@@ -7,35 +7,31 @@ on:
 
 jobs:
   windows:
-    # windows-latest uses a newer MSVC toolchain than the legacy breakpad port supports.
-    # Pin to 2022 until the dependency is updated.
-    runs-on: windows-2022
+    runs-on: windows-latest
 
     steps:
-    - name: Checkout this repository (holds stock-market.patch)
-      uses: actions/checkout@v4
-      with:
-        path: mod
-
+    # OpenTTD 15.3 goes into the root of the workspace (vcpkg looks for vcpkg.json there).
     - name: Checkout OpenTTD 15.3
       uses: actions/checkout@v4
       with:
         repository: OpenTTD/OpenTTD
         ref: '15.3'
-        path: openttd
 
-    - name: Apply stock market patch
+    # This repository (holds stock-market.patch) goes into the folder "mod".
+    - name: Checkout this repository
+      uses: actions/checkout@v4
+      with:
+        path: mod
+
+    - name: Apply the trading terminal patch
       shell: bash
       run: |
-        cd openttd
-        git apply --whitespace=nowarn ../mod/stock-market.patch
-        git status --short
+        git apply --whitespace=nowarn mod/stock-market.patch
+        git status --short | head -40
 
     - name: Setup vcpkg
       id: vcpkg
       uses: OpenTTD/actions/setup-vcpkg@v6
-      with:
-        path: openttd
 
     - name: Configure developer command prompt
       uses: ilammy/msvc-dev-cmd@v1
@@ -44,7 +40,6 @@ jobs:
 
     - name: Build
       shell: bash
-      working-directory: openttd
       run: |
         mkdir build
         cd build
@@ -59,9 +54,7 @@ jobs:
       shell: bash
       run: |
         mkdir out
-        cp openttd/build/openttd.exe out/
-        cp -r openttd/bin/ai openttd/bin/game out/ 2>/dev/null || true
-        cp openttd/build/lang/*.lng out/ 2>/dev/null || true
+        cp build/openttd.exe out/
 
     - name: Upload
       uses: actions/upload-artifact@v4
