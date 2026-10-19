@@ -1,27 +1,50 @@
-    - name: Checkout this repository
+name: Build OpenTTD 15.3 (Stock Market) for Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  windows:
+    # windows-latest uses a newer MSVC toolchain than the legacy breakpad port supports.
+    # Pin to 2022 until the dependency is updated.
+    runs-on: windows-2022
+
+    steps:
+    - name: Checkout this repository (holds stock-market.patch)
       uses: actions/checkout@v4
       with:
         path: mod
-    - name: Apply the trading terminal patch
+
+    - name: Checkout OpenTTD 15.3
+      uses: actions/checkout@v4
+      with:
+        repository: OpenTTD/OpenTTD
+        ref: '15.3'
+        path: openttd
+
+    - name: Apply stock market patch
       shell: bash
       run: |
-        git apply --whitespace=nowarn mod/stock-market.patch
-        git status --short | head -40
-    - name: Install vcpkg
-      shell: bash
-      run: |
-        git clone https://github.com/microsoft/vcpkg.git "${{ runner.temp }}/vcpkg"
-        "${{ runner.temp }}/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
-      env:
-        VCPKG_DISABLE_METRICS: 1
+        cd openttd
+        git apply --whitespace=nowarn ../mod/stock-market.patch
+        git status --short
+
+    - name: Setup vcpkg
+      id: vcpkg
+      uses: OpenTTD/actions/setup-vcpkg@v6
+      with:
+        path: openttd
+
     - name: Configure developer command prompt
       uses: ilammy/msvc-dev-cmd@v1
       with:
         arch: x64
+
     - name: Build
       shell: bash
-      env:
-        VCPKG_BINARY_SOURCES: "clear"
+      working-directory: openttd
       run: |
         mkdir build
         cd build
@@ -29,13 +52,17 @@
           -GNinja \
           -DCMAKE_BUILD_TYPE=Release \
           -DVCPKG_TARGET_TRIPLET=x64-windows-static \
-          -DCMAKE_TOOLCHAIN_FILE="${{ runner.temp }}/vcpkg/scripts/buildsystems/vcpkg.cmake"
+          -DCMAKE_TOOLCHAIN_FILE="${{ steps.vcpkg.outputs.vcpkg-cmake }}"
         cmake --build .
+
     - name: Collect files
       shell: bash
       run: |
         mkdir out
-        cp build/openttd.exe out/
+        cp openttd/build/openttd.exe out/
+        cp -r openttd/bin/ai openttd/bin/game out/ 2>/dev/null || true
+        cp openttd/build/lang/*.lng out/ 2>/dev/null || true
+
     - name: Upload
       uses: actions/upload-artifact@v4
       with:
