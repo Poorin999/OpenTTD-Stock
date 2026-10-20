@@ -492,8 +492,9 @@ struct StockWindow : Window {
 			DrawString(r.left + 4, r.right - 4, top, STR_STOCK_SPECTATOR, TC_FROMSTRING, SA_LEFT);
 			return;
 		}
-		/* The deposited money counts as part of the balance, so that equity = balance + floating profit still holds. */
-		const int64_t balance = static_cast<int64_t>(Company::Get(_local_company)->money);
+		/* The deposited money counts as part of the balance, so that equity = balance + floating profit still holds.
+		 * This must match GetStockEquity(), which is what the margin checks and the margin level use. */
+		const int64_t balance = static_cast<int64_t>(Company::Get(_local_company)->money) + _stock_market.trading_balance[_local_company.base()];
 		const int64_t floating = GetStockFloatingProfit(_local_company);
 		const int64_t margin = GetStockUsedMargin(_local_company);
 		const int64_t equity = balance + floating;
