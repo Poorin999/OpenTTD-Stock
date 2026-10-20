@@ -121,10 +121,40 @@ int64_t GetStockPrice(CompanyID company)
 	return FixedToPrice(StockPriceFromValuation(ComputeStockValuation(Company::Get(company))));
 }
 
-/** The difference between Ask and Bid for a given mid price. */
-static int64_t GetSpread(int64_t mid)
+/**
+ * Market capitalisation of a company: the price of one share times the number of shares.
+ * @param company The company.
+ * @return The market cap, or 0 when the company does not exist.
+ */
+int64_t GetStockMarketCap(CompanyID company)
 {
-	return std::max<int64_t>(1, mid / 200);
+	return GetStockPrice(company) * STOCK_SHARES_PER_COMPANY;
+}
+
+/**
+ * The difference between Ask and Bid for a given mid price.
+ * Normally this is 0.5% of the price, at least 1. When the market cap is lower than #STOCK_UNDERVALUED_PERCENT of the
+ * book value the company looks cheap, so the spread tightens (the lower the market cap, the tighter, but not below
+ * #STOCK_UNDERVALUED_MIN_SPREAD_PERCENT of the normal spread) to attract buyers. Because the market cap follows
+ * the price, selling pressure that pushes the price down also makes the spread tighter: a feedback loop.
+ * Whole money units are used, so a normal spread of 1 can only tighten to 0.
+ * @param company The company.
+ * @param mid The mid price of one share.
+ * @return The spread, 0 or more.
+ */
+static int64_t GetSpread(CompanyID company, int64_t mid)
+{
+	const int64_t normal = std::max<int64_t>(1, mid / 200);
+
+	const int64_t book = _stock_market.valuation[company.base()].book;
+	if (book <= 0) return normal; // No valuation yet.
+
+	const int64_t cap_percent = GetStockMarketCap(company) * 100 / book;
+	if (cap_percent >= STOCK_UNDERVALUED_PERCENT) return normal;
+
+	/* 100% at the threshold, getting smaller together with the market cap. */
+	const int64_t factor = std::clamp<int64_t>(cap_percent * 100 / STOCK_UNDERVALUED_PERCENT, STOCK_UNDERVALUED_MIN_SPREAD_PERCENT, 100);
+	return (normal * factor + 50) / 100;
 }
 
 /** Price at which you can sell (and at which long positions are closed). */
@@ -132,7 +162,7 @@ int64_t GetStockBid(CompanyID company)
 {
 	const int64_t mid = GetStockPrice(company);
 	if (mid == 0) return 0;
-	return std::max<int64_t>(1, mid - GetSpread(mid) / 2);
+	return std::max<int64_t>(1, mid - GetSpread(company, mid) / 2);
 }
 
 /** Price at which you can buy (and at which short positions are closed). */
@@ -140,7 +170,7 @@ int64_t GetStockAsk(CompanyID company)
 {
 	const int64_t mid = GetStockPrice(company);
 	if (mid == 0) return 0;
-	return std::max<int64_t>(1, mid - GetSpread(mid) / 2) + GetSpread(mid);
+	return std::max<int64_t>(1, mid - GetSpread(company, mid) / 2) + GetSpread(company, mid);
 }
 
 /**

@@ -16,7 +16,7 @@
 #include <vector>
 
 /** Number of (virtual) shares every company has. The mid price of one share is the company value divided by this. */
-static constexpr int64_t STOCK_SHARES_PER_COMPANY = 1'000'000;
+static constexpr int64_t STOCK_SHARES_PER_COMPANY = 100'000;
 
 /** One LOT is this many shares. Volumes are stored in hundredths of a LOT, so one volume unit is exactly one share. */
 static constexpr int64_t STOCK_SHARES_PER_LOT = 100;
@@ -45,8 +45,14 @@ static constexpr int64_t STOCK_MARGIN_CALL_LEVEL = 100;
 /** Stop out: below this margin level the positions with the biggest loss are closed by force. */
 static constexpr int64_t STOCK_STOP_OUT_LEVEL = 50;
 
-/** Valuation model: a company is worth its book value plus this many years of earnings (within the limits in StockPriceFromValuation). */
-static constexpr int64_t STOCK_EARNINGS_MULTIPLE = 10;
+/** Valuation model: a company is worth its book value plus this many years of earnings, i.e. a P/E ratio of 15 (within the limits in StockPriceFromValuation). */
+static constexpr int64_t STOCK_EARNINGS_MULTIPLE = 15;
+
+/** Undervalued market: when the market cap is below this percentage of the book value, the spread starts to tighten. */
+static constexpr int64_t STOCK_UNDERVALUED_PERCENT = 80;
+
+/** Undervalued market: the spread never becomes smaller than this percentage of the normal spread. */
+static constexpr int64_t STOCK_UNDERVALUED_MIN_SPREAD_PERCENT = 25;
 
 /** Dividends: this share of the net earnings of a company is distributed to the holders of its shares, in percent. */
 static constexpr int64_t STOCK_PAYOUT_PERCENT = 30;
@@ -216,6 +222,7 @@ private:
 extern StockMarket _stock_market;
 
 int64_t GetStockPrice(CompanyID company);
+int64_t GetStockMarketCap(CompanyID company);
 StockSummary GetStockSummary(CompanyID company);
 int64_t GetStockBid(CompanyID company);
 int64_t GetStockAsk(CompanyID company);
