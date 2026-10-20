@@ -12,7 +12,7 @@ jobs:
     runs-on: windows-2022
 
     steps:
-    - name: Checkout this repository (holds stock-market.patch)
+    - name: Checkout this repository (holds stock-market.patch and the new source files in src/)
       uses: actions/checkout@v4
       with:
         path: mod
@@ -24,12 +24,29 @@ jobs:
         ref: '15.3'
         path: openttd
 
+    # The patch only changes files that already exist in OpenTTD 15.3.
     - name: Apply stock market patch
       shell: bash
       run: |
         cd openttd
         git apply --whitespace=nowarn ../mod/stock-market.patch
         git status --short
+
+    # The new files of the trading terminal live in src/ of this repository.
+    # Refuse to overwrite anything that OpenTTD already has, so that the two sources can never clash.
+    - name: Add stock market source files
+      shell: bash
+      run: |
+        cd mod/src
+        status=0
+        while IFS= read -r f; do
+          if [ -e "../../openttd/src/$f" ]; then
+            echo "::error::src/$f already exists in OpenTTD 15.3 (or in the patch); refusing to overwrite it"
+            status=1
+          fi
+        done < <(find . -type f | sed 's|^\./||' | sort)
+        [ "$status" -eq 0 ] || exit 1
+        cp -rv . ../../openttd/src/
 
     - name: Setup vcpkg
       id: vcpkg
