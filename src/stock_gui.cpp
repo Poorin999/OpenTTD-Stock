@@ -150,6 +150,8 @@ struct StockWindow : Window {
 		CloseVolume,  ///< Volume to close of a position.
 		StopLoss,     ///< New Stop Loss of a position.
 		TakeProfit,   ///< New Take Profit of a position.
+		Deposit,      ///< Amount to move from the company cash to the trading balance.
+		Withdraw,     ///< Amount to move from the trading balance to the company cash.
 	};
 
 	CompanyID selected = INVALID_OWNER; ///< Symbol (company) whose chart is shown.
@@ -160,12 +162,15 @@ struct StockWindow : Window {
 	bool is_dragging_chart = false;     ///< Whether the mouse button is held down on the chart.
 	int drag_start_x = 0;               ///< X position (in the window) where the drag started, or where the last candle step was made.
 	int chart_scroll_offset = 0;        ///< Number of candles the chart is scrolled back into the past; 0 shows the newest candles at the right edge.
+	bool view_yearly = false;           ///< Whether the chart shows one candle per year instead of one per month.
 
 	StockWindow(WindowDesc &desc) : Window(desc)
 	{
 		this->CreateNestedTree();
 		this->vscroll = this->GetScrollbar(WID_ST_TOOL_SCROLLBAR);
 		this->FinishInitNested(0);
+		this->SetWidgetLoweredState(WID_ST_TF_MONTH, !this->view_yearly);
+		this->SetWidgetLoweredState(WID_ST_TF_YEAR, this->view_yearly);
 		this->EnsureValidSelection();
 		this->OnInvalidateData(0);
 	}
@@ -186,6 +191,35 @@ struct StockWindow : Window {
 			return;
 		}
 		this->selected = INVALID_OWNER;
+	}
+
+	/**
+	 * The candles of the selected symbol in the active timeframe, the oldest first.
+	 * In the yearly view the monthly candles of one calendar year are combined: the open of the first month,
+	 * the highest high, the lowest low and the close of the last month. The year is stored as year * 12 in ym.
+	 */
+	std::vector<StockCandle> GetChartCandles() const
+	{
+		std::vector<StockCandle> months;
+		if (!Company::IsValidID(this->selected)) return months;
+		const size_t index = this->selected.base();
+		months = _stock_market.candles[index];
+		if (_stock_market.has_current[index]) months.push_back(_stock_market.current[index]);
+		if (!this->view_yearly) return months;
+
+		std::vector<StockCandle> years;
+		for (const StockCandle &m : months) {
+			const int32_t year_ym = (m.ym / 12) * 12;
+			if (!years.empty() && years.back().ym == year_ym) {
+				StockCandle &y = years.back();
+				y.high = std::max(y.high, m.high);
+				y.low = std::min(y.low, m.low);
+				y.close = m.close;
+			} else {
+				years.push_back({year_ym, m.open, m.high, m.low, m.close});
+			}
+		}
+		return years;
 	}
 
 	/** The rows of the toolbox: first the open positions, then the pending orders of the local company. */
@@ -266,6 +300,13 @@ struct StockWindow : Window {
 		this->query_kind = QueryKind::None;
 		if (!str.has_value() || !Company::IsValidID(_local_company)) return;
 
+		if (kind == QueryKind::Deposit || kind == QueryKind::Withdraw) {
+			double amount = 0;
+			if (!ParseStockNumber(*str, amount) || amount <= 0) return;
+			Command<CMD_STOCK_TRANSFER>::Post(STR_STOCK_ERROR_CANT_TRANSFER, kind == QueryKind::Deposit, Money(StockDisplayToMoney(amount)));
+			return;
+		}
+
 		/* The position may have been closed while the query window was open. */
 		const StockOrder *position = _stock_market.FindPosition(this->query_id, _local_company);
 		if (position == nullptr) return;
@@ -319,12 +360,8 @@ struct StockWindow : Window {
 		this->drag_start_x += steps * slot;
 
 		/* Dragging to the right goes back in time, dragging to the left comes back to the newest candles. */
-		int max_offset = 0;
-		if (Company::IsValidID(this->selected)) {
-			const size_t index = this->selected.base();
-			const size_t count = _stock_market.candles[index].size() + (_stock_market.has_current[index] ? 1 : 0);
-			max_offset = count > 0 ? static_cast<int>(count) - 1 : 0; // At least one candle stays visible.
-		}
+		const size_t count = this->GetChartCandles().size();
+		const int max_offset = count > 0 ? static_cast<int>(count) - 1 : 0; // At least one candle stays visible.
 		this->chart_scroll_offset = std::clamp(this->chart_scroll_offset + steps, 0, max_offset);
 		this->SetDirty();
 	}
@@ -340,6 +377,28 @@ struct StockWindow : Window {
 			case WID_ST_NEW_ORDER:
 				ShowStockOrderWindow(this->selected);
 				break;
+
+			case WID_ST_DEPOSIT:
+			case WID_ST_WITHDRAW: {
+				if (!Company::IsValidID(_local_company)) break;
+				const bool deposit = widget == WID_ST_DEPOSIT;
+				this->query_kind = deposit ? QueryKind::Deposit : QueryKind::Withdraw;
+				ShowQueryString({}, deposit ? STR_STOCK_QUERY_DEPOSIT : STR_STOCK_QUERY_WITHDRAW, 24, this, CS_ALPHANUMERAL, {});
+				break;
+			}
+
+			case WID_ST_TF_MONTH:
+			case WID_ST_TF_YEAR: {
+				const bool yearly = widget == WID_ST_TF_YEAR;
+				if (this->view_yearly != yearly) {
+					this->view_yearly = yearly;
+					this->chart_scroll_offset = 0; // The units of the offset change with the timeframe.
+				}
+				this->SetWidgetLoweredState(WID_ST_TF_MONTH, !this->view_yearly);
+				this->SetWidgetLoweredState(WID_ST_TF_YEAR, this->view_yearly);
+				this->SetDirty();
+				break;
+			}
 
 			case WID_ST_HISTORY:
 				this->show_history = !this->show_history;
@@ -416,6 +475,7 @@ struct StockWindow : Window {
 			DrawString(r.left + 4, r.right - 4, top, STR_STOCK_SPECTATOR, TC_FROMSTRING, SA_LEFT);
 			return;
 		}
+		/* The deposited money counts as part of the balance, so that equity = balance + floating profit still holds. */
 		const int64_t balance = static_cast<int64_t>(Company::Get(_local_company)->money);
 		const int64_t floating = GetStockFloatingProfit(_local_company);
 		const int64_t margin = GetStockUsedMargin(_local_company);
@@ -428,6 +488,7 @@ struct StockWindow : Window {
 			/* Below the margin call level the line turns red; below the stop-out level positions are closed by force. */
 			text = GetString(level < STOCK_MARGIN_CALL_LEVEL ? STR_STOCK_ACCOUNT_CALL : STR_STOCK_ACCOUNT_LEVEL, balance, equity, margin, equity - margin, level);
 		}
+		text += GetString(STR_STOCK_TRADING_BALANCE, _stock_market.trading_balance[_local_company.base()]);
 		DrawString(r.left + 4, r.right - 4, top, text, TC_FROMSTRING, SA_LEFT);
 	}
 
@@ -501,10 +562,8 @@ struct StockWindow : Window {
 	void DrawChart(const Rect &r) const
 	{
 		if (!Company::IsValidID(this->selected)) return;
-		const size_t index = this->selected.base();
 
-		std::vector<StockCandle> candles = _stock_market.candles[index];
-		if (_stock_market.has_current[index]) candles.push_back(_stock_market.current[index]);
+		const std::vector<StockCandle> candles = this->GetChartCandles();
 
 		const int small_height = GetCharacterHeight(FS_SMALL);
 		const int axis_width = ScaleGUITrad(64);
@@ -540,6 +599,11 @@ struct StockWindow : Window {
 			lo = std::min(lo, candles[i].low);
 			hi = std::max(hi, candles[i].high);
 		}
+		/* Cheap shares: when the price hardly moves, widen the range so that the candles keep a visible height. */
+		if (hi == lo || hi - lo < 20) {
+			hi += 10;
+			lo = std::max<int64_t>(0, lo - 10);
+		}
 		const int64_t margin = std::max<int64_t>((hi - lo) / 10, 1);
 		lo = std::max<int64_t>(lo - margin, 0);
 		hi += margin;
@@ -572,8 +636,18 @@ struct StockWindow : Window {
 			if (body_bottom <= body_top) body_bottom = body_top + 1;
 			GfxFillRect(cx - body_half, body_top, cx + body_half, body_bottom, colour);
 
-			/* One small tick for every month (one candle = one month). */
+			/* One small tick for every candle (one month, or one year in the yearly view). */
 			GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(2), PC_WHITE);
+
+			if (this->view_yearly) {
+				/* A year label every five years; each label is wider than one candle. */
+				const int year = c.ym / 12;
+				if (year % 5 == 0) {
+					GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(3), PC_WHITE);
+					DrawString(cx - ScaleGUITrad(20), cx + ScaleGUITrad(20), full_bottom + ScaleGUITrad(3), fmt::format("{}", year), TC_WHITE, SA_HOR_CENTER, false, FS_SMALL);
+				}
+				continue;
+			}
 
 			/* A label every quarter (Jan, Apr, Jul, Oct); each label is wider than one candle, so not every month. */
 			const int month_index = c.ym % 12; // 0 = January.
@@ -790,7 +864,9 @@ static constexpr std::initializer_list<NWidgetPart> _nested_stock_widgets = {
 	NWidget(NWID_HORIZONTAL),
 		NWidget(WWT_PUSHTXTBTN, COLOUR_LIGHT_BLUE, WID_ST_NEW_ORDER), SetMinimalSize(110, 14), SetStringTip(STR_STOCK_NEW_ORDER, STR_STOCK_TIP_NEW_ORDER),
 		NWidget(WWT_TEXTBTN, COLOUR_LIGHT_BLUE, WID_ST_HISTORY), SetMinimalSize(110, 14), SetStringTip(STR_STOCK_HISTORY, STR_STOCK_TIP_HISTORY),
-		NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_ACCOUNT), SetMinimalSize(520, 14), SetResize(1, 0), SetFill(1, 0),
+		NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_ST_DEPOSIT), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_DEPOSIT, STR_STOCK_TIP_DEPOSIT),
+		NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_ST_WITHDRAW), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_WITHDRAW, STR_STOCK_TIP_WITHDRAW),
+		NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_ACCOUNT), SetMinimalSize(380, 14), SetResize(1, 0), SetFill(1, 0),
 		EndContainer(),
 	EndContainer(),
 	NWidget(NWID_HORIZONTAL),
@@ -800,6 +876,11 @@ static constexpr std::initializer_list<NWidgetPart> _nested_stock_widgets = {
 			NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_TITLE), SetMinimalSize(400, 16), SetResize(1, 0), SetFill(1, 0),
 			EndContainer(),
 			NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_SUMMARY), SetMinimalSize(400, 16), SetResize(1, 0), SetFill(1, 0), SetToolTip(STR_STOCK_TIP_SUMMARY),
+			EndContainer(),
+			NWidget(NWID_HORIZONTAL),
+				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_MONTH), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_TF_MONTH, STR_STOCK_TIP_TF_MONTH),
+				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_YEAR), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_TF_YEAR, STR_STOCK_TIP_TF_YEAR),
+				NWidget(NWID_SPACER), SetFill(1, 0), SetResize(1, 0),
 			EndContainer(),
 			NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_CHART), SetMinimalSize(400, 184), SetResize(1, 1), SetFill(1, 1),
 			EndContainer(),

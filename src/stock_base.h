@@ -187,6 +187,7 @@ struct StockMarket {
 	std::array<int64_t, MAX_COMPANIES> base_fp{};                  ///< Mid price per share according to the valuation, times #STOCK_PRICE_SCALE, refreshed once per day.
 	std::array<int64_t, MAX_COMPANIES> impact{};                   ///< Accumulated market impact of the orders, in parts per million; positive when more was bought than sold.
 	std::array<StockValuation, MAX_COMPANIES> valuation{};         ///< Valuation per company, refreshed once per day.
+	std::array<int64_t, MAX_COMPANIES> trading_balance{};          ///< Money per company that was deposited in the trading account; counts as equity.
 	std::vector<StockClosedTrade> history{};                       ///< Closed trades of all companies, the oldest first.
 	std::vector<StockOrder> positions{};                           ///< Open positions.
 	std::vector<StockOrder> pending{};                             ///< Pending orders.

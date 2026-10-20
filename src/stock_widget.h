@@ -14,6 +14,10 @@
 enum StockWidgets : WidgetID {
 	WID_ST_NEW_ORDER,        ///< Button that opens the New Order window.
 	WID_ST_HISTORY,          ///< Toggle button: show the history of closed trades instead of the open trades.
+	WID_ST_DEPOSIT,          ///< Button: move money from the company cash to the trading balance.
+	WID_ST_WITHDRAW,         ///< Button: move money from the trading balance back to the company cash.
+	WID_ST_TF_MONTH,         ///< Toggle button: chart with monthly candles.
+	WID_ST_TF_YEAR,          ///< Toggle button: chart with yearly candles.
 	WID_ST_ACCOUNT,          ///< Balance, equity, margin and free margin.
 	WID_ST_WATCH,            ///< Market Watch: symbols with Bid and Ask.
 	WID_ST_TITLE,            ///< Selected symbol with its Bid, Ask and change.

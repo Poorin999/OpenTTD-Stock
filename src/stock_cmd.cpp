@@ -197,3 +197,39 @@ CommandCost CmdStockModify(DoCommandFlags flags, uint32_t id, Money sl_in, Money
 
 	return CommandCost(EXPENSES_OTHER);
 }
+
+/**
+ * Move money between the company cash and the trading balance. Both count as equity, so this does not change the
+ * value of the company; it is not an expense either, so the cost of the command is zero.
+ * A withdrawal is only allowed when the free margin (equity minus the margin of the open positions) covers it.
+ * @param flags Type of operation.
+ * @param deposit True to deposit (cash to trading balance), false to withdraw.
+ * @param amount Amount of money, more than zero.
+ * @return Zero cost, or an error.
+ */
+CommandCost CmdStockTransfer(DoCommandFlags flags, bool deposit, Money amount_in)
+{
+	const int64_t amount = amount_in;
+	Company *c = Company::GetIfValid(_current_company);
+	if (c == nullptr) return CMD_ERROR;
+	if (amount <= 0) return CommandCost(STR_STOCK_ERROR_BAD_AMOUNT);
+
+	int64_t &balance = _stock_market.trading_balance[_current_company.base()];
+	if (deposit) {
+		if (static_cast<int64_t>(c->money) < amount) return CommandCost(STR_STOCK_ERROR_NO_FUNDS);
+	} else {
+		if (balance < amount) return CommandCost(STR_STOCK_ERROR_NO_FUNDS);
+		const int64_t free_margin = GetStockEquity(_current_company) - GetStockUsedMargin(_current_company);
+		if (free_margin < amount) return CommandCost(STR_STOCK_ERROR_NO_MARGIN);
+	}
+
+	if (flags.Test(DoCommandFlag::Execute)) {
+		const int64_t signed_amount = deposit ? amount : -amount;
+		c->money -= Money(signed_amount);
+		balance += signed_amount;
+		InvalidateWindowData(WC_FINANCES, c->index.base());
+		InvalidateWindowData(WC_STOCK_MARKET, 0);
+	}
+
+	return CommandCost();
+}

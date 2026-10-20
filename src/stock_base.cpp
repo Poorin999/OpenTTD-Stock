@@ -38,6 +38,7 @@ void StockMarket::Reset()
 	this->base_fp.fill(0);
 	this->impact.fill(0);
 	this->valuation.fill({});
+	this->trading_balance.fill(0);
 	this->history.clear();
 	this->positions.clear();
 	this->pending.clear();
@@ -78,7 +79,8 @@ static int64_t GetImpactPpm(uint32_t volume)
 static StockValuation ComputeStockValuation(const Company *c)
 {
 	StockValuation v;
-	v.book = static_cast<int64_t>(CalculateCompanyValue(c));
+	/* Money in the trading account still belongs to the company, so a deposit must not lower the share price. */
+	v.book = static_cast<int64_t>(CalculateCompanyValue(c)) + _stock_market.trading_balance[c->index.base()];
 
 	int64_t sum = 0;
 	for (size_t q = 0; q < STOCK_EARNINGS_QUARTERS; q++) {
@@ -271,7 +273,7 @@ int64_t GetStockEquity(CompanyID owner)
 {
 	const Company *c = Company::GetIfValid(owner);
 	if (c == nullptr) return 0;
-	return static_cast<int64_t>(c->money) + GetStockFloatingProfit(owner);
+	return static_cast<int64_t>(c->money) + _stock_market.trading_balance[owner.base()] + GetStockFloatingProfit(owner);
 }
 
 /**
@@ -383,7 +385,7 @@ void StockMarket::HandleRemovedCompanies()
 	for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
 		if (Company::IsValidID(CompanyID{i})) continue;
 		const bool stale = !this->candles[i].empty() || this->has_current[i] || this->price_fp[i] != 0 ||
-				this->base_fp[i] != 0 || this->impact[i] != 0 || this->valuation[i].quarters != 0;
+				this->base_fp[i] != 0 || this->impact[i] != 0 || this->valuation[i].quarters != 0 || this->trading_balance[i] != 0;
 		if (!stale) continue;
 		this->candles[i].clear();
 		this->current[i] = {};
@@ -392,6 +394,7 @@ void StockMarket::HandleRemovedCompanies()
 		this->base_fp[i] = 0;
 		this->impact[i] = 0;
 		this->valuation[i] = {};
+		this->trading_balance[i] = 0;
 		std::erase_if(this->history, [i](const StockClosedTrade &t) { return t.owner == i; });
 	}
 }

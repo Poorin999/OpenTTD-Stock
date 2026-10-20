@@ -18,9 +18,11 @@
 CommandCost CmdStockOpen(DoCommandFlags flags, CompanyID target, StockOrderType type, uint32_t volume, Money price, Money sl, Money tp, uint32_t expiry_days);
 CommandCost CmdStockClose(DoCommandFlags flags, uint32_t id, uint32_t close_volume);
 CommandCost CmdStockModify(DoCommandFlags flags, uint32_t id, Money sl, Money tp);
+CommandCost CmdStockTransfer(DoCommandFlags flags, bool deposit, Money amount);
 
 DEF_CMD_TRAIT(CMD_STOCK_OPEN,   CmdStockOpen,   {}, CommandType::MoneyManagement)
 DEF_CMD_TRAIT(CMD_STOCK_CLOSE,  CmdStockClose,  {}, CommandType::MoneyManagement)
 DEF_CMD_TRAIT(CMD_STOCK_MODIFY, CmdStockModify, {}, CommandType::MoneyManagement)
+DEF_CMD_TRAIT(CMD_STOCK_TRANSFER, CmdStockTransfer, {}, CommandType::MoneyManagement)
 
 #endif /* STOCK_CMD_H */

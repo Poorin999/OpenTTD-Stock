@@ -1,0 +1,16 @@
+# 3) ADD these strings (Deposit / Withdraw and the timeframe buttons):
+
+STR_STOCK_DEPOSIT                                               :Deposit
+STR_STOCK_WITHDRAW                                              :Withdraw
+STR_STOCK_TF_MONTH                                              :Monthly
+STR_STOCK_TF_YEAR                                               :Yearly
+STR_STOCK_TIP_DEPOSIT                                           :{BLACK}Move money from your company cash to the trading balance. It still counts as equity
+STR_STOCK_TIP_WITHDRAW                                          :{BLACK}Move money from the trading balance back to your company cash. Only the free margin can be withdrawn
+STR_STOCK_TIP_TF_MONTH                                          :{BLACK}Show one candle per month
+STR_STOCK_TIP_TF_YEAR                                           :{BLACK}Show one candle per year. Drag the chart with the mouse to scroll through the history
+STR_STOCK_QUERY_DEPOSIT                                         :Amount to deposit
+STR_STOCK_QUERY_WITHDRAW                                        :Amount to withdraw
+STR_STOCK_TRADING_BALANCE                                       :{WHITE}   Trading balance: {CURRENCY_LONG}
+STR_STOCK_ERROR_CANT_TRANSFER                                   :{WHITE}Can't transfer the money...
+STR_STOCK_ERROR_BAD_AMOUNT                                      :{WHITE}Invalid amount
+STR_STOCK_ERROR_NO_FUNDS                                        :{WHITE}Not enough money

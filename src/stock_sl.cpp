@@ -26,6 +26,7 @@ enum StockRecordKind : uint8_t {
 	SRK_META = 6,     ///< Misc: ym = next order id, v1 = last seen quarter, v2 = days until the dividend is paid, v3 = quarter of that dividend.
 	SRK_VALUATION = 7, ///< Valuation: a = company, v1 = book value, v2 = earnings, v3 = number of quarters.
 	SRK_MARKET = 9,   ///< Market state: a = company, v1 = current price times STOCK_PRICE_SCALE, v2 = valuation price times STOCK_PRICE_SCALE, v3 = market impact.
+	SRK_BALANCE = 10, ///< Trading account: a = company, v1 = deposited money.
 	SRK_HISTORY = 8,  ///< Closed trade: a = owner, b = target, ym = id, v1 = volume, v2 = open price, v3 = close price, v4 = profit, v5 = type | reason << 8 | closed month << 16.
 };
 
@@ -115,6 +116,13 @@ struct STCKChunkHandler : ChunkHandler {
 				r.v3 = _stock_market.impact[i];
 				write(r);
 			}
+			if (_stock_market.trading_balance[i] != 0) {
+				StockRecord r;
+				r.kind = SRK_BALANCE;
+				r.a = i;
+				r.v1 = _stock_market.trading_balance[i];
+				write(r);
+			}
 			const StockValuation &valuation = _stock_market.valuation[i];
 			if (valuation.quarters > 0) {
 				StockRecord r;
@@ -191,6 +199,10 @@ struct STCKChunkHandler : ChunkHandler {
 						_stock_market.base_fp[r.a] = r.v2;
 						_stock_market.impact[r.a] = std::clamp<int64_t>(r.v3, -STOCK_IMPACT_MAX_PPM, STOCK_IMPACT_MAX_PPM);
 					}
+					break;
+
+				case SRK_BALANCE:
+					if (r.a < MAX_COMPANIES) _stock_market.trading_balance[r.a] = std::max<int64_t>(r.v1, 0);
 					break;
 
 				case SRK_VALUATION:
