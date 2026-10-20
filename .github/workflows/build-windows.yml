@@ -30,15 +30,14 @@ jobs:
         cd openttd
         git apply --whitespace=nowarn ../mod/stock-market.patch
         git status --short
-
-            - name: Apply stock market overlay (v2)
+    - name: Apply stock market overlay (v2)
       shell: bash
       run: |
         cd mod
         bash apply_overlay.sh ../openttd
         cd ../openttd
         git status --short
-
+        
     - name: Setup vcpkg
       id: vcpkg
       uses: OpenTTD/actions/setup-vcpkg@v6
