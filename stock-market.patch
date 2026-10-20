@@ -1,0 +1,2475 @@
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 16215e7..d179d46 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -469,6 +469,13 @@ add_files(
+     statusbar_gui.cpp
+     statusbar_gui.h
+     stdafx.h
++    stock_base.cpp
++    stock_base.h
++    stock_cmd.cpp
++    stock_cmd.h
++    stock_gui.cpp
++    stock_order_gui.cpp
++    stock_gui.h
+     story.cpp
+     story_base.h
+     story_cmd.h
+diff --git a/src/command.cpp b/src/command.cpp
+index ce4a948..5cf2af9 100644
+--- a/src/command.cpp
++++ b/src/command.cpp
+@@ -35,6 +35,7 @@
+ #include "league_cmd.h"
+ #include "landscape_cmd.h"
+ #include "misc_cmd.h"
++#include "stock_cmd.h"
+ #include "news_cmd.h"
+ #include "object_cmd.h"
+ #include "order_cmd.h"
+diff --git a/src/command_type.h b/src/command_type.h
+index d77274c..b61ebc6 100644
+--- a/src/command_type.h
++++ b/src/command_type.h
+@@ -375,6 +375,9 @@ enum Commands : uint8_t {
+ 	CMD_UPDATE_LEAGUE_TABLE_ELEMENT_SCORE, ///< update the score of a league table element
+ 	CMD_REMOVE_LEAGUE_TABLE_ELEMENT,       ///< remove a league table element
+ 
++	CMD_STOCK_OPEN,                   ///< open a market or pending order in the trading terminal
++	CMD_STOCK_CLOSE,                  ///< close a position or cancel a pending order
++
+ 	CMD_END,                          ///< Must ALWAYS be on the end of this list!! (period)
+ };
+ 
+diff --git a/src/economy.cpp b/src/economy.cpp
+index a82ccc1..8dbbdd4 100644
+--- a/src/economy.cpp
++++ b/src/economy.cpp
+@@ -10,6 +10,7 @@
+ #include "stdafx.h"
+ #include <ranges>
+ #include "company_func.h"
++#include "stock_base.h"
+ #include "command_func.h"
+ #include "industry.h"
+ #include "town.h"
+@@ -936,6 +937,7 @@ void InitializeEconomy()
+ 	_economy.inflation_prices = _economy.inflation_payment = 1 << 16;
+ 	ClearCargoPickupMonitoring();
+ 	ClearCargoDeliveryMonitoring();
++	_stock_market.Reset();
+ }
+ 
+ /**
+diff --git a/src/lang/english.txt b/src/lang/english.txt
+index 0b32a4a..701da85 100644
+--- a/src/lang/english.txt
++++ b/src/lang/english.txt
+@@ -842,6 +842,99 @@ STR_SMALLMAP_TOOLTIP_ENABLE_ALL_CARGOS                          :{BLACK}Display
+ 
+ # Status bar messages
+ STR_STATUSBAR_TOOLTIP_SHOW_LAST_NEWS                            :{BLACK}Show last message or news report
++STR_STATUSBAR_TOOLTIP_STOCK_MARKET                              :{BLACK}Open the stock market
++
++# Trading terminal
++STR_STOCK_CAPTION                                               :{WHITE}Trading Terminal
++STR_STOCK_NEW_ORDER                                             :{BLACK}New Order
++STR_STOCK_TIP_NEW_ORDER                                         :{BLACK}Open a new market or pending order for the selected symbol
++STR_STOCK_TIP_WATCH                                             :{BLACK}Market Watch: click a symbol to show its chart
++STR_STOCK_TIP_TOOLBOX                                           :{BLACK}Open trades and pending orders. Click the x to close a trade or cancel an order
++STR_STOCK_SYMBOL                                                :{COMPANY}
++STR_STOCK_ACCOUNT                                               :{WHITE}Balance: {CURRENCY_LONG}   Equity: {CURRENCY_LONG}   Margin: {CURRENCY_LONG}   Free margin: {CURRENCY_LONG}
++STR_STOCK_ACCOUNT_LEVEL                                         :{WHITE}Balance: {CURRENCY_LONG}   Equity: {CURRENCY_LONG}   Margin: {CURRENCY_LONG}   Free margin: {CURRENCY_LONG}   Margin level: {COMMA}%
++STR_STOCK_ACCOUNT_CALL                                          :{WHITE}Balance: {CURRENCY_LONG}   Equity: {CURRENCY_LONG}   Margin: {CURRENCY_LONG}   Free margin: {CURRENCY_LONG}   {RED}MARGIN CALL: {COMMA}%
++STR_STOCK_SUMMARY                                               :{WHITE}P/E: {COMMA}.{NUM}     EPS: {CURRENCY_LONG}     Div Yield: {COMMA}.{NUM}%
++STR_STOCK_SUMMARY_NO_PE                                         :{WHITE}P/E: -     EPS: {CURRENCY_LONG}     Div Yield: 0.0%
++STR_STOCK_SUMMARY_NONE                                          :{SILVER}P/E: -     EPS: -     Div Yield: -     (no full quarter of results yet)
++STR_STOCK_TIP_SUMMARY                                           :{BLACK}P/E: price divided by the earnings per share. EPS: net result of the last four quarters per share. Div Yield: indicated dividend (30% of the earnings) divided by the price. The dividend is only an indicator, it is not paid out
++STR_STOCK_SPECTATOR                                             :{WHITE}Spectators can not trade
++STR_STOCK_TITLE                                                 :{WHITE}{COMPANY}     Bid {CURRENCY_LONG}     Ask {CURRENCY_LONG}
++STR_STOCK_CHANGE_UP                                             :{GREEN}+{COMMA}.{NUM}%
++STR_STOCK_CHANGE_DOWN                                           :{RED}-{COMMA}.{NUM}%
++STR_STOCK_COL_SYMBOL                                            :Symbol
++STR_STOCK_COL_BID                                               :Bid
++STR_STOCK_COL_ASK                                               :Ask
++STR_STOCK_COL_ID                                                :Ticket
++STR_STOCK_COL_TYPE                                              :Type
++STR_STOCK_COL_VOLUME                                            :Volume
++STR_STOCK_COL_OPEN                                              :Open price
++STR_STOCK_COL_SL                                                :S / L
++STR_STOCK_COL_TP                                                :T / P
++STR_STOCK_COL_PRICE                                             :Price
++STR_STOCK_COL_PROFIT                                            :Profit
++STR_STOCK_PENDING                                               :pending
++STR_STOCK_EMPTY                                                 :{SILVER}No open trades
++STR_STOCK_HISTORY                                               :{BLACK}History
++STR_STOCK_TIP_HISTORY                                           :{BLACK}Show the closed trades. Click again to show the open trades
++STR_STOCK_HISTORY_EMPTY                                         :{SILVER}No closed trades
++STR_STOCK_HISTORY_GONE                                          :(delisted)
++STR_STOCK_COL_CLOSE_PRICE                                       :Close price
++STR_STOCK_COL_CLOSED                                            :Closed
++STR_STOCK_COL_REASON                                            :Reason
++STR_STOCK_REASON_MANUAL                                         :manual
++STR_STOCK_REASON_SL                                             :S / L
++STR_STOCK_REASON_TP                                             :T / P
++STR_STOCK_REASON_STOP_OUT                                       :stop out
++STR_STOCK_REASON_DELISTED                                       :delisted
++STR_STOCK_CLOSE_X                                               :x
++STR_STOCK_TYPE_BUY                                              :buy
++STR_STOCK_TYPE_SELL                                             :sell
++STR_STOCK_TYPE_BUY_LIMIT                                        :Buy Limit
++STR_STOCK_TYPE_SELL_LIMIT                                       :Sell Limit
++STR_STOCK_TYPE_BUY_STOP                                         :Buy Stop
++STR_STOCK_TYPE_SELL_STOP                                        :Sell Stop
++STR_STOCK_PREV                                                  :{BLACK}<
++STR_STOCK_NEXT                                                  :{BLACK}>
++STR_STOCK_TIP_PREV                                              :{BLACK}Previous symbol
++STR_STOCK_TIP_NEXT                                              :{BLACK}Next symbol
++
++# New order window
++STR_STOCK_ORDER_CAPTION                                         :{WHITE}New Order
++STR_STOCK_ORDER_LABEL_SYMBOL                                    :{BLACK}Symbol:
++STR_STOCK_ORDER_LABEL_VOLUME                                    :{BLACK}Volume (LOT):
++STR_STOCK_ORDER_LABEL_PRICE                                     :{BLACK}Price:
++STR_STOCK_ORDER_LABEL_SL                                        :{BLACK}Stop Loss:
++STR_STOCK_ORDER_LABEL_TP                                        :{BLACK}Take Profit:
++STR_STOCK_ORDER_HINT_VOLUME                                     :Volume in LOT
++STR_STOCK_ORDER_HINT_PRICE                                      :Price of the pending order
++STR_STOCK_ORDER_HINT_NONE                                       :none
++STR_STOCK_ORDER_PRICES                                          :{WHITE}Bid {CURRENCY_LONG}          Ask {CURRENCY_LONG}
++STR_STOCK_ORDER_INFO                                            :{WHITE}Volume: {COMMA} shares   Value: {CURRENCY_LONG}   Margin: {CURRENCY_LONG}
++STR_STOCK_ORDER_TYPE_MARKET                                     :Market
++STR_STOCK_ORDER_SELL                                            :{WHITE}Sell by Market
++STR_STOCK_ORDER_BUY                                             :{WHITE}Buy by Market
++STR_STOCK_ORDER_PLACE                                           :{BLACK}Place Pending Order
++STR_STOCK_TIP_TYPE                                              :{BLACK}Market executes at once at the current price. Limit and Stop orders wait for the price
++STR_STOCK_TIP_VOLUME                                            :{BLACK}Volume in LOT. 1 LOT = 100 shares, the smallest step is 0.01 LOT
++STR_STOCK_TIP_PRICE                                             :{BLACK}Price at which the pending order is triggered
++STR_STOCK_TIP_SL                                                :{BLACK}Stop Loss: the trade is closed when the price moves against you to this level. Leave empty for none
++STR_STOCK_TIP_TP                                                :{BLACK}Take Profit: the trade is closed when the price moves in your favour to this level. Leave empty for none
++STR_STOCK_TIP_SELL                                              :{BLACK}Open a short position at the Bid price
++STR_STOCK_TIP_BUY                                               :{BLACK}Open a long position at the Ask price
++STR_STOCK_TIP_PLACE                                             :{BLACK}Place a pending order of the selected type
++
++# Trading terminal errors
++STR_STOCK_ERROR_CANT_OPEN                                       :{WHITE}Can't open this order...
++STR_STOCK_ERROR_CANT_CLOSE                                      :{WHITE}Can't close this trade...
++STR_STOCK_ERROR_BAD_VOLUME                                      :{WHITE}Invalid volume (0.01 to 100.00 LOT)
++STR_STOCK_ERROR_BAD_PRICE                                       :{WHITE}Invalid price for this order type (Limit orders below Ask / above Bid, Stop orders above Ask / below Bid)
++STR_STOCK_ERROR_BAD_STOPS                                       :{WHITE}Invalid Stop Loss or Take Profit (for a buy: S/L below and T/P above the price, for a sell the other way round)
++STR_STOCK_ERROR_NO_MARGIN                                       :{WHITE}Not enough free margin (the margin is 10% of the value)
++STR_STOCK_ERROR_TOO_MANY                                        :{WHITE}Too many open trades and orders
++STR_STOCK_ERROR_OWN_COMPANY                                     :{WHITE}You can't trade the shares of your own company
++STR_STOCK_ERROR_NO_ORDER                                        :{WHITE}This trade does not exist any more
++
+ STR_STATUSBAR_COMPANY_NAME                                      :{SILVER}- -  {COMPANY}  - -
+ STR_STATUSBAR_PAUSED                                            :{YELLOW}*  *  PAUSED  *  *
+ STR_STATUSBAR_PAUSED_LINK_GRAPH                                 :{ORANGE}*  *  PAUSED (waiting for link graph update) *  *
+diff --git a/src/network/network_command.cpp b/src/network/network_command.cpp
+index 76003f0..e0bdf9b 100644
+--- a/src/network/network_command.cpp
++++ b/src/network/network_command.cpp
+@@ -38,6 +38,7 @@
+ #include "../settings_cmd.h"
+ #include "../signs_cmd.h"
+ #include "../station_cmd.h"
++#include "../stock_cmd.h"
+ #include "../story_cmd.h"
+ #include "../subsidy_cmd.h"
+ #include "../terraform_cmd.h"
+diff --git a/src/saveload/CMakeLists.txt b/src/saveload/CMakeLists.txt
+index 5c917f3..cf6b124 100644
+--- a/src/saveload/CMakeLists.txt
++++ b/src/saveload/CMakeLists.txt
+@@ -38,6 +38,7 @@ add_files(
+     settings_sl.cpp
+     signs_sl.cpp
+     station_sl.cpp
++    stock_sl.cpp
+     storage_sl.cpp
+     strings_sl.cpp
+     story_sl.cpp
+diff --git a/src/saveload/compat/CMakeLists.txt b/src/saveload/compat/CMakeLists.txt
+index dc7c57e..0884fba 100644
+--- a/src/saveload/compat/CMakeLists.txt
++++ b/src/saveload/compat/CMakeLists.txt
+@@ -21,6 +21,7 @@ add_files(
+     settings_sl_compat.h
+     signs_sl_compat.h
+     station_sl_compat.h
++    stock_sl_compat.h
+     storage_sl_compat.h
+     story_sl_compat.h
+     subsidy_sl_compat.h
+diff --git a/src/saveload/compat/stock_sl_compat.h b/src/saveload/compat/stock_sl_compat.h
+new file mode 100644
+index 0000000..a13b7d0
+--- /dev/null
++++ b/src/saveload/compat/stock_sl_compat.h
+@@ -0,0 +1,28 @@
++/*
++ * This file is part of OpenTTD.
++ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
++ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
++ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
++ */
++
++/** @file stock_sl_compat.h Loading of stock chunks. */
++
++#ifndef SAVELOAD_COMPAT_STOCK_H
++#define SAVELOAD_COMPAT_STOCK_H
++
++#include "../saveload.h"
++
++/** Original field order for _stock_desc. */
++const SaveLoadCompat _stock_sl_compat[] = {
++	SLC_VAR("kind"),
++	SLC_VAR("a"),
++	SLC_VAR("b"),
++	SLC_VAR("ym"),
++	SLC_VAR("v1"),
++	SLC_VAR("v2"),
++	SLC_VAR("v3"),
++	SLC_VAR("v4"),
++	SLC_VAR("v5"),
++};
++
++#endif /* SAVELOAD_COMPAT_STOCK_H */
+diff --git a/src/saveload/saveload.cpp b/src/saveload/saveload.cpp
+index ebec3d2..86ab9d1 100644
+--- a/src/saveload/saveload.cpp
++++ b/src/saveload/saveload.cpp
+@@ -240,6 +240,7 @@ static const std::vector<ChunkHandlerRef> &ChunkHandlers()
+ 	extern const ChunkHandlerTable _subsidy_chunk_handlers;
+ 	extern const ChunkHandlerTable _cargomonitor_chunk_handlers;
+ 	extern const ChunkHandlerTable _goal_chunk_handlers;
++	extern const ChunkHandlerTable _stock_chunk_handlers;
+ 	extern const ChunkHandlerTable _story_page_chunk_handlers;
+ 	extern const ChunkHandlerTable _league_chunk_handlers;
+ 	extern const ChunkHandlerTable _ai_chunk_handlers;
+@@ -274,6 +275,7 @@ static const std::vector<ChunkHandlerRef> &ChunkHandlers()
+ 		_subsidy_chunk_handlers,
+ 		_cargomonitor_chunk_handlers,
+ 		_goal_chunk_handlers,
++		_stock_chunk_handlers,
+ 		_story_page_chunk_handlers,
+ 		_league_chunk_handlers,
+ 		_engine_chunk_handlers,
+diff --git a/src/saveload/stock_sl.cpp b/src/saveload/stock_sl.cpp
+new file mode 100644
+index 0000000..6deacb3
+--- /dev/null
++++ b/src/saveload/stock_sl.cpp
+@@ -0,0 +1,233 @@
++/*
++ * This file is part of OpenTTD.
++ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
++ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
++ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
++ */
++
++/** @file stock_sl.cpp Code handling saving and loading of the trading terminal. */
++
++#include "../stdafx.h"
++
++#include "saveload.h"
++#include "compat/stock_sl_compat.h"
++
++#include "../stock_base.h"
++
++#include "../safeguards.h"
++
++/** Kinds of records in the chunk. */
++enum StockRecordKind : uint8_t {
++	SRK_CANDLE = 0,   ///< Closed candle: a = company, ym = month, v1..v4 = open/high/low/close.
++	SRK_RUNNING = 1,  ///< Running candle, same fields as SRK_CANDLE.
++	SRK_PRICE = 2,    ///< Daily price: a = company, v1 = price.
++	SRK_POSITION = 4, ///< Open position: a = owner, b = target, ym = id, v1 = volume, v2 = price, v3 = SL, v4 = TP, v5 = type.
++	SRK_PENDING = 5,  ///< Pending order, same fields as SRK_POSITION.
++	SRK_META = 6,     ///< Misc: ym = next order id.
++	SRK_VALUATION = 7, ///< Valuation: a = company, v1 = book value, v2 = earnings, v3 = number of quarters.
++	SRK_HISTORY = 8,  ///< Closed trade: a = owner, b = target, ym = id, v1 = volume, v2 = open price, v3 = close price, v4 = profit, v5 = type | reason << 8 | closed month << 16.
++};
++
++/** One saved record of the trading terminal. */
++struct StockRecord {
++	uint8_t kind = 0;
++	uint8_t a = 0;
++	uint8_t b = 0;
++	int32_t ym = 0;
++	int64_t v1 = 0;
++	int64_t v2 = 0;
++	int64_t v3 = 0;
++	int64_t v4 = 0;
++	int64_t v5 = 0;
++};
++
++static const SaveLoad _stock_desc[] = {
++	SLE_VAR(StockRecord, kind, SLE_UINT8),
++	SLE_VAR(StockRecord, a,    SLE_UINT8),
++	SLE_VAR(StockRecord, b,    SLE_UINT8),
++	SLE_VAR(StockRecord, ym,   SLE_INT32),
++	SLE_VAR(StockRecord, v1,   SLE_INT64),
++	SLE_VAR(StockRecord, v2,   SLE_INT64),
++	SLE_VAR(StockRecord, v3,   SLE_INT64),
++	SLE_VAR(StockRecord, v4,   SLE_INT64),
++	SLE_VAR(StockRecord, v5,   SLE_INT64),
++};
++
++static StockRecord CandleRecord(uint8_t kind, uint8_t company, const StockCandle &candle)
++{
++	StockRecord r;
++	r.kind = kind;
++	r.a = company;
++	r.ym = candle.ym;
++	r.v1 = candle.open;
++	r.v2 = candle.high;
++	r.v3 = candle.low;
++	r.v4 = candle.close;
++	return r;
++}
++
++static StockRecord OrderRecord(uint8_t kind, const StockOrder &o)
++{
++	StockRecord r;
++	r.kind = kind;
++	r.a = o.owner;
++	r.b = o.target;
++	r.ym = static_cast<int32_t>(o.id);
++	r.v1 = o.volume;
++	r.v2 = o.price;
++	r.v3 = o.sl;
++	r.v4 = o.tp;
++	r.v5 = static_cast<int64_t>(o.type);
++	return r;
++}
++
++struct STCKChunkHandler : ChunkHandler {
++	STCKChunkHandler() : ChunkHandler('STCK', CH_TABLE) {}
++
++	void Save() const override
++	{
++		SlTableHeader(_stock_desc);
++
++		int index = 0;
++		auto write = [&](StockRecord record) {
++			SlSetArrayIndex(index++);
++			SlObject(&record, _stock_desc);
++		};
++
++		StockRecord meta;
++		meta.kind = SRK_META;
++		meta.ym = static_cast<int32_t>(_stock_market.next_id);
++		write(meta);
++
++		for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
++			for (const StockCandle &candle : _stock_market.candles[i]) write(CandleRecord(SRK_CANDLE, i, candle));
++			if (_stock_market.has_current[i]) write(CandleRecord(SRK_RUNNING, i, _stock_market.current[i]));
++			if (_stock_market.price[i] > 0) {
++				StockRecord r;
++				r.kind = SRK_PRICE;
++				r.a = i;
++				r.v1 = _stock_market.price[i];
++				write(r);
++			}
++			const StockValuation &valuation = _stock_market.valuation[i];
++			if (valuation.quarters > 0) {
++				StockRecord r;
++				r.kind = SRK_VALUATION;
++				r.a = i;
++				r.v1 = valuation.book;
++				r.v2 = valuation.earnings;
++				r.v3 = valuation.quarters;
++				write(r);
++			}
++		}
++
++		for (const StockOrder &o : _stock_market.positions) write(OrderRecord(SRK_POSITION, o));
++		for (const StockOrder &o : _stock_market.pending) write(OrderRecord(SRK_PENDING, o));
++
++		for (const StockClosedTrade &t : _stock_market.history) {
++			StockRecord r;
++			r.kind = SRK_HISTORY;
++			r.a = t.owner;
++			r.b = t.target;
++			r.ym = static_cast<int32_t>(t.id);
++			r.v1 = t.volume;
++			r.v2 = t.open_price;
++			r.v3 = t.close_price;
++			r.v4 = t.profit;
++			r.v5 = static_cast<int64_t>(t.type) | (static_cast<int64_t>(t.reason) << 8) | (static_cast<int64_t>(t.closed_ym) << 16);
++			write(r);
++		}
++	}
++
++	void Load() const override
++	{
++		const std::vector<SaveLoad> slt = SlCompatTableHeader(_stock_desc, _stock_sl_compat);
++
++		_stock_market.Reset();
++
++		int index;
++		while ((index = SlIterateArray()) != -1) {
++			StockRecord r;
++			SlObject(&r, slt);
++
++			switch (r.kind) {
++				case SRK_META:
++					_stock_market.next_id = static_cast<uint32_t>(std::max<int32_t>(r.ym, 1));
++					break;
++
++				case SRK_CANDLE:
++				case SRK_RUNNING: {
++					if (r.a >= MAX_COMPANIES) break;
++					StockCandle candle{r.ym, r.v1, r.v2, r.v3, r.v4};
++					if (r.kind == SRK_CANDLE) {
++						_stock_market.candles[r.a].push_back(candle);
++					} else {
++						_stock_market.current[r.a] = candle;
++						_stock_market.has_current[r.a] = true;
++					}
++					break;
++				}
++
++				case SRK_PRICE:
++					if (r.a < MAX_COMPANIES) _stock_market.price[r.a] = r.v1;
++					break;
++
++				case SRK_VALUATION:
++					if (r.a < MAX_COMPANIES) {
++						StockValuation &valuation = _stock_market.valuation[r.a];
++						valuation.book = r.v1;
++						valuation.earnings = r.v2;
++						valuation.quarters = static_cast<uint8_t>(std::clamp<int64_t>(r.v3, 0, static_cast<int64_t>(STOCK_EARNINGS_QUARTERS)));
++					}
++					break;
++
++				case SRK_POSITION:
++				case SRK_PENDING: {
++					if (r.a >= MAX_COMPANIES || r.b >= MAX_COMPANIES) break;
++					if (r.v5 < 0 || r.v5 >= static_cast<int64_t>(StockOrderType::End)) break;
++					StockOrder o;
++					o.id = static_cast<uint32_t>(r.ym);
++					o.owner = r.a;
++					o.target = r.b;
++					o.type = static_cast<StockOrderType>(r.v5);
++					o.volume = static_cast<uint32_t>(r.v1);
++					o.price = r.v2;
++					o.sl = r.v3;
++					o.tp = r.v4;
++					(r.kind == SRK_POSITION ? _stock_market.positions : _stock_market.pending).push_back(o);
++					break;
++				}
++
++				case SRK_HISTORY: {
++					if (r.a >= MAX_COMPANIES || r.b >= MAX_COMPANIES) break;
++					const int64_t type = r.v5 & 0xFF;
++					const int64_t reason = (r.v5 >> 8) & 0xFF;
++					if (type != static_cast<int64_t>(StockOrderType::Buy) && type != static_cast<int64_t>(StockOrderType::Sell)) break;
++					if (reason >= static_cast<int64_t>(StockCloseReason::End)) break;
++					StockClosedTrade t;
++					t.id = static_cast<uint32_t>(r.ym);
++					t.owner = r.a;
++					t.target = r.b;
++					t.type = static_cast<StockOrderType>(type);
++					t.reason = static_cast<StockCloseReason>(reason);
++					t.volume = static_cast<uint32_t>(r.v1);
++					t.open_price = r.v2;
++					t.close_price = r.v3;
++					t.profit = r.v4;
++					t.closed_ym = static_cast<int32_t>(r.v5 >> 16);
++					_stock_market.history.push_back(t);
++					break;
++				}
++
++				default: break;
++			}
++		}
++	}
++};
++
++static const STCKChunkHandler STCK;
++static const ChunkHandlerRef stock_chunk_handlers[] = {
++	STCK,
++};
++
++extern const ChunkHandlerTable _stock_chunk_handlers(stock_chunk_handlers);
+diff --git a/src/statusbar_gui.cpp b/src/statusbar_gui.cpp
+index fa05885..9bf6a7d 100644
+--- a/src/statusbar_gui.cpp
++++ b/src/statusbar_gui.cpp
+@@ -22,6 +22,7 @@
+ #include "saveload/saveload.h"
+ #include "window_func.h"
+ #include "statusbar_gui.h"
++#include "stock_gui.h"
+ #include "toolbar_gui.h"
+ #include "core/geometry_func.hpp"
+ #include "zoom_func.h"
+@@ -113,6 +114,24 @@ struct StatusBarWindow : Window {
+ 				DrawString(tr, GetString(STR_JUST_DATE_LONG, TimerGameCalendar::date), TC_WHITE, SA_HOR_CENTER);
+ 				break;
+ 
++			case WID_S_STOCK: {
++				/* Draw a tiny candlestick chart as icon. */
++				const int ox = r.left + ScaleGUITrad(4);
++				const int oy = r.top + ScaleGUITrad(1);
++				struct MiniCandle { int x, wick_top, wick_bottom, body_top, body_bottom; bool up; };
++				static constexpr MiniCandle candles[] = {
++					{ 2, 3, 10, 5, 8, true},
++					{ 9, 1,  8, 2, 5, true},
++					{16, 4, 10, 6, 9, false},
++				};
++				for (const MiniCandle &c : candles) {
++					const int cx = ox + ScaleGUITrad(c.x);
++					GfxDrawLine(cx, oy + ScaleGUITrad(c.wick_top), cx, oy + ScaleGUITrad(c.wick_bottom), PC_WHITE);
++					GfxFillRect(cx - ScaleGUITrad(1), oy + ScaleGUITrad(c.body_top), cx + ScaleGUITrad(1), oy + ScaleGUITrad(c.body_bottom), c.up ? PC_GREEN : PC_RED);
++				}
++				break;
++			}
++
+ 			case WID_S_RIGHT: {
+ 				if (_local_company == COMPANY_SPECTATOR) {
+ 					DrawString(tr, STR_STATUSBAR_SPECTATOR, TC_FROMSTRING, SA_HOR_CENTER);
+@@ -187,6 +206,7 @@ struct StatusBarWindow : Window {
+ 		switch (widget) {
+ 			case WID_S_MIDDLE: ShowLastNewsMessage(); break;
+ 			case WID_S_RIGHT:  if (_local_company != COMPANY_SPECTATOR) ShowCompanyFinances(_local_company); break;
++			case WID_S_STOCK:  ShowStockWindow(); break;
+ 			default: ResetObjectToPlace();
+ 		}
+ 	}
+@@ -213,6 +233,7 @@ struct StatusBarWindow : Window {
+ static constexpr std::initializer_list<NWidgetPart> _nested_main_status_widgets = {
+ 	NWidget(NWID_HORIZONTAL),
+ 		NWidget(WWT_PANEL, COLOUR_GREY, WID_S_LEFT), SetMinimalSize(140, 12), EndContainer(),
++		NWidget(WWT_PUSHBTN, COLOUR_GREY, WID_S_STOCK), SetMinimalSize(28, 12), SetToolTip(STR_STATUSBAR_TOOLTIP_STOCK_MARKET),
+ 		NWidget(WWT_PUSHBTN, COLOUR_GREY, WID_S_MIDDLE), SetMinimalSize(40, 12), SetToolTip(STR_STATUSBAR_TOOLTIP_SHOW_LAST_NEWS), SetResize(1, 0),
+ 		NWidget(WWT_PUSHBTN, COLOUR_GREY, WID_S_RIGHT), SetMinimalSize(140, 12),
+ 	EndContainer(),
+diff --git a/src/stock_base.cpp b/src/stock_base.cpp
+new file mode 100644
+index 0000000..c92e0e7
+--- /dev/null
++++ b/src/stock_base.cpp
+@@ -0,0 +1,475 @@
++/*
++ * This file is part of OpenTTD.
++ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
++ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
++ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
++ */
++
++/** @file stock_base.cpp Implementation of the in-game trading terminal. */
++
++#include "stdafx.h"
++#include "stock_base.h"
++#include "command_type.h"
++#include "company_base.h"
++#include "company_func.h"
++#include "window_func.h"
++#include "core/backup_type.hpp"
++#include "timer/timer.h"
++#include "timer/timer_game_economy.h"
++
++#include "safeguards.h"
++
++StockMarket _stock_market;
++
++/** Forget everything, e.g. when a new game is started. */
++void StockMarket::Reset()
++{
++	for (auto &list : this->candles) list.clear();
++	this->current.fill({});
++	this->has_current.fill(false);
++	this->price.fill(0);
++	this->valuation.fill({});
++	this->history.clear();
++	this->positions.clear();
++	this->pending.clear();
++	this->next_id = 1;
++}
++
++/**
++ * Valuation model, step 1: collect the figures of a company.
++ * The book value is the company value; the earnings are the net result (income plus expenses, which are negative)
++ * of the last four completed quarters. With fewer quarters on record the result is annualised.
++ * Only game state is used, so every client of a network game gets the same figures.
++ * @param c The company.
++ * @return The valuation.
++ */
++static StockValuation ComputeStockValuation(const Company *c)
++{
++	StockValuation v;
++	v.book = static_cast<int64_t>(CalculateCompanyValue(c));
++
++	int64_t sum = 0;
++	for (size_t q = 0; q < STOCK_EARNINGS_QUARTERS; q++) {
++		const CompanyEconomyEntry &e = c->old_economy[q];
++		if (e.income == 0 && e.expenses == 0) continue; // This quarter has not happened yet.
++		sum += static_cast<int64_t>(e.income) + static_cast<int64_t>(e.expenses);
++		v.quarters++;
++	}
++	if (v.quarters > 0) v.earnings = sum * static_cast<int64_t>(STOCK_EARNINGS_QUARTERS) / v.quarters;
++	return v;
++}
++
++/**
++ * Valuation model, step 2: the mid price of one share.
++ * The company is worth its book value plus STOCK_EARNINGS_MULTIPLE years of earnings. The earnings premium
++ * is limited to +400% / -50% of the book value, so that one extreme year can not make the price jump
++ * wildly or turn negative. Without earnings the price is simply the book value per share.
++ * @param v The valuation.
++ * @return The price, at least 2.
++ */
++static int64_t StockPriceFromValuation(const StockValuation &v)
++{
++	const int64_t book = std::max<int64_t>(v.book, 0);
++	const int64_t premium = std::clamp<int64_t>(v.earnings * STOCK_EARNINGS_MULTIPLE, -book / 2, book * 4);
++	return std::max<int64_t>(2, (book + premium) / STOCK_SHARES_PER_COMPANY);
++}
++
++/**
++ * Compute the mid price of one share of a company from scratch.
++ * @param company The company.
++ * @return The price, or 0 when the company does not exist.
++ */
++static int64_t ComputeStockPrice(CompanyID company)
++{
++	const Company *c = Company::GetIfValid(company);
++	if (c == nullptr) return 0;
++	return StockPriceFromValuation(ComputeStockValuation(c));
++}
++
++/**
++ * Get the mid price of one share of a company.
++ * Only the daily update stores prices, so the result is the same on all clients of a network game.
++ * @param company The company.
++ * @return The price, or 0 when the company does not exist.
++ */
++int64_t GetStockPrice(CompanyID company)
++{
++	if (!Company::IsValidID(company)) return 0;
++	const int64_t cached = _stock_market.price[company.base()];
++	return cached > 0 ? cached : ComputeStockPrice(company);
++}
++
++/** The difference between Ask and Bid for a given mid price. */
++static int64_t GetSpread(int64_t mid)
++{
++	return std::max<int64_t>(2, mid / 200);
++}
++
++/** Price at which you can sell (and at which long positions are closed). */
++int64_t GetStockBid(CompanyID company)
++{
++	const int64_t mid = GetStockPrice(company);
++	if (mid == 0) return 0;
++	return std::max<int64_t>(1, mid - GetSpread(mid) / 2);
++}
++
++/** Price at which you can buy (and at which short positions are closed). */
++int64_t GetStockAsk(CompanyID company)
++{
++	const int64_t mid = GetStockPrice(company);
++	if (mid == 0) return 0;
++	return std::max<int64_t>(1, mid - GetSpread(mid) / 2) + GetSpread(mid);
++}
++
++/**
++ * Floating profit or loss of a position, if it would be closed now.
++ * @param position The position.
++ * @return Profit (negative for a loss) in money units.
++ */
++int64_t GetStockProfit(const StockOrder &position)
++{
++	const CompanyID target{position.target};
++	const int64_t units = position.volume; // hundredths of a LOT, which is one share per unit.
++	if (IsStockBuy(position.type)) return (GetStockBid(target) - position.price) * units;
++	return (position.price - GetStockAsk(target)) * units;
++}
++
++/**
++ * Figures for the summary row of a symbol: EPS, P/E and dividend yield, based on the daily valuation.
++ * The dividend is only an indicator (STOCK_PAYOUT_PERCENT of the earnings); nothing is paid out.
++ * @param company The company whose shares are shown.
++ * @return The figures; see #StockSummary for what is missing when there are no (positive) earnings.
++ */
++StockSummary GetStockSummary(CompanyID company)
++{
++	StockSummary s;
++	if (!Company::IsValidID(company)) return s;
++
++	const StockValuation &v = _stock_market.valuation[company.base()];
++	if (v.quarters == 0) return s;
++
++	s.has_earnings = true;
++	s.eps = v.earnings / STOCK_SHARES_PER_COMPANY;
++
++	const int64_t price = GetStockPrice(company);
++	if (v.earnings > 0 && v.book > 0 && price > 0) {
++		s.has_pe = true;
++		s.pe_tenths = price * STOCK_SHARES_PER_COMPANY * 10 / v.earnings;
++		s.yield_tenths = v.earnings * STOCK_PAYOUT_PERCENT * 10 / (price * STOCK_SHARES_PER_COMPANY);
++	}
++	return s;
++}
++
++/** Margin that is held for a position. */
++int64_t GetStockMargin(const StockOrder &position)
++{
++	return position.price * static_cast<int64_t>(position.volume) / STOCK_MARGIN_DIVISOR;
++}
++
++/** Sum of the margins of all open positions of a company. */
++int64_t GetStockUsedMargin(CompanyID owner)
++{
++	int64_t sum = 0;
++	for (const StockOrder &p : _stock_market.positions) {
++		if (p.owner == owner.base()) sum += GetStockMargin(p);
++	}
++	return sum;
++}
++
++/** Sum of the floating profit of all open positions of a company. */
++int64_t GetStockFloatingProfit(CompanyID owner)
++{
++	int64_t sum = 0;
++	for (const StockOrder &p : _stock_market.positions) {
++		if (p.owner == owner.base() && Company::IsValidID(CompanyID{p.target})) sum += GetStockProfit(p);
++	}
++	return sum;
++}
++
++/** Equity of a company: its money plus the floating profit of its open positions. */
++int64_t GetStockEquity(CompanyID owner)
++{
++	const Company *c = Company::GetIfValid(owner);
++	if (c == nullptr) return 0;
++	return static_cast<int64_t>(c->money) + GetStockFloatingProfit(owner);
++}
++
++/**
++ * Margin level of a company: equity divided by the used margin, in percent.
++ * @param owner The company.
++ * @return The margin level, or -1 when the company has no open positions.
++ */
++int64_t GetStockMarginLevel(CompanyID owner)
++{
++	const int64_t used = GetStockUsedMargin(owner);
++	if (used <= 0) return -1;
++	const int64_t equity = GetStockEquity(owner);
++	if (equity <= 0) return 0;
++	/* Split the division so that a huge equity can not overflow. */
++	return std::min<int64_t>(equity / used, 99999) * 100 + (equity % used) * 100 / used;
++}
++
++/**
++ * Add a realised profit or loss to the money of a company.
++ * @param owner Company that gets (or pays) the money.
++ * @param profit Profit; negative for a loss.
++ */
++void PayStockProfit(CompanyID owner, int64_t profit)
++{
++	if (!Company::IsValidID(owner) || profit == 0) return;
++	AutoRestoreBackup cur_company(_current_company, owner);
++	SubtractMoneyFromCompany(CommandCost(EXPENSES_OTHER, Money(-profit)));
++	InvalidateWindowData(WC_FINANCES, owner.base());
++}
++
++StockOrder *StockMarket::FindPosition(uint32_t id, CompanyID owner)
++{
++	for (StockOrder &p : this->positions) {
++		if (p.id == id && p.owner == owner.base()) return &p;
++	}
++	return nullptr;
++}
++
++StockOrder *StockMarket::FindPending(uint32_t id, CompanyID owner)
++{
++	for (StockOrder &p : this->pending) {
++		if (p.id == id && p.owner == owner.base()) return &p;
++	}
++	return nullptr;
++}
++
++/** Number of positions and pending orders of a company. */
++size_t StockMarket::CountOrders(CompanyID owner) const
++{
++	size_t n = 0;
++	for (const StockOrder &p : this->positions) n += (p.owner == owner.base());
++	for (const StockOrder &p : this->pending) n += (p.owner == owner.base());
++	return n;
++}
++
++/**
++ * Clean up after companies that have disappeared (bankrupt or bought): orders of such a company vanish,
++ * positions in its shares are closed at the last known price.
++ */
++void StockMarket::HandleRemovedCompanies()
++{
++	for (size_t i = 0; i < this->positions.size();) {
++		const StockOrder p = this->positions[i];
++		const bool owner_ok = Company::IsValidID(CompanyID{p.owner});
++		const bool target_ok = Company::IsValidID(CompanyID{p.target});
++		if (owner_ok && target_ok) {
++			i++;
++			continue;
++		}
++		if (owner_ok) {
++			const int64_t last = this->price[p.target] > 0 ? this->price[p.target] : p.price;
++			const int64_t units = p.volume;
++			const int64_t profit = IsStockBuy(p.type) ? (last - p.price) * units : (p.price - last) * units;
++			PayStockProfit(CompanyID{p.owner}, profit);
++			this->AddHistory(p, last, profit, StockCloseReason::Delisted);
++		}
++		this->positions.erase(this->positions.begin() + i);
++	}
++
++	for (size_t i = 0; i < this->pending.size();) {
++		const StockOrder &p = this->pending[i];
++		if (Company::IsValidID(CompanyID{p.owner}) && Company::IsValidID(CompanyID{p.target})) {
++			i++;
++		} else {
++			this->pending.erase(this->pending.begin() + i);
++		}
++	}
++
++	for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
++		if (Company::IsValidID(CompanyID{i})) continue;
++		this->candles[i].clear();
++		this->current[i] = {};
++		this->has_current[i] = false;
++		this->price[i] = 0;
++		this->valuation[i] = {};
++		std::erase_if(this->history, [i](const StockClosedTrade &t) { return t.owner == i; });
++	}
++}
++
++/**
++ * Remember a closed position in the history. Only the newest STOCK_MAX_HISTORY_PER_COMPANY trades per company are kept.
++ * @param position The position that has been closed (a copy, not a reference into #positions).
++ * @param close_price Price at which it was closed.
++ * @param profit Realised profit; negative for a loss.
++ * @param reason Why it was closed.
++ */
++void StockMarket::AddHistory(const StockOrder &position, int64_t close_price, int64_t profit, StockCloseReason reason)
++{
++	StockClosedTrade t;
++	t.id = position.id;
++	t.owner = position.owner;
++	t.target = position.target;
++	t.type = IsStockBuy(position.type) ? StockOrderType::Buy : StockOrderType::Sell;
++	t.reason = reason;
++	t.volume = position.volume;
++	t.open_price = position.price;
++	t.close_price = close_price;
++	t.profit = profit;
++	t.closed_ym = TimerGameEconomy::year.base() * 12 + TimerGameEconomy::month;
++	this->history.push_back(t);
++
++	size_t count = 0;
++	for (const StockClosedTrade &h : this->history) count += (h.owner == t.owner);
++	if (count > STOCK_MAX_HISTORY_PER_COMPANY) {
++		const auto oldest = std::find_if(this->history.begin(), this->history.end(), [&t](const StockClosedTrade &h) { return h.owner == t.owner; });
++		this->history.erase(oldest);
++	}
++}
++
++/** Close positions that have reached their Stop Loss or Take Profit. */
++void StockMarket::CheckPositions()
++{
++	for (size_t i = 0; i < this->positions.size();) {
++		const StockOrder p = this->positions[i];
++		const CompanyID target{p.target};
++		const int64_t bid = GetStockBid(target);
++		const int64_t ask = GetStockAsk(target);
++
++		bool hit_sl;
++		bool hit_tp;
++		if (IsStockBuy(p.type)) {
++			hit_sl = p.sl != 0 && bid <= p.sl;
++			hit_tp = p.tp != 0 && bid >= p.tp;
++		} else {
++			hit_sl = p.sl != 0 && ask >= p.sl;
++			hit_tp = p.tp != 0 && ask <= p.tp;
++		}
++		const bool hit = hit_sl || hit_tp;
++
++		if (!hit) {
++			i++;
++			continue;
++		}
++
++		const int64_t profit = GetStockProfit(p);
++		this->positions.erase(this->positions.begin() + i);
++		PayStockProfit(CompanyID{p.owner}, profit);
++		this->AddHistory(p, IsStockBuy(p.type) ? bid : ask, profit, hit_sl ? StockCloseReason::StopLoss : StockCloseReason::TakeProfit);
++	}
++}
++
++/**
++ * Margin call. When the equity of a company is below the stop-out level of the margin it has to hold,
++ * its position with the biggest loss is closed at the current price, again and again, until the margin level
++ * is restored or no position is left. The loss is paid from the money of the company.
++ */
++void StockMarket::CheckMarginCall()
++{
++	for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
++		const CompanyID owner{i};
++		if (!Company::IsValidID(owner)) continue;
++
++		for (;;) {
++			const int64_t used = GetStockUsedMargin(owner);
++			if (used <= 0) break;
++			if (GetStockEquity(owner) >= used * STOCK_STOP_OUT_LEVEL / 100) break;
++
++			size_t worst = this->positions.size();
++			int64_t worst_profit = 0;
++			for (size_t k = 0; k < this->positions.size(); k++) {
++				const StockOrder &p = this->positions[k];
++				if (p.owner != owner.base()) continue;
++				const int64_t profit = GetStockProfit(p);
++				if (worst == this->positions.size() || profit < worst_profit) {
++					worst = k;
++					worst_profit = profit;
++				}
++			}
++			if (worst == this->positions.size()) break;
++
++			const StockOrder closed = this->positions[worst];
++			this->positions.erase(this->positions.begin() + worst);
++			PayStockProfit(owner, worst_profit);
++			this->AddHistory(closed, IsStockBuy(closed.type) ? GetStockBid(CompanyID{closed.target}) : GetStockAsk(CompanyID{closed.target}), worst_profit, StockCloseReason::StopOut);
++		}
++	}
++}
++
++/** Turn pending orders into positions when their price has been reached. */
++void StockMarket::CheckPending()
++{
++	for (size_t i = 0; i < this->pending.size();) {
++		StockOrder o = this->pending[i];
++		const CompanyID target{o.target};
++		const int64_t bid = GetStockBid(target);
++		const int64_t ask = GetStockAsk(target);
++
++		bool hit = false;
++		switch (o.type) {
++			case StockOrderType::BuyLimit:  hit = ask <= o.price; break;
++			case StockOrderType::BuyStop:   hit = ask >= o.price; break;
++			case StockOrderType::SellLimit: hit = bid >= o.price; break;
++			case StockOrderType::SellStop:  hit = bid <= o.price; break;
++			default: break;
++		}
++
++		if (!hit) {
++			i++;
++			continue;
++		}
++
++		this->pending.erase(this->pending.begin() + i);
++
++		const Company *c = Company::GetIfValid(CompanyID{o.owner});
++		if (c == nullptr) continue;
++
++		o.type = IsStockBuy(o.type) ? StockOrderType::Buy : StockOrderType::Sell;
++		o.price = IsStockBuy(o.type) ? ask : bid;
++
++		/* Not enough free margin: the order is dropped. */
++		if (GetStockUsedMargin(CompanyID{o.owner}) + GetStockMargin(o) > GetStockEquity(CompanyID{o.owner})) continue;
++
++		this->positions.push_back(o);
++	}
++}
++
++/** Recompute all prices; called once per day. Starts a new candle at the start of a month. */
++void StockMarket::UpdateDaily()
++{
++	const int32_t ym = TimerGameEconomy::year.base() * 12 + TimerGameEconomy::month;
++
++	for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
++		const CompanyID cid{i};
++		if (!Company::IsValidID(cid)) continue;
++
++		const StockValuation valuation = ComputeStockValuation(Company::Get(cid));
++		this->valuation[i] = valuation;
++		const int64_t price = StockPriceFromValuation(valuation);
++		this->price[i] = price;
++		StockCandle &cur = this->current[i];
++
++		if (!this->has_current[i]) {
++			cur = {ym, price, price, price, price};
++			this->has_current[i] = true;
++		} else if (cur.ym != ym) {
++			auto &list = this->candles[i];
++			list.push_back(cur);
++			if (list.size() > STOCK_MAX_CANDLES) list.erase(list.begin());
++			const int64_t prev_close = cur.close;
++			cur = {ym, prev_close, std::max(prev_close, price), std::min(prev_close, price), price};
++		} else {
++			cur.high = std::max(cur.high, price);
++			cur.low = std::min(cur.low, price);
++			cur.close = price;
++		}
++	}
++
++	this->HandleRemovedCompanies();
++	this->CheckPositions();
++	this->CheckPending();
++	this->CheckMarginCall();
++
++	InvalidateWindowData(WC_STOCK_MARKET, 0);
++	InvalidateWindowData(WC_STOCK_ORDER, 0);
++}
++
++/** Update the market once per economy day. */
++static const IntervalTimer<TimerGameEconomy> _stock_daily({TimerGameEconomy::DAY, TimerGameEconomy::Priority::COMPANY}, [](auto)
++{
++	_stock_market.UpdateDaily();
++});
+diff --git a/src/stock_base.h b/src/stock_base.h
+new file mode 100644
+index 0000000..372493c
+--- /dev/null
++++ b/src/stock_base.h
+@@ -0,0 +1,174 @@
++/*
++ * This file is part of OpenTTD.
++ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
++ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
++ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
++ */
++
++/** @file stock_base.h Data of the in-game trading terminal: prices, candles, open positions and pending orders. */
++
++#ifndef STOCK_BASE_H
++#define STOCK_BASE_H
++
++#include "company_type.h"
++#include "economy_type.h"
++#include <array>
++#include <vector>
++
++/** Number of (virtual) shares every company has. The mid price of one share is the company value divided by this. */
++static constexpr int64_t STOCK_SHARES_PER_COMPANY = 1000;
++
++/** One LOT is this many shares. Volumes are stored in hundredths of a LOT, so one volume unit is exactly one share. */
++static constexpr int64_t STOCK_SHARES_PER_LOT = 100;
++
++/** Largest volume of a single order, in hundredths of a LOT (100.00 LOT). */
++static constexpr uint32_t STOCK_MAX_VOLUME = 10000;
++
++/** The margin needed to open a position is the value of the position divided by this (leverage 1:10). */
++static constexpr int64_t STOCK_MARGIN_DIVISOR = 10;
++
++/** Margin call: below this margin level (equity / used margin, in percent) the terminal warns the player. */
++static constexpr int64_t STOCK_MARGIN_CALL_LEVEL = 100;
++
++/** Stop out: below this margin level the positions with the biggest loss are closed by force. */
++static constexpr int64_t STOCK_STOP_OUT_LEVEL = 50;
++
++/** Valuation model: a company is worth its book value plus this many years of earnings (within the limits in StockPriceFromValuation). */
++static constexpr int64_t STOCK_EARNINGS_MULTIPLE = 10;
++
++/** Valuation model: this share of the earnings is the (indicated) dividend, in percent. */
++static constexpr int64_t STOCK_PAYOUT_PERCENT = 30;
++
++/** Valuation model: the earnings are the net result of this many completed quarters, i.e. one year. */
++static constexpr size_t STOCK_EARNINGS_QUARTERS = 4;
++
++/** Maximum number of closed trades that are remembered per company; the oldest ones are forgotten first. */
++static constexpr size_t STOCK_MAX_HISTORY_PER_COMPANY = 100;
++
++/** Maximum number of positions plus pending orders per company. */
++static constexpr size_t STOCK_MAX_ORDERS_PER_COMPANY = 40;
++
++/** Maximum number of closed monthly candles that are remembered per company. */
++static constexpr size_t STOCK_MAX_CANDLES = 240;
++
++/** Kind of an order. The first two are executed at once (market execution), the others are pending orders. */
++enum class StockOrderType : uint8_t {
++	Buy,       ///< Market execution: buy at the Ask price.
++	Sell,      ///< Market execution: sell (short) at the Bid price.
++	BuyLimit,  ///< Buy when the Ask price falls to the given price.
++	SellLimit, ///< Sell when the Bid price rises to the given price.
++	BuyStop,   ///< Buy when the Ask price rises to the given price.
++	SellStop,  ///< Sell when the Bid price falls to the given price.
++	End,       ///< End marker.
++};
++
++/** Whether the order is (or becomes) a long position. */
++inline bool IsStockBuy(StockOrderType type)
++{
++	return type == StockOrderType::Buy || type == StockOrderType::BuyLimit || type == StockOrderType::BuyStop;
++}
++
++/** One open position (when stored in StockMarket::positions) or one pending order (StockMarket::pending). */
++struct StockOrder {
++	uint32_t id = 0;                         ///< Unique number of the order.
++	uint8_t owner = 0;                       ///< Company that owns the order.
++	uint8_t target = 0;                      ///< Company whose shares (symbol) are traded.
++	StockOrderType type = StockOrderType::Buy; ///< Buy or Sell for positions, any type for pending orders.
++	uint32_t volume = 0;                     ///< Volume in hundredths of a LOT.
++	int64_t price = 0;                       ///< Entry price of a position, or trigger price of a pending order.
++	int64_t sl = 0;                          ///< Stop Loss, 0 when not set.
++	int64_t tp = 0;                          ///< Take Profit, 0 when not set.
++};
++
++/** One candle of the chart; covers one economy month. */
++struct StockCandle {
++	int32_t ym = 0;      ///< Economy year * 12 + month.
++	int64_t open = 0;    ///< Price at the start of the month.
++	int64_t high = 0;    ///< Highest price of the month.
++	int64_t low = 0;     ///< Lowest price of the month.
++	int64_t close = 0;   ///< Price at the end of the month (or the latest price for the running month).
++};
++
++/** Why a position was closed. */
++enum class StockCloseReason : uint8_t {
++	Manual,      ///< The player closed it.
++	StopLoss,    ///< The Stop Loss was reached.
++	TakeProfit,  ///< The Take Profit was reached.
++	StopOut,     ///< Closed by force because of a margin call.
++	Delisted,    ///< The company whose shares were traded disappeared.
++	End,         ///< End marker.
++};
++
++/** One closed trade, as shown in the history. */
++struct StockClosedTrade {
++	uint32_t id = 0;                              ///< Number of the trade (same as when it was open).
++	uint8_t owner = 0;                            ///< Company that made the trade.
++	uint8_t target = 0;                           ///< Company whose shares (symbol) were traded.
++	StockOrderType type = StockOrderType::Buy;    ///< Buy (long) or Sell (short).
++	StockCloseReason reason = StockCloseReason::Manual; ///< Why it was closed.
++	uint32_t volume = 0;                          ///< Volume in hundredths of a LOT.
++	int64_t open_price = 0;                       ///< Price at which it was opened.
++	int64_t close_price = 0;                      ///< Price at which it was closed.
++	int64_t profit = 0;                           ///< Realised profit; negative for a loss.
++	int32_t closed_ym = 0;                        ///< Economy year * 12 + month of the closing.
++};
++
++/** Valuation of one company, refreshed once per day. */
++struct StockValuation {
++	int64_t book = 0;      ///< Book value: the company value (assets minus loan).
++	int64_t earnings = 0;  ///< Net result of the last year; annualised when fewer than four quarters are known.
++	uint8_t quarters = 0;  ///< Number of completed quarters behind #earnings (0..4). 0 means there are no results yet.
++};
++
++/** The figures of the summary row: P/E, EPS and dividend yield. */
++struct StockSummary {
++	bool has_earnings = false;    ///< False when the company has no completed quarter yet: nothing can be shown.
++	bool has_pe = false;          ///< False when earnings or book value are not positive: P/E is not meaningful.
++	int64_t eps = 0;              ///< Earnings per share; negative for a loss.
++	int64_t pe_tenths = 0;        ///< Price / earnings ratio, in tenths.
++	int64_t yield_tenths = 0;     ///< Dividend yield, in tenths of a percent.
++};
++
++/** All state of the trading terminal. Saved in the 'STCK' chunk. */
++struct StockMarket {
++	std::array<std::vector<StockCandle>, MAX_COMPANIES> candles{}; ///< Closed candles per company.
++	std::array<StockCandle, MAX_COMPANIES> current{};              ///< The running candle per company.
++	std::array<bool, MAX_COMPANIES> has_current{};                 ///< Whether #current is valid.
++	std::array<int64_t, MAX_COMPANIES> price{};                    ///< Mid price per share, refreshed once per day. 0 when unknown.
++	std::array<StockValuation, MAX_COMPANIES> valuation{};         ///< Valuation per company, refreshed once per day.
++	std::vector<StockClosedTrade> history{};                       ///< Closed trades of all companies, the oldest first.
++	std::vector<StockOrder> positions{};                           ///< Open positions.
++	std::vector<StockOrder> pending{};                             ///< Pending orders.
++	uint32_t next_id = 1;                                          ///< Number of the next order.
++
++	void Reset();
++	void UpdateDaily();
++
++	StockOrder *FindPosition(uint32_t id, CompanyID owner);
++	StockOrder *FindPending(uint32_t id, CompanyID owner);
++	size_t CountOrders(CompanyID owner) const;
++	void AddHistory(const StockOrder &position, int64_t close_price, int64_t profit, StockCloseReason reason);
++
++private:
++	void HandleRemovedCompanies();
++	void CheckPositions();
++	void CheckPending();
++	void CheckMarginCall();
++};
++
++extern StockMarket _stock_market;
++
++int64_t GetStockPrice(CompanyID company);
++StockSummary GetStockSummary(CompanyID company);
++int64_t GetStockBid(CompanyID company);
++int64_t GetStockAsk(CompanyID company);
++
++int64_t GetStockProfit(const StockOrder &position);
++int64_t GetStockMargin(const StockOrder &position);
++int64_t GetStockUsedMargin(CompanyID owner);
++int64_t GetStockFloatingProfit(CompanyID owner);
++int64_t GetStockEquity(CompanyID owner);
++int64_t GetStockMarginLevel(CompanyID owner);
++void PayStockProfit(CompanyID owner, int64_t profit);
++
++#endif /* STOCK_BASE_H */
+diff --git a/src/stock_cmd.cpp b/src/stock_cmd.cpp
+new file mode 100644
+index 0000000..27d16e7
+--- /dev/null
++++ b/src/stock_cmd.cpp
+@@ -0,0 +1,133 @@
++/*
++ * This file is part of OpenTTD.
++ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
++ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
++ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
++ */
++
++/** @file stock_cmd.cpp Commands to open and close trades in the trading terminal. */
++
++#include "stdafx.h"
++#include "stock_cmd.h"
++#include "stock_base.h"
++#include "command_func.h"
++#include "company_base.h"
++#include "company_func.h"
++#include "window_func.h"
++
++#include "table/strings.h"
++
++#include "safeguards.h"
++
++/**
++ * Open a trade: either a market execution (Buy / Sell at the current price) or a pending order.
++ * Profit and loss are settled when the position is closed; opening only needs free margin.
++ * @param flags Type of operation.
++ * @param target Company whose shares (symbol) are traded. Must not be the company giving the command.
++ * @param type Order type.
++ * @param volume Volume in hundredths of a LOT (100 = 1.00 LOT).
++ * @param price Trigger price; only used for pending orders.
++ * @param sl Stop Loss, 0 for none.
++ * @param tp Take Profit, 0 for none.
++ * @return Zero cost, or an error.
++ */
++CommandCost CmdStockOpen(DoCommandFlags flags, CompanyID target, StockOrderType type, uint32_t volume, Money price_in, Money sl_in, Money tp_in)
++{
++	const int64_t price = price_in, sl = sl_in, tp = tp_in;
++	const Company *owner = Company::GetIfValid(_current_company);
++	if (owner == nullptr) return CMD_ERROR;
++	if (!Company::IsValidID(target)) return CMD_ERROR;
++	if (target == _current_company) return CommandCost(STR_STOCK_ERROR_OWN_COMPANY);
++	if (type >= StockOrderType::End) return CMD_ERROR;
++	if (volume == 0 || volume > STOCK_MAX_VOLUME) return CommandCost(STR_STOCK_ERROR_BAD_VOLUME);
++	if (_stock_market.CountOrders(_current_company) >= STOCK_MAX_ORDERS_PER_COMPANY) return CommandCost(STR_STOCK_ERROR_TOO_MANY);
++
++	const int64_t bid = GetStockBid(target);
++	const int64_t ask = GetStockAsk(target);
++	const bool market = type == StockOrderType::Buy || type == StockOrderType::Sell;
++	const bool buy = IsStockBuy(type);
++
++	int64_t entry = 0;
++	if (market) {
++		entry = buy ? ask : bid;
++	} else {
++		entry = price;
++		if (entry <= 0) return CommandCost(STR_STOCK_ERROR_BAD_PRICE);
++		/* A pending order must lie on the correct side of the current price. */
++		switch (type) {
++			case StockOrderType::BuyLimit:  if (entry >= ask) return CommandCost(STR_STOCK_ERROR_BAD_PRICE); break;
++			case StockOrderType::BuyStop:   if (entry <= ask) return CommandCost(STR_STOCK_ERROR_BAD_PRICE); break;
++			case StockOrderType::SellLimit: if (entry <= bid) return CommandCost(STR_STOCK_ERROR_BAD_PRICE); break;
++			case StockOrderType::SellStop:  if (entry >= bid) return CommandCost(STR_STOCK_ERROR_BAD_PRICE); break;
++			default: break;
++		}
++	}
++
++	/* Stop Loss and Take Profit must be on the correct side of the entry price. */
++	if (sl < 0 || tp < 0) return CommandCost(STR_STOCK_ERROR_BAD_STOPS);
++	if (buy) {
++		if ((sl != 0 && sl >= entry) || (tp != 0 && tp <= entry)) return CommandCost(STR_STOCK_ERROR_BAD_STOPS);
++	} else {
++		if ((sl != 0 && sl <= entry) || (tp != 0 && tp >= entry)) return CommandCost(STR_STOCK_ERROR_BAD_STOPS);
++	}
++
++	if (market) {
++		StockOrder probe;
++		probe.price = entry;
++		probe.volume = volume;
++		if (GetStockUsedMargin(_current_company) + GetStockMargin(probe) > GetStockEquity(_current_company)) {
++			return CommandCost(STR_STOCK_ERROR_NO_MARGIN);
++		}
++	}
++
++	if (flags.Test(DoCommandFlag::Execute)) {
++		StockOrder order;
++		order.id = _stock_market.next_id++;
++		order.owner = _current_company.base();
++		order.target = target.base();
++		order.type = type;
++		order.volume = volume;
++		order.price = entry;
++		order.sl = sl;
++		order.tp = tp;
++		(market ? _stock_market.positions : _stock_market.pending).push_back(order);
++		InvalidateWindowData(WC_STOCK_MARKET, 0);
++	}
++
++	return CommandCost(EXPENSES_OTHER);
++}
++
++/**
++ * Close an open position (the profit or loss is added to the company money) or cancel a pending order.
++ * @param flags Type of operation.
++ * @param id Number of the position or order.
++ * @return Zero cost, or an error.
++ */
++CommandCost CmdStockClose(DoCommandFlags flags, uint32_t id)
++{
++	if (!Company::IsValidID(_current_company)) return CMD_ERROR;
++
++	StockOrder *position = _stock_market.FindPosition(id, _current_company);
++	if (position != nullptr) {
++		if (flags.Test(DoCommandFlag::Execute)) {
++			const StockOrder closed = *position;
++			const int64_t profit = GetStockProfit(closed);
++			_stock_market.positions.erase(_stock_market.positions.begin() + (position - _stock_market.positions.data()));
++			PayStockProfit(_current_company, profit);
++			_stock_market.AddHistory(closed, IsStockBuy(closed.type) ? GetStockBid(CompanyID{closed.target}) : GetStockAsk(CompanyID{closed.target}), profit, StockCloseReason::Manual);
++			InvalidateWindowData(WC_STOCK_MARKET, 0);
++		}
++		return CommandCost(EXPENSES_OTHER);
++	}
++
++	StockOrder *order = _stock_market.FindPending(id, _current_company);
++	if (order != nullptr) {
++		if (flags.Test(DoCommandFlag::Execute)) {
++			_stock_market.pending.erase(_stock_market.pending.begin() + (order - _stock_market.pending.data()));
++			InvalidateWindowData(WC_STOCK_MARKET, 0);
++		}
++		return CommandCost(EXPENSES_OTHER);
++	}
++
++	return CommandCost(STR_STOCK_ERROR_NO_ORDER);
++}
+diff --git a/src/stock_cmd.h b/src/stock_cmd.h
+new file mode 100644
+index 0000000..30c1687
+--- /dev/null
++++ b/src/stock_cmd.h
+@@ -0,0 +1,24 @@
++/*
++ * This file is part of OpenTTD.
++ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
++ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
++ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
++ */
++
++/** @file stock_cmd.h Command definitions related to the trading terminal. */
++
++#ifndef STOCK_CMD_H
++#define STOCK_CMD_H
++
++#include "command_type.h"
++#include "company_type.h"
++#include "economy_type.h"
++#include "stock_base.h"
++
++CommandCost CmdStockOpen(DoCommandFlags flags, CompanyID target, StockOrderType type, uint32_t volume, Money price, Money sl, Money tp);
++CommandCost CmdStockClose(DoCommandFlags flags, uint32_t id);
++
++DEF_CMD_TRAIT(CMD_STOCK_OPEN,  CmdStockOpen,  {}, CommandType::MoneyManagement)
++DEF_CMD_TRAIT(CMD_STOCK_CLOSE, CmdStockClose, {}, CommandType::MoneyManagement)
++
++#endif /* STOCK_CMD_H */
+diff --git a/src/stock_gui.cpp b/src/stock_gui.cpp
+new file mode 100644
+index 0000000..6bc0988
+--- /dev/null
++++ b/src/stock_gui.cpp
+@@ -0,0 +1,615 @@
++/*
++ * This file is part of OpenTTD.
++ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
++ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
++ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
++ */
++
++/** @file stock_gui.cpp The trading terminal: Market Watch, candlestick chart and the toolbox with open trades. */
++
++#include "stdafx.h"
++#include "3rdparty/fmt/format.h"
++#include "stock_gui.h"
++#include "stock_base.h"
++#include "stock_cmd.h"
++#include "command_func.h"
++#include "company_base.h"
++#include "company_func.h"
++#include "gfx_func.h"
++#include "palette_func.h"
++#include "strings_func.h"
++#include "window_func.h"
++#include "window_gui.h"
++#include "zoom_func.h"
++
++#include "widgets/stock_widget.h"
++
++#include "table/strings.h"
++
++#include "safeguards.h"
++
++/**
++ * Format a volume (hundredths of a LOT) as a LOT number with two decimals.
++ * @param volume Volume in hundredths of a LOT.
++ * @return For example "1.25".
++ */
++std::string StockVolumeToString(uint32_t volume)
++{
++	return fmt::format("{}.{:02}", volume / 100, volume % 100);
++}
++
++/** Text that names an order type. */
++StringID GetStockOrderTypeString(StockOrderType type)
++{
++	switch (type) {
++		case StockOrderType::Buy:       return STR_STOCK_TYPE_BUY;
++		case StockOrderType::Sell:      return STR_STOCK_TYPE_SELL;
++		case StockOrderType::BuyLimit:  return STR_STOCK_TYPE_BUY_LIMIT;
++		case StockOrderType::SellLimit: return STR_STOCK_TYPE_SELL_LIMIT;
++		case StockOrderType::BuyStop:   return STR_STOCK_TYPE_BUY_STOP;
++		case StockOrderType::SellStop:  return STR_STOCK_TYPE_SELL_STOP;
++		default: return STR_STOCK_TYPE_BUY;
++	}
++}
++
++/** The text for a close reason. */
++static StringID GetStockCloseReasonString(StockCloseReason reason)
++{
++	switch (reason) {
++		case StockCloseReason::StopLoss:   return STR_STOCK_REASON_SL;
++		case StockCloseReason::TakeProfit: return STR_STOCK_REASON_TP;
++		case StockCloseReason::StopOut:    return STR_STOCK_REASON_STOP_OUT;
++		case StockCloseReason::Delisted:   return STR_STOCK_REASON_DELISTED;
++		default:                           return STR_STOCK_REASON_MANUAL;
++	}
++}
++
++/** Economy year * 12 + month as "2026-03". */
++static std::string StockMonthToString(int32_t ym)
++{
++	const int month = ym % 12 + 1;
++	return std::to_string(ym / 12) + (month < 10 ? "-0" : "-") + std::to_string(month);
++}
++
++struct StockWindow : Window {
++	CompanyID selected = INVALID_OWNER; ///< Symbol (company) whose chart is shown.
++	Scrollbar *vscroll = nullptr;       ///< Scrollbar of the toolbox.
++	bool show_history = false;          ///< Whether the toolbox shows the closed trades instead of the open ones.
++
++	StockWindow(WindowDesc &desc) : Window(desc)
++	{
++		this->CreateNestedTree();
++		this->vscroll = this->GetScrollbar(WID_ST_TOOL_SCROLLBAR);
++		this->FinishInitNested(0);
++		this->EnsureValidSelection();
++		this->OnInvalidateData(0);
++	}
++
++	int RowHeight() const { return GetCharacterHeight(FS_NORMAL) + ScaleGUITrad(2); }
++	int HeaderHeight() const { return this->RowHeight() + ScaleGUITrad(3); }
++
++	/** Make sure #selected is a company that exists. */
++	void EnsureValidSelection()
++	{
++		if (Company::IsValidID(this->selected)) return;
++		if (Company::IsValidID(_local_company)) {
++			this->selected = _local_company;
++			return;
++		}
++		for (const Company *c : Company::Iterate()) {
++			this->selected = c->index;
++			return;
++		}
++		this->selected = INVALID_OWNER;
++	}
++
++	/** The rows of the toolbox: first the open positions, then the pending orders of the local company. */
++	std::vector<const StockOrder *> GetRows() const
++	{
++		std::vector<const StockOrder *> rows;
++		if (!Company::IsValidID(_local_company)) return rows;
++		for (const StockOrder &p : _stock_market.positions) {
++			if (p.owner == _local_company.base()) rows.push_back(&p);
++		}
++		for (const StockOrder &p : _stock_market.pending) {
++			if (p.owner == _local_company.base()) rows.push_back(&p);
++		}
++		return rows;
++	}
++
++	/** The closed trades of the local company, the newest first. */
++	std::vector<const StockClosedTrade *> GetHistoryRows() const
++	{
++		std::vector<const StockClosedTrade *> rows;
++		if (!Company::IsValidID(_local_company)) return rows;
++		for (auto it = _stock_market.history.rbegin(); it != _stock_market.history.rend(); ++it) {
++			if (it->owner == _local_company.base()) rows.push_back(&*it);
++		}
++		return rows;
++	}
++
++	void OnResize() override
++	{
++		/* The toolbox widget has no vertical resize step, so compute the number of visible rows by hand. */
++		const NWidgetBase *toolbox = this->GetWidget<NWidgetBase>(WID_ST_TOOLBOX);
++		this->vscroll->SetCapacity(static_cast<size_t>(std::max(1, (static_cast<int>(toolbox->current_y) - this->HeaderHeight()) / std::max(1, this->RowHeight()))));
++	}
++
++	void OnInvalidateData([[maybe_unused]] int data = 0, [[maybe_unused]] bool gui_scope = true) override
++	{
++		if (!gui_scope) return;
++		this->vscroll->SetCount(this->show_history ? this->GetHistoryRows().size() : this->GetRows().size());
++		this->SetDirty();
++	}
++
++	void OnPaint() override
++	{
++		this->EnsureValidSelection();
++		this->DrawWidgets();
++	}
++
++	void OnClick(Point pt, WidgetID widget, [[maybe_unused]] int click_count) override
++	{
++		switch (widget) {
++			case WID_ST_NEW_ORDER:
++				ShowStockOrderWindow(this->selected);
++				break;
++
++			case WID_ST_HISTORY:
++				this->show_history = !this->show_history;
++				this->SetWidgetLoweredState(WID_ST_HISTORY, this->show_history);
++				this->vscroll->SetPosition(0);
++				this->OnInvalidateData();
++				break;
++
++			case WID_ST_WATCH: {
++				const NWidgetBase *nw = this->GetWidget<NWidgetBase>(WID_ST_WATCH);
++				if (pt.y - nw->pos_y < this->HeaderHeight()) break;
++				const int row = (pt.y - nw->pos_y - this->HeaderHeight()) / this->RowHeight();
++				int n = 0;
++				for (const Company *c : Company::Iterate()) {
++					if (n++ == row) {
++						this->selected = c->index;
++						SetStockOrderSymbol(c->index);
++						this->SetDirty();
++						break;
++					}
++				}
++				break;
++			}
++
++			case WID_ST_TOOLBOX: {
++				if (this->show_history) break; // Closed trades have no close button.
++				const NWidgetBase *nw = this->GetWidget<NWidgetBase>(WID_ST_TOOLBOX);
++				if (pt.x - nw->pos_x < static_cast<int>(nw->current_x) - ScaleGUITrad(28)) break; // Only the close column.
++				if (pt.y - nw->pos_y < this->HeaderHeight()) break;
++				const size_t row = this->vscroll->GetScrolledRowFromWidget(pt.y, this, WID_ST_TOOLBOX, this->HeaderHeight(), this->RowHeight());
++				const std::vector<const StockOrder *> rows = this->GetRows();
++				if (row >= rows.size()) break;
++				Command<CMD_STOCK_CLOSE>::Post(STR_STOCK_ERROR_CANT_CLOSE, rows[row]->id);
++				break;
++			}
++
++			default: break;
++		}
++	}
++
++	void DrawWidget(const Rect &r, WidgetID widget) const override
++	{
++		switch (widget) {
++			case WID_ST_ACCOUNT: this->DrawAccount(r); break;
++			case WID_ST_WATCH:   this->DrawWatch(r); break;
++			case WID_ST_TITLE:   this->DrawTitle(r); break;
++			case WID_ST_SUMMARY: this->DrawSummary(r); break;
++			case WID_ST_CHART:   this->DrawChart(r); break;
++			case WID_ST_TOOLBOX: this->DrawToolbox(r); break;
++			default: break;
++		}
++	}
++
++	void DrawAccount(const Rect &r) const
++	{
++		const int top = CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL));
++		if (!Company::IsValidID(_local_company)) {
++			DrawString(r.left + 4, r.right - 4, top, STR_STOCK_SPECTATOR, TC_FROMSTRING, SA_LEFT);
++			return;
++		}
++		const int64_t balance = static_cast<int64_t>(Company::Get(_local_company)->money);
++		const int64_t floating = GetStockFloatingProfit(_local_company);
++		const int64_t margin = GetStockUsedMargin(_local_company);
++		const int64_t equity = balance + floating;
++		const int64_t level = GetStockMarginLevel(_local_company);
++		std::string text;
++		if (level < 0) {
++			text = GetString(STR_STOCK_ACCOUNT, balance, equity, margin, equity - margin);
++		} else {
++			/* Below the margin call level the line turns red; below the stop-out level positions are closed by force. */
++			text = GetString(level < STOCK_MARGIN_CALL_LEVEL ? STR_STOCK_ACCOUNT_CALL : STR_STOCK_ACCOUNT_LEVEL, balance, equity, margin, equity - margin, level);
++		}
++		DrawString(r.left + 4, r.right - 4, top, text, TC_FROMSTRING, SA_LEFT);
++	}
++
++	/** Market Watch: one row per symbol with the Bid and Ask price. */
++	void DrawWatch(const Rect &r) const
++	{
++		const int row_h = this->RowHeight();
++		const int ask_right = r.right - ScaleGUITrad(4);
++		const int bid_right = ask_right - ScaleGUITrad(74);
++		const int left = r.left + ScaleGUITrad(4);
++
++		int y = r.top + ScaleGUITrad(2);
++		DrawString(left, bid_right - ScaleGUITrad(74), y, STR_STOCK_COL_SYMBOL, TC_BLACK, SA_LEFT);
++		DrawString(bid_right - ScaleGUITrad(70), bid_right, y, STR_STOCK_COL_BID, TC_BLACK, SA_RIGHT);
++		DrawString(ask_right - ScaleGUITrad(70), ask_right, y, STR_STOCK_COL_ASK, TC_BLACK, SA_RIGHT);
++		y = r.top + this->HeaderHeight();
++		GfxDrawLine(r.left + 1, y - 2, r.right - 1, y - 2, GREY_SCALE(4));
++
++		for (const Company *c : Company::Iterate()) {
++			if (y + row_h > r.bottom) break;
++			if (c->index == this->selected) GfxFillRect(r.left + 1, y - 1, r.right - 1, y + row_h - 2, GREY_SCALE(4));
++
++			DrawString(left, bid_right - ScaleGUITrad(74), y, GetString(STR_STOCK_SYMBOL, c->index), TC_WHITE, SA_LEFT);
++			DrawString(bid_right - ScaleGUITrad(70), bid_right, y, GetString(STR_JUST_CURRENCY_SHORT, GetStockBid(c->index)), TC_LIGHT_BLUE, SA_RIGHT);
++			DrawString(ask_right - ScaleGUITrad(70), ask_right, y, GetString(STR_JUST_CURRENCY_SHORT, GetStockAsk(c->index)), TC_LIGHT_BLUE, SA_RIGHT);
++			y += row_h;
++		}
++	}
++
++	/** The price one month ago, used to show the change. */
++	int64_t GetReferencePrice() const
++	{
++		const size_t index = this->selected.base();
++		if (!_stock_market.candles[index].empty()) return _stock_market.candles[index].back().close;
++		if (_stock_market.has_current[index]) return _stock_market.current[index].open;
++		return GetStockPrice(this->selected);
++	}
++
++	void DrawTitle(const Rect &r) const
++	{
++		if (!Company::IsValidID(this->selected)) return;
++		const int top = CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL));
++		DrawString(r.left + 4, r.right - 4, top, GetString(STR_STOCK_TITLE, this->selected, GetStockBid(this->selected), GetStockAsk(this->selected)), TC_FROMSTRING, SA_LEFT);
++
++		const int64_t price = GetStockPrice(this->selected);
++		const int64_t reference = this->GetReferencePrice();
++		const int64_t tenths = reference > 0 ? (price - reference) * 1000 / reference : 0;
++		const int64_t abs_tenths = tenths < 0 ? -tenths : tenths;
++		const StringID str = tenths >= 0 ? STR_STOCK_CHANGE_UP : STR_STOCK_CHANGE_DOWN;
++		DrawString(r.left + 4, r.right - 4, top, GetString(str, abs_tenths / 10, abs_tenths % 10), TC_FROMSTRING, SA_RIGHT);
++	}
++
++	/** The summary row: P/E, EPS and dividend yield of the selected symbol. */
++	void DrawSummary(const Rect &r) const
++	{
++		if (!Company::IsValidID(this->selected)) return;
++		const int top = CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL));
++		const StockSummary s = GetStockSummary(this->selected);
++
++		std::string text;
++		if (!s.has_earnings) {
++			text = GetString(STR_STOCK_SUMMARY_NONE);
++		} else if (!s.has_pe) {
++			text = GetString(STR_STOCK_SUMMARY_NO_PE, s.eps);
++		} else {
++			text = GetString(STR_STOCK_SUMMARY, s.pe_tenths / 10, s.pe_tenths % 10, s.eps, s.yield_tenths / 10, s.yield_tenths % 10);
++		}
++		DrawString(r.left + 4, r.right - 4, top, text, TC_FROMSTRING, SA_LEFT);
++	}
++
++	void DrawChart(const Rect &r) const
++	{
++		if (!Company::IsValidID(this->selected)) return;
++		const size_t index = this->selected.base();
++
++		std::vector<StockCandle> candles = _stock_market.candles[index];
++		if (_stock_market.has_current[index]) candles.push_back(_stock_market.current[index]);
++
++		const int small_height = GetCharacterHeight(FS_SMALL);
++		const int axis_width = ScaleGUITrad(64);
++		const int left = r.left + axis_width;
++		const int right = r.right - ScaleGUITrad(6);
++		const int top = r.top + ScaleGUITrad(6);
++		const int full_bottom = r.bottom - small_height - ScaleGUITrad(4);
++		if (right - left < 20 || full_bottom - top < 20) return;
++
++		/* The lower quarter of the chart shows the RSI, when there is enough room for it. */
++		const int rsi_height = (full_bottom - top) >= ScaleGUITrad(150) ? (full_bottom - top) / 4 : 0;
++		const int gap = rsi_height > 0 ? ScaleGUITrad(4) : 0;
++		const int bottom = full_bottom - rsi_height - gap;
++		if (bottom - top < 20) return;
++
++		GfxFillRect(left, top, right, bottom, GREY_SCALE(2));
++		if (rsi_height > 0) GfxFillRect(left, bottom + gap, right, full_bottom, GREY_SCALE(2));
++
++		if (candles.empty()) return;
++
++		const int slot = std::max(1, ScaleGUITrad(10));
++		const int body_half = ScaleGUITrad(3);
++		const size_t max_visible = static_cast<size_t>(std::max(1, (right - left) / slot));
++		const size_t first = candles.size() > max_visible ? candles.size() - max_visible : 0;
++
++		int64_t lo = INT64_MAX;
++		int64_t hi = INT64_MIN;
++		for (size_t i = first; i < candles.size(); i++) {
++			lo = std::min(lo, candles[i].low);
++			hi = std::max(hi, candles[i].high);
++		}
++		const int64_t margin = std::max<int64_t>((hi - lo) / 10, 1);
++		lo = std::max<int64_t>(lo - margin, 0);
++		hi += margin;
++		const double range = static_cast<double>(hi - lo);
++
++		auto to_y = [&](int64_t value) {
++			return bottom - static_cast<int>(static_cast<double>(value - lo) * (bottom - top) / range);
++		};
++
++		/* Horizontal grid lines with price labels. */
++		for (int i = 0; i <= 4; i++) {
++			const int64_t value = lo + (hi - lo) * i / 4;
++			const int y = to_y(value);
++			GfxDrawLine(left, y, right, y, GREY_SCALE(4));
++			DrawString(r.left + 2, left - 4, y - small_height / 2, GetString(STR_JUST_CURRENCY_SHORT, value), TC_WHITE, SA_RIGHT, false, FS_SMALL);
++		}
++
++		/* Candles, the newest at the right edge. */
++		const int count = static_cast<int>(candles.size() - first);
++		const int x0 = right - count * slot;
++		for (int i = 0; i < count; i++) {
++			const StockCandle &c = candles[first + i];
++			const int cx = x0 + i * slot + slot / 2;
++			const PixelColour colour = c.close >= c.open ? PC_GREEN : PC_RED;
++
++			GfxDrawLine(cx, to_y(c.high), cx, to_y(c.low), PC_WHITE);
++
++			const int body_top = to_y(std::max(c.open, c.close));
++			int body_bottom = to_y(std::min(c.open, c.close));
++			if (body_bottom <= body_top) body_bottom = body_top + 1;
++			GfxFillRect(cx - body_half, body_top, cx + body_half, body_bottom, colour);
++
++			if (c.ym % 12 == 0) {
++				GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(3), PC_WHITE);
++				DrawString(cx - ScaleGUITrad(20), cx + ScaleGUITrad(20), full_bottom + ScaleGUITrad(3), GetString(STR_JUST_INT, c.ym / 12), TC_WHITE, SA_HOR_CENTER, false, FS_SMALL);
++			}
++		}
++
++		/* Moving average of the closing price over 20 candles, drawn as a yellow line. */
++		static constexpr size_t MA_PERIOD = 20;
++		int prev_x = 0;
++		int prev_y = 0;
++		bool have_prev = false;
++		for (size_t i = first; i < candles.size(); i++) {
++			if (i + 1 < MA_PERIOD) {
++				have_prev = false;
++				continue;
++			}
++			int64_t sum = 0;
++			for (size_t k = i + 1 - MA_PERIOD; k <= i; k++) sum += candles[k].close;
++			const int x = x0 + static_cast<int>(i - first) * slot + slot / 2;
++			const int y = std::clamp(to_y(sum / static_cast<int64_t>(MA_PERIOD)), top, bottom);
++			if (have_prev) GfxDrawLine(prev_x, prev_y, x, y, PC_YELLOW);
++			prev_x = x;
++			prev_y = y;
++			have_prev = true;
++		}
++
++		/* RSI over 14 candles in the lower pane, with the 30 and 70 levels. */
++		if (rsi_height > 0) {
++			static constexpr size_t RSI_PERIOD = 14;
++			const int rsi_top = bottom + gap;
++			auto rsi_y = [&](int64_t value) {
++				return full_bottom - static_cast<int>(value * (full_bottom - rsi_top) / 100);
++			};
++
++			for (const int level : {30, 70}) {
++				const int y = rsi_y(level);
++				GfxDrawLine(left, y, right, y, GREY_SCALE(4));
++				DrawString(r.left + 2, left - 4, y - small_height / 2, GetString(STR_JUST_INT, level), TC_WHITE, SA_RIGHT, false, FS_SMALL);
++			}
++
++			int prev_rx = 0;
++			int prev_ry = 0;
++			bool have_prev_rsi = false;
++			for (size_t i = first; i < candles.size(); i++) {
++				if (i < RSI_PERIOD) {
++					have_prev_rsi = false;
++					continue;
++				}
++				int64_t gain = 0;
++				int64_t loss = 0;
++				for (size_t k = i + 1 - RSI_PERIOD; k <= i; k++) {
++					const int64_t change = candles[k].close - candles[k - 1].close;
++					if (change > 0) {
++						gain += change;
++					} else {
++						loss -= change;
++					}
++				}
++				const int64_t total = gain + loss;
++				const int64_t rsi = total > 0 ? gain * 100 / total : 50;
++				const int x = x0 + static_cast<int>(i - first) * slot + slot / 2;
++				const int y = rsi_y(rsi);
++				if (have_prev_rsi) GfxDrawLine(prev_rx, prev_ry, x, y, PC_LIGHT_BLUE);
++				prev_rx = x;
++				prev_ry = y;
++				have_prev_rsi = true;
++			}
++		}
++	}
++
++	/** The toolbox in history mode: the closed trades of the local company, the newest first. */
++	void DrawHistory(const Rect &r) const
++	{
++		const int row_h = this->RowHeight();
++		const int header_h = this->HeaderHeight();
++
++		/* The same column edges as the open trades. */
++		const int c_id = r.left + ScaleGUITrad(4);
++		const int c_symbol = r.left + ScaleGUITrad(48);
++		const int c_type = r.left + ScaleGUITrad(168);
++		const int c_volume = r.left + ScaleGUITrad(300);
++		const int c_open = r.left + ScaleGUITrad(380);
++		const int c_close = r.left + ScaleGUITrad(450);
++		const int c_date = r.left + ScaleGUITrad(520);
++		const int c_reason = r.left + ScaleGUITrad(590);
++		const int c_profit = r.left + ScaleGUITrad(680);
++
++		int y = r.top + ScaleGUITrad(2);
++		DrawString(c_id, c_symbol, y, STR_STOCK_COL_ID, TC_BLACK, SA_LEFT);
++		DrawString(c_symbol, c_type, y, STR_STOCK_COL_SYMBOL, TC_BLACK, SA_LEFT);
++		DrawString(c_type, c_volume - ScaleGUITrad(60), y, STR_STOCK_COL_TYPE, TC_BLACK, SA_LEFT);
++		DrawString(c_volume - ScaleGUITrad(60), c_volume, y, STR_STOCK_COL_VOLUME, TC_BLACK, SA_RIGHT);
++		DrawString(c_volume, c_open, y, STR_STOCK_COL_OPEN, TC_BLACK, SA_RIGHT);
++		DrawString(c_open, c_close, y, STR_STOCK_COL_CLOSE_PRICE, TC_BLACK, SA_RIGHT);
++		DrawString(c_close, c_date, y, STR_STOCK_COL_CLOSED, TC_BLACK, SA_RIGHT);
++		DrawString(c_date, c_reason, y, STR_STOCK_COL_REASON, TC_BLACK, SA_RIGHT);
++		DrawString(c_reason, c_profit, y, STR_STOCK_COL_PROFIT, TC_BLACK, SA_RIGHT);
++		GfxDrawLine(r.left + 1, r.top + header_h - 2, r.right - 1, r.top + header_h - 2, GREY_SCALE(4));
++
++		const std::vector<const StockClosedTrade *> rows = this->GetHistoryRows();
++		if (rows.empty()) {
++			DrawString(c_id, r.right - 4, r.top + header_h + 2, STR_STOCK_HISTORY_EMPTY, TC_FROMSTRING, SA_LEFT);
++			return;
++		}
++
++		const size_t first = this->vscroll->GetPosition();
++		const size_t last = std::min<size_t>(rows.size(), first + this->vscroll->GetCapacity());
++		y = r.top + header_h;
++		for (size_t i = first; i < last; i++, y += row_h) {
++			const StockClosedTrade &t = *rows[i];
++			const CompanyID target{t.target};
++
++			DrawString(c_id, c_symbol, y, GetString(STR_JUST_INT, t.id), TC_WHITE, SA_LEFT);
++			DrawString(c_symbol, c_type, y, Company::IsValidID(target) ? GetString(STR_STOCK_SYMBOL, target) : GetString(STR_STOCK_HISTORY_GONE), TC_WHITE, SA_LEFT);
++			DrawString(c_type, c_volume - ScaleGUITrad(60), y, GetStockOrderTypeString(t.type), IsStockBuy(t.type) ? TC_LIGHT_BLUE : TC_ORANGE, SA_LEFT);
++			DrawString(c_volume - ScaleGUITrad(60), c_volume, y, StockVolumeToString(t.volume), TC_WHITE, SA_RIGHT);
++			DrawString(c_volume, c_open, y, GetString(STR_JUST_CURRENCY_LONG, t.open_price), TC_WHITE, SA_RIGHT);
++			DrawString(c_open, c_close, y, GetString(STR_JUST_CURRENCY_LONG, t.close_price), TC_WHITE, SA_RIGHT);
++			DrawString(c_close, c_date, y, StockMonthToString(t.closed_ym), TC_WHITE, SA_RIGHT);
++			DrawString(c_date, c_reason, y, GetStockCloseReasonString(t.reason), t.reason == StockCloseReason::StopOut ? TC_RED : TC_WHITE, SA_RIGHT);
++			DrawString(c_reason, c_profit, y, GetString(STR_JUST_CURRENCY_LONG, t.profit), t.profit >= 0 ? TC_GREEN : TC_RED, SA_RIGHT);
++		}
++	}
++
++	/** The toolbox: open positions with floating profit, then pending orders. */
++	void DrawToolbox(const Rect &r) const
++	{
++		if (this->show_history) {
++			this->DrawHistory(r);
++			return;
++		}
++
++		const int row_h = this->RowHeight();
++		const int header_h = this->HeaderHeight();
++
++		/* Column edges. */
++		const int c_id = r.left + ScaleGUITrad(4);
++		const int c_symbol = r.left + ScaleGUITrad(48);
++		const int c_type = r.left + ScaleGUITrad(168);
++		const int c_volume = r.left + ScaleGUITrad(300);
++		const int c_open = r.left + ScaleGUITrad(380);
++		const int c_sl = r.left + ScaleGUITrad(450);
++		const int c_tp = r.left + ScaleGUITrad(520);
++		const int c_price = r.left + ScaleGUITrad(590);
++		const int c_profit = r.left + ScaleGUITrad(680);
++		const int close_left = r.right - ScaleGUITrad(26);
++
++		int y = r.top + ScaleGUITrad(2);
++		DrawString(c_id, c_symbol, y, STR_STOCK_COL_ID, TC_BLACK, SA_LEFT);
++		DrawString(c_symbol, c_type, y, STR_STOCK_COL_SYMBOL, TC_BLACK, SA_LEFT);
++		DrawString(c_type, c_volume - ScaleGUITrad(60), y, STR_STOCK_COL_TYPE, TC_BLACK, SA_LEFT);
++		DrawString(c_volume - ScaleGUITrad(60), c_volume, y, STR_STOCK_COL_VOLUME, TC_BLACK, SA_RIGHT);
++		DrawString(c_volume, c_open, y, STR_STOCK_COL_OPEN, TC_BLACK, SA_RIGHT);
++		DrawString(c_open, c_sl, y, STR_STOCK_COL_SL, TC_BLACK, SA_RIGHT);
++		DrawString(c_sl, c_tp, y, STR_STOCK_COL_TP, TC_BLACK, SA_RIGHT);
++		DrawString(c_tp, c_price, y, STR_STOCK_COL_PRICE, TC_BLACK, SA_RIGHT);
++		DrawString(c_price, c_profit, y, STR_STOCK_COL_PROFIT, TC_BLACK, SA_RIGHT);
++		GfxDrawLine(r.left + 1, r.top + header_h - 2, r.right - 1, r.top + header_h - 2, GREY_SCALE(4));
++
++		const std::vector<const StockOrder *> rows = this->GetRows();
++		if (rows.empty()) {
++			DrawString(c_id, r.right - 4, r.top + header_h + 2, STR_STOCK_EMPTY, TC_FROMSTRING, SA_LEFT);
++			return;
++		}
++
++		const size_t first = this->vscroll->GetPosition();
++		const size_t last = std::min<size_t>(rows.size(), first + this->vscroll->GetCapacity());
++		y = r.top + header_h;
++		for (size_t i = first; i < last; i++, y += row_h) {
++			const StockOrder &o = *rows[i];
++			const CompanyID target{o.target};
++			const bool is_position = o.type == StockOrderType::Buy || o.type == StockOrderType::Sell;
++
++			DrawString(c_id, c_symbol, y, GetString(STR_JUST_INT, o.id), TC_WHITE, SA_LEFT);
++			DrawString(c_symbol, c_type, y, GetString(STR_STOCK_SYMBOL, target), TC_WHITE, SA_LEFT);
++			DrawString(c_type, c_volume - ScaleGUITrad(60), y, GetStockOrderTypeString(o.type), IsStockBuy(o.type) ? TC_LIGHT_BLUE : TC_ORANGE, SA_LEFT);
++			DrawString(c_volume - ScaleGUITrad(60), c_volume, y, StockVolumeToString(o.volume), TC_WHITE, SA_RIGHT);
++			DrawString(c_volume, c_open, y, GetString(STR_JUST_CURRENCY_LONG, o.price), TC_WHITE, SA_RIGHT);
++			DrawString(c_open, c_sl, y, o.sl != 0 ? GetString(STR_JUST_CURRENCY_LONG, o.sl) : std::string("-"), TC_WHITE, SA_RIGHT);
++			DrawString(c_sl, c_tp, y, o.tp != 0 ? GetString(STR_JUST_CURRENCY_LONG, o.tp) : std::string("-"), TC_WHITE, SA_RIGHT);
++
++			const int64_t now = IsStockBuy(o.type) ? GetStockBid(target) : GetStockAsk(target);
++			DrawString(c_tp, c_price, y, GetString(STR_JUST_CURRENCY_LONG, now), TC_WHITE, SA_RIGHT);
++
++			if (is_position) {
++				const int64_t profit = GetStockProfit(o);
++				DrawString(c_price, c_profit, y, GetString(STR_JUST_CURRENCY_LONG, profit), profit >= 0 ? TC_GREEN : TC_RED, SA_RIGHT);
++			} else {
++				DrawString(c_price, c_profit, y, STR_STOCK_PENDING, TC_GREY, SA_RIGHT);
++			}
++
++			/* The close button. */
++			GfxFillRect(close_left, y, r.right - ScaleGUITrad(4), y + row_h - 3, GREY_SCALE(5));
++			DrawString(close_left, r.right - ScaleGUITrad(4), y, STR_STOCK_CLOSE_X, TC_WHITE, SA_HOR_CENTER);
++		}
++	}
++};
++
++static constexpr std::initializer_list<NWidgetPart> _nested_stock_widgets = {
++	NWidget(NWID_HORIZONTAL),
++		NWidget(WWT_CLOSEBOX, COLOUR_GREY),
++		NWidget(WWT_CAPTION, COLOUR_GREY), SetStringTip(STR_STOCK_CAPTION),
++		NWidget(WWT_SHADEBOX, COLOUR_GREY),
++		NWidget(WWT_DEFSIZEBOX, COLOUR_GREY),
++		NWidget(WWT_STICKYBOX, COLOUR_GREY),
++	EndContainer(),
++	NWidget(NWID_HORIZONTAL),
++		NWidget(WWT_PUSHTXTBTN, COLOUR_LIGHT_BLUE, WID_ST_NEW_ORDER), SetMinimalSize(110, 14), SetStringTip(STR_STOCK_NEW_ORDER, STR_STOCK_TIP_NEW_ORDER),
++		NWidget(WWT_TEXTBTN, COLOUR_LIGHT_BLUE, WID_ST_HISTORY), SetMinimalSize(110, 14), SetStringTip(STR_STOCK_HISTORY, STR_STOCK_TIP_HISTORY),
++		NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_ACCOUNT), SetMinimalSize(520, 14), SetResize(1, 0), SetFill(1, 0),
++		EndContainer(),
++	EndContainer(),
++	NWidget(NWID_HORIZONTAL),
++		NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_WATCH), SetMinimalSize(230, 200), SetFill(0, 1), SetToolTip(STR_STOCK_TIP_WATCH),
++		EndContainer(),
++		NWidget(NWID_VERTICAL),
++			NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_TITLE), SetMinimalSize(400, 16), SetResize(1, 0), SetFill(1, 0),
++			EndContainer(),
++			NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_SUMMARY), SetMinimalSize(400, 16), SetResize(1, 0), SetFill(1, 0), SetToolTip(STR_STOCK_TIP_SUMMARY),
++			EndContainer(),
++			NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_CHART), SetMinimalSize(400, 184), SetResize(1, 1), SetFill(1, 1),
++			EndContainer(),
++		EndContainer(),
++	EndContainer(),
++	NWidget(NWID_HORIZONTAL),
++		NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_TOOLBOX), SetMinimalSize(630, 100), SetResize(1, 0), SetFill(1, 1), SetScrollbar(WID_ST_TOOL_SCROLLBAR), SetToolTip(STR_STOCK_TIP_TOOLBOX),
++		EndContainer(),
++		NWidget(NWID_VERTICAL),
++			NWidget(NWID_VSCROLLBAR, COLOUR_GREY, WID_ST_TOOL_SCROLLBAR),
++			NWidget(WWT_RESIZEBOX, COLOUR_GREY),
++		EndContainer(),
++	EndContainer(),
++};
++
++static WindowDesc _stock_desc(
++	WDP_AUTO, "stock_market", 880, 440,
++	WC_STOCK_MARKET, WC_NONE,
++	{},
++	_nested_stock_widgets
++);
++
++/** Open the trading terminal, or bring it to the front when it is already open. */
++void ShowStockWindow()
++{
++	if (BringWindowToFrontById(WC_STOCK_MARKET, 0) != nullptr) return;
++	new StockWindow(_stock_desc);
++}
+diff --git a/src/stock_gui.h b/src/stock_gui.h
+new file mode 100644
+index 0000000..a858aee
+--- /dev/null
++++ b/src/stock_gui.h
+@@ -0,0 +1,25 @@
++/*
++ * This file is part of OpenTTD.
++ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
++ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
++ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
++ */
++
++/** @file stock_gui.h Functions related to the trading terminal windows. */
++
++#ifndef STOCK_GUI_H
++#define STOCK_GUI_H
++
++#include "company_type.h"
++#include "stock_base.h"
++#include "strings_type.h"
++#include <string>
++
++void ShowStockWindow();
++void ShowStockOrderWindow(CompanyID symbol);
++void SetStockOrderSymbol(CompanyID symbol);
++
++std::string StockVolumeToString(uint32_t volume);
++StringID GetStockOrderTypeString(StockOrderType type);
++
++#endif /* STOCK_GUI_H */
+diff --git a/src/stock_order_gui.cpp b/src/stock_order_gui.cpp
+new file mode 100644
+index 0000000..60e3b27
+--- /dev/null
++++ b/src/stock_order_gui.cpp
+@@ -0,0 +1,337 @@
++/*
++ * This file is part of OpenTTD.
++ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
++ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
++ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
++ */
++
++/** @file stock_order_gui.cpp The New Order window of the trading terminal (market execution and pending orders). */
++
++#include "stdafx.h"
++#include "stock_gui.h"
++#include "stock_base.h"
++#include "stock_cmd.h"
++#include "command_func.h"
++#include "company_base.h"
++#include "company_func.h"
++#include "currency.h"
++#include "gfx_func.h"
++#include "querystring_gui.h"
++#include "strings_func.h"
++#include "window_func.h"
++#include "window_gui.h"
++#include "zoom_func.h"
++
++#include "widgets/stock_widget.h"
++
++#include "table/strings.h"
++
++#include "safeguards.h"
++
++/**
++ * Read a number the player typed. Both '.' and ',' are accepted as decimal separator.
++ * @param text The text of the edit box.
++ * @param[out] value The parsed value.
++ * @return True when the text holds a valid number, false when it is empty or invalid.
++ */
++static bool ParseNumber(std::string_view text, double &value)
++{
++	std::string s(text);
++	for (char &c : s) {
++		if (c == ',') c = '.';
++	}
++	const size_t begin = s.find_first_not_of(' ');
++	if (begin == std::string::npos) return false;
++	s = s.substr(begin);
++
++	char *end = nullptr;
++	value = std::strtod(s.c_str(), &end);
++	if (end == s.c_str()) return false;
++	while (*end == ' ') end++;
++	return *end == '\0' && std::isfinite(value);
++}
++
++/** Convert a price the player typed (in the display currency) to internal money. */
++static int64_t DisplayToMoney(double value)
++{
++	const double rate = std::max<double>(1.0, GetCurrency().rate);
++	return static_cast<int64_t>(std::llround(value / rate));
++}
++
++struct StockOrderWindow : Window {
++	/** The pending order types, in the same order as the type buttons after the first one. */
++	static constexpr StockOrderType PENDING_TYPES[] = {
++		StockOrderType::BuyLimit, StockOrderType::SellLimit, StockOrderType::BuyStop, StockOrderType::SellStop,
++	};
++
++	CompanyID symbol = INVALID_OWNER; ///< Symbol (company) that is traded.
++	int type_index = 0;               ///< 0 = Market Execution, 1..4 = the pending order types.
++
++	QueryString volume_editbox{16}; ///< Volume in LOT.
++	QueryString price_editbox{24};  ///< Price of a pending order.
++	QueryString sl_editbox{24};     ///< Stop Loss.
++	QueryString tp_editbox{24};     ///< Take Profit.
++
++	StockOrderWindow(WindowDesc &desc, CompanyID symbol) : Window(desc), symbol(symbol)
++	{
++		this->CreateNestedTree();
++		this->FinishInitNested(0);
++
++		this->querystrings[WID_SO_VOLUME] = &this->volume_editbox;
++		this->querystrings[WID_SO_PRICE] = &this->price_editbox;
++		this->querystrings[WID_SO_SL] = &this->sl_editbox;
++		this->querystrings[WID_SO_TP] = &this->tp_editbox;
++		this->volume_editbox.text.Assign("1.00");
++
++		this->EnsureValidSymbol();
++		this->UpdateStates();
++	}
++
++	/** Whether the shares of this company may be traded: it must exist and not be the company of the local player. */
++	static bool IsTradable(CompanyID company)
++	{
++		return Company::IsValidID(company) && company != _local_company;
++	}
++
++	/** Make sure #symbol is a tradable company; pick the first one when it is not. INVALID_OWNER when there is none. */
++	void EnsureValidSymbol()
++	{
++		if (IsTradable(this->symbol)) return;
++		this->symbol = INVALID_OWNER;
++		for (const Company *c : Company::Iterate()) {
++			if (!IsTradable(c->index)) continue;
++			this->symbol = c->index;
++			return;
++		}
++	}
++
++	/** Update which buttons are pressed and usable. */
++	void UpdateStates()
++	{
++		for (int i = 0; i < 5; i++) {
++			this->SetWidgetLoweredState(WID_SO_TYPE_MARKET + i, i == this->type_index);
++		}
++		const bool market = this->type_index == 0;
++		this->SetWidgetDisabledState(WID_SO_PRICE, market);
++		this->SetWidgetDisabledState(WID_SO_SELL, !market);
++		this->SetWidgetDisabledState(WID_SO_BUY, !market);
++		this->SetWidgetDisabledState(WID_SO_PLACE, market);
++		this->SetDirty();
++	}
++
++	void SetSymbol(CompanyID company)
++	{
++		if (!IsTradable(company)) return;
++		this->symbol = company;
++		this->SetDirty();
++	}
++
++	void CycleSymbol(bool forward)
++	{
++		std::vector<CompanyID> ids;
++		for (const Company *c : Company::Iterate()) {
++			if (IsTradable(c->index)) ids.push_back(c->index);
++		}
++		if (ids.empty()) return;
++
++		size_t pos = 0;
++		for (size_t i = 0; i < ids.size(); i++) {
++			if (ids[i] == this->symbol) pos = i;
++		}
++		pos = (pos + (forward ? 1 : ids.size() - 1)) % ids.size();
++		this->SetSymbol(ids[pos]);
++	}
++
++	/** Volume the player typed, in hundredths of a LOT. 0 when invalid. */
++	uint32_t GetVolume() const
++	{
++		double lots = 0;
++		if (!ParseNumber(this->volume_editbox.text.GetText(), lots) || lots <= 0) return 0;
++		const double units = std::round(lots * 100.0);
++		if (units < 1 || units > STOCK_MAX_VOLUME) return 0;
++		return static_cast<uint32_t>(units);
++	}
++
++	/** A price that can be left empty: 0 when empty, -1 when invalid. */
++	static int64_t GetOptionalPrice(const QueryString &editbox)
++	{
++		double value = 0;
++		const std::string_view text = editbox.text.GetText();
++		if (text.find_first_not_of(' ') == std::string_view::npos) return 0;
++		if (!ParseNumber(text, value) || value <= 0) return -1;
++		return DisplayToMoney(value);
++	}
++
++	void Send(StockOrderType type)
++	{
++		if (!Company::IsValidID(_local_company) || !IsTradable(this->symbol)) return;
++
++		const bool market = type == StockOrderType::Buy || type == StockOrderType::Sell;
++		int64_t price = 0;
++		if (!market) price = GetOptionalPrice(this->price_editbox);
++
++		Command<CMD_STOCK_OPEN>::Post(STR_STOCK_ERROR_CANT_OPEN, this->symbol, type, this->GetVolume(), Money(price),
++				Money(GetOptionalPrice(this->sl_editbox)), Money(GetOptionalPrice(this->tp_editbox)));
++	}
++
++	void OnPaint() override
++	{
++		this->EnsureValidSymbol();
++		this->DrawWidgets();
++	}
++
++	void OnClick([[maybe_unused]] Point pt, WidgetID widget, [[maybe_unused]] int click_count) override
++	{
++		switch (widget) {
++			case WID_SO_PREV: this->CycleSymbol(false); break;
++			case WID_SO_NEXT: this->CycleSymbol(true); break;
++
++			case WID_SO_TYPE_MARKET:
++			case WID_SO_TYPE_BUY_LIMIT:
++			case WID_SO_TYPE_SELL_LIMIT:
++			case WID_SO_TYPE_BUY_STOP:
++			case WID_SO_TYPE_SELL_STOP:
++				this->type_index = widget - WID_SO_TYPE_MARKET;
++				this->UpdateStates();
++				break;
++
++			case WID_SO_SELL: this->Send(StockOrderType::Sell); break;
++			case WID_SO_BUY:  this->Send(StockOrderType::Buy); break;
++			case WID_SO_PLACE:
++				if (this->type_index >= 1 && this->type_index <= 4) this->Send(PENDING_TYPES[this->type_index - 1]);
++				break;
++
++			default: break;
++		}
++	}
++
++	void OnEditboxChanged([[maybe_unused]] WidgetID widget) override
++	{
++		this->SetWidgetDirty(WID_SO_INFO);
++	}
++
++	void OnInvalidateData([[maybe_unused]] int data = 0, [[maybe_unused]] bool gui_scope = true) override
++	{
++		if (gui_scope) this->SetDirty();
++	}
++
++	void DrawWidget(const Rect &r, WidgetID widget) const override
++	{
++		if (!Company::IsValidID(this->symbol)) return;
++		const int top = CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL));
++
++		switch (widget) {
++			case WID_SO_SYMBOL:
++				DrawString(r.left + 4, r.right - 4, top, GetString(STR_STOCK_SYMBOL, this->symbol), TC_WHITE, SA_HOR_CENTER);
++				break;
++
++			case WID_SO_PRICES:
++				DrawString(r.left + 4, r.right - 4, top, GetString(STR_STOCK_ORDER_PRICES, GetStockBid(this->symbol), GetStockAsk(this->symbol)), TC_FROMSTRING, SA_HOR_CENTER);
++				break;
++
++			case WID_SO_INFO: {
++				const uint32_t volume = this->GetVolume();
++				const int64_t price = IsStockBuy(this->type_index == 0 ? StockOrderType::Buy : PENDING_TYPES[std::clamp(this->type_index, 1, 4) - 1]) ? GetStockAsk(this->symbol) : GetStockBid(this->symbol);
++				const int64_t value = price * static_cast<int64_t>(volume);
++				DrawString(r.left + 4, r.right - 4, top, GetString(STR_STOCK_ORDER_INFO, static_cast<int64_t>(volume), value, value / STOCK_MARGIN_DIVISOR), TC_FROMSTRING, SA_LEFT);
++				break;
++			}
++
++			default: break;
++		}
++	}
++};
++
++static constexpr std::initializer_list<NWidgetPart> _nested_stock_order_widgets = {
++	NWidget(NWID_HORIZONTAL),
++		NWidget(WWT_CLOSEBOX, COLOUR_GREY),
++		NWidget(WWT_CAPTION, COLOUR_GREY), SetStringTip(STR_STOCK_ORDER_CAPTION),
++		NWidget(WWT_SHADEBOX, COLOUR_GREY),
++		NWidget(WWT_STICKYBOX, COLOUR_GREY),
++	EndContainer(),
++	NWidget(WWT_PANEL, COLOUR_GREY),
++		NWidget(NWID_VERTICAL), SetPIP(4, 3, 4),
++			/* Symbol. */
++			NWidget(NWID_HORIZONTAL), SetPIP(4, 2, 4),
++				NWidget(WWT_TEXT, INVALID_COLOUR), SetStringTip(STR_STOCK_ORDER_LABEL_SYMBOL), SetMinimalSize(96, 14), SetFill(0, 1),
++				NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_SO_PREV), SetMinimalSize(22, 14), SetStringTip(STR_STOCK_PREV, STR_STOCK_TIP_PREV),
++				NWidget(WWT_PANEL, COLOUR_GREY, WID_SO_SYMBOL), SetMinimalSize(160, 14), SetResize(1, 0), SetFill(1, 0),
++				EndContainer(),
++				NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_SO_NEXT), SetMinimalSize(22, 14), SetStringTip(STR_STOCK_NEXT, STR_STOCK_TIP_NEXT),
++			EndContainer(),
++			NWidget(NWID_HORIZONTAL), SetPIP(4, 0, 4),
++				NWidget(WWT_PANEL, COLOUR_GREY, WID_SO_PRICES), SetMinimalSize(300, 14), SetResize(1, 0), SetFill(1, 0),
++				EndContainer(),
++			EndContainer(),
++			/* Order type. */
++			NWidget(NWID_HORIZONTAL, NWidContainerFlag::EqualSize), SetPIP(4, 1, 4),
++				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_SO_TYPE_MARKET), SetFill(1, 0), SetResize(1, 0), SetStringTip(STR_STOCK_ORDER_TYPE_MARKET, STR_STOCK_TIP_TYPE),
++				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_SO_TYPE_BUY_LIMIT), SetFill(1, 0), SetResize(1, 0), SetStringTip(STR_STOCK_TYPE_BUY_LIMIT, STR_STOCK_TIP_TYPE),
++				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_SO_TYPE_SELL_LIMIT), SetFill(1, 0), SetResize(1, 0), SetStringTip(STR_STOCK_TYPE_SELL_LIMIT, STR_STOCK_TIP_TYPE),
++				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_SO_TYPE_BUY_STOP), SetFill(1, 0), SetResize(1, 0), SetStringTip(STR_STOCK_TYPE_BUY_STOP, STR_STOCK_TIP_TYPE),
++				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_SO_TYPE_SELL_STOP), SetFill(1, 0), SetResize(1, 0), SetStringTip(STR_STOCK_TYPE_SELL_STOP, STR_STOCK_TIP_TYPE),
++			EndContainer(),
++			/* Volume, price, SL, TP. */
++			NWidget(NWID_HORIZONTAL), SetPIP(4, 2, 4),
++				NWidget(WWT_TEXT, INVALID_COLOUR), SetStringTip(STR_STOCK_ORDER_LABEL_VOLUME), SetMinimalSize(96, 14), SetFill(0, 1),
++				NWidget(WWT_EDITBOX, COLOUR_GREY, WID_SO_VOLUME), SetMinimalSize(120, 12), SetResize(1, 0), SetFill(1, 0), SetPadding(1), SetStringTip(STR_STOCK_ORDER_HINT_VOLUME, STR_STOCK_TIP_VOLUME),
++			EndContainer(),
++			NWidget(NWID_HORIZONTAL), SetPIP(4, 2, 4),
++				NWidget(WWT_TEXT, INVALID_COLOUR), SetStringTip(STR_STOCK_ORDER_LABEL_PRICE), SetMinimalSize(96, 14), SetFill(0, 1),
++				NWidget(WWT_EDITBOX, COLOUR_GREY, WID_SO_PRICE), SetMinimalSize(120, 12), SetResize(1, 0), SetFill(1, 0), SetPadding(1), SetStringTip(STR_STOCK_ORDER_HINT_PRICE, STR_STOCK_TIP_PRICE),
++			EndContainer(),
++			NWidget(NWID_HORIZONTAL), SetPIP(4, 2, 4),
++				NWidget(WWT_TEXT, INVALID_COLOUR), SetStringTip(STR_STOCK_ORDER_LABEL_SL), SetMinimalSize(96, 14), SetFill(0, 1),
++				NWidget(WWT_EDITBOX, COLOUR_GREY, WID_SO_SL), SetMinimalSize(120, 12), SetResize(1, 0), SetFill(1, 0), SetPadding(1), SetStringTip(STR_STOCK_ORDER_HINT_NONE, STR_STOCK_TIP_SL),
++			EndContainer(),
++			NWidget(NWID_HORIZONTAL), SetPIP(4, 2, 4),
++				NWidget(WWT_TEXT, INVALID_COLOUR), SetStringTip(STR_STOCK_ORDER_LABEL_TP), SetMinimalSize(96, 14), SetFill(0, 1),
++				NWidget(WWT_EDITBOX, COLOUR_GREY, WID_SO_TP), SetMinimalSize(120, 12), SetResize(1, 0), SetFill(1, 0), SetPadding(1), SetStringTip(STR_STOCK_ORDER_HINT_NONE, STR_STOCK_TIP_TP),
++			EndContainer(),
++			/* Value and margin. */
++			NWidget(NWID_HORIZONTAL), SetPIP(4, 0, 4),
++				NWidget(WWT_PANEL, COLOUR_GREY, WID_SO_INFO), SetMinimalSize(300, 14), SetResize(1, 0), SetFill(1, 0),
++				EndContainer(),
++			EndContainer(),
++			/* Execution. */
++			NWidget(NWID_HORIZONTAL, NWidContainerFlag::EqualSize), SetPIP(4, 2, 4),
++				NWidget(WWT_PUSHTXTBTN, COLOUR_RED, WID_SO_SELL), SetMinimalSize(100, 18), SetFill(1, 0), SetResize(1, 0), SetStringTip(STR_STOCK_ORDER_SELL, STR_STOCK_TIP_SELL),
++				NWidget(WWT_PUSHTXTBTN, COLOUR_LIGHT_BLUE, WID_SO_BUY), SetMinimalSize(100, 18), SetFill(1, 0), SetResize(1, 0), SetStringTip(STR_STOCK_ORDER_BUY, STR_STOCK_TIP_BUY),
++			EndContainer(),
++			NWidget(NWID_HORIZONTAL), SetPIP(4, 0, 4),
++				NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_SO_PLACE), SetMinimalSize(200, 18), SetFill(1, 0), SetResize(1, 0), SetStringTip(STR_STOCK_ORDER_PLACE, STR_STOCK_TIP_PLACE),
++			EndContainer(),
++		EndContainer(),
++	EndContainer(),
++};
++
++static WindowDesc _stock_order_desc(
++	WDP_AUTO, "stock_order", 0, 0,
++	WC_STOCK_ORDER, WC_NONE,
++	{},
++	_nested_stock_order_widgets
++);
++
++/**
++ * Open the New Order window for a symbol.
++ * @param symbol Company whose shares are traded.
++ */
++void ShowStockOrderWindow(CompanyID symbol)
++{
++	StockOrderWindow *w = dynamic_cast<StockOrderWindow *>(BringWindowToFrontById(WC_STOCK_ORDER, 0));
++	if (w != nullptr) {
++		if (Company::IsValidID(symbol)) w->SetSymbol(symbol);
++		return;
++	}
++	new StockOrderWindow(_stock_order_desc, symbol);
++}
++
++/**
++ * Change the symbol of the New Order window, when it is open.
++ * @param symbol Company whose shares are traded.
++ */
++void SetStockOrderSymbol(CompanyID symbol)
++{
++	StockOrderWindow *w = dynamic_cast<StockOrderWindow *>(FindWindowById(WC_STOCK_ORDER, 0));
++	if (w != nullptr) w->SetSymbol(symbol);
++}
+diff --git a/src/widgets/CMakeLists.txt b/src/widgets/CMakeLists.txt
+index a69f7e7..d7d6732 100644
+--- a/src/widgets/CMakeLists.txt
++++ b/src/widgets/CMakeLists.txt
+@@ -49,6 +49,7 @@ add_files(
+     smallmap_widget.h
+     station_widget.h
+     statusbar_widget.h
++    stock_widget.h
+     story_widget.h
+     subsidy_widget.h
+     terraform_widget.h
+diff --git a/src/widgets/statusbar_widget.h b/src/widgets/statusbar_widget.h
+index 7d5dbce..1572304 100644
+--- a/src/widgets/statusbar_widget.h
++++ b/src/widgets/statusbar_widget.h
+@@ -15,6 +15,7 @@ enum StatusbarWidgets : WidgetID {
+ 	WID_S_LEFT,   ///< Left part of the statusbar; date is shown there.
+ 	WID_S_MIDDLE, ///< Middle part; current news or company name or *** SAVING *** or *** PAUSED ***.
+ 	WID_S_RIGHT,  ///< Right part; bank balance.
++	WID_S_STOCK,  ///< Small stock chart icon next to the date; opens the stock market.
+ };
+ 
+ #endif /* WIDGETS_STATUSBAR_WIDGET_H */
+diff --git a/src/widgets/stock_widget.h b/src/widgets/stock_widget.h
+new file mode 100644
+index 0000000..e7b21b9
+--- /dev/null
++++ b/src/widgets/stock_widget.h
+@@ -0,0 +1,47 @@
++/*
++ * This file is part of OpenTTD.
++ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
++ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
++ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
++ */
++
++/** @file stock_widget.h Types related to the trading terminal widgets. */
++
++#ifndef WIDGETS_STOCK_WIDGET_H
++#define WIDGETS_STOCK_WIDGET_H
++
++/** Widgets of the #StockWindow class (the terminal). */
++enum StockWidgets : WidgetID {
++	WID_ST_NEW_ORDER,        ///< Button that opens the New Order window.
++	WID_ST_HISTORY,          ///< Toggle button: show the history of closed trades instead of the open trades.
++	WID_ST_ACCOUNT,          ///< Balance, equity, margin and free margin.
++	WID_ST_WATCH,            ///< Market Watch: symbols with Bid and Ask.
++	WID_ST_TITLE,            ///< Selected symbol with its Bid, Ask and change.
++	WID_ST_SUMMARY,          ///< Summary row of the selected symbol: P/E, EPS and dividend yield.
++	WID_ST_CHART,            ///< The candlestick chart.
++	WID_ST_TOOLBOX,          ///< Toolbox: open positions and pending orders.
++	WID_ST_TOOL_SCROLLBAR,   ///< Scrollbar of the toolbox.
++};
++
++/** Widgets of the #StockOrderWindow class. */
++enum StockOrderWidgets : WidgetID {
++	WID_SO_PREV,             ///< Select the previous symbol.
++	WID_SO_SYMBOL,           ///< Name of the selected symbol.
++	WID_SO_NEXT,             ///< Select the next symbol.
++	WID_SO_PRICES,           ///< Current Bid and Ask.
++	WID_SO_TYPE_MARKET,      ///< Order type: Market Execution. The type buttons must stay in this order.
++	WID_SO_TYPE_BUY_LIMIT,   ///< Order type: Buy Limit.
++	WID_SO_TYPE_SELL_LIMIT,  ///< Order type: Sell Limit.
++	WID_SO_TYPE_BUY_STOP,    ///< Order type: Buy Stop.
++	WID_SO_TYPE_SELL_STOP,   ///< Order type: Sell Stop.
++	WID_SO_VOLUME,           ///< Edit box: volume in LOT.
++	WID_SO_PRICE,            ///< Edit box: price of a pending order.
++	WID_SO_SL,               ///< Edit box: Stop Loss.
++	WID_SO_TP,               ///< Edit box: Take Profit.
++	WID_SO_INFO,             ///< Value and margin of the order.
++	WID_SO_SELL,             ///< Sell by market.
++	WID_SO_BUY,              ///< Buy by market.
++	WID_SO_PLACE,            ///< Place a pending order.
++};
++
++#endif /* WIDGETS_STOCK_WIDGET_H */
+diff --git a/src/window_type.h b/src/window_type.h
+index 67a23bc..ab092e4 100644
+--- a/src/window_type.h
++++ b/src/window_type.h
+@@ -732,6 +732,18 @@ enum WindowClass : uint16_t {
+ 	 */
+ 	WC_HELPWIN,
+ 
++	/**
++	 * Stock market window; %Window numbers:
++	 *   - 0 = #StockWidgets
++	 */
++	WC_STOCK_MARKET,
++
++	/**
++	 * New order window of the trading terminal; %Window numbers:
++	 *   - 0 = #StockOrderWidgets
++	 */
++	WC_STOCK_ORDER,
++
+ 	WC_INVALID = 0xFFFF, ///< Invalid window.
+ };
+ 
