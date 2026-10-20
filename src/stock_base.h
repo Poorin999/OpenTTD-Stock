@@ -22,7 +22,7 @@ static constexpr int64_t STOCK_SHARES_PER_COMPANY = 100'000;
 static constexpr int64_t STOCK_SHARES_PER_LOT = 100;
 
 /** Largest size of a single order, as a percentage of the shares of a company. */
-static constexpr int64_t STOCK_MAX_ORDER_PERCENT = 10;
+static constexpr int64_t STOCK_MAX_ORDER_PERCENT = 100;
 
 /** Largest volume of a single order, in hundredths of a LOT. 10% of 100,000 shares is 10,000 (100.00 LOT). */
 static constexpr uint32_t STOCK_MAX_VOLUME = static_cast<uint32_t>(STOCK_SHARES_PER_COMPANY * STOCK_MAX_ORDER_PERCENT / 100);
