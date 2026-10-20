@@ -1,0 +1,20 @@
+# Changes for src/lang/english.txt (trading terminal section)
+# ---------------------------------------------------------------------------
+# 1) ADD these strings:
+
+STR_STOCK_PENDING_EXPIRY                                        :pending ({COMMA} d)
+STR_STOCK_QUERY_CLOSE_VOLUME                                    :Volume to close (LOT)
+STR_STOCK_QUERY_SL                                              :Stop Loss (empty for none)
+STR_STOCK_QUERY_TP                                              :Take Profit (empty for none)
+STR_STOCK_ORDER_LABEL_EXPIRY                                    :{BLACK}Expires in (days):
+STR_STOCK_ORDER_HINT_EXPIRY                                     :never
+STR_STOCK_TIP_EXPIRY                                            :{BLACK}Number of economy days after which the pending order is cancelled automatically. Leave empty for an order that stays until you cancel it
+STR_STOCK_ERROR_CANT_MODIFY                                     :{WHITE}Can't change this trade...
+STR_STOCK_ERROR_BAD_EXPIRY                                      :{WHITE}Invalid expiration time (1 to 3650 days, or empty for none)
+STR_STOCK_NEWS_ORDER_EXPIRED                                    :{BLACK}Pending order #{NUM} ({STRING}) for {COMPANY} has expired
+
+# 2) REPLACE these existing strings:
+
+STR_STOCK_TIP_TOOLBOX                                           :{BLACK}Open trades and pending orders. Click the S / L or T / P of a trade to change it. Click the x to close (a part of) a trade or to cancel an order
+STR_STOCK_TIP_SUMMARY                                           :{BLACK}P/E: price divided by the earnings per share. EPS: net result of the last four quarters per share. Div Yield: dividend (30% of the earnings) per year divided by the price. The dividend is paid to long positions when the third and the fourth quarter of the year are completed
+STR_STOCK_ORDER_INFO                                            :{WHITE}Volume: {COMMA} shares   Value: {CURRENCY_LONG}   Margin: {CURRENCY_LONG}   Commission: {CURRENCY_LONG}
