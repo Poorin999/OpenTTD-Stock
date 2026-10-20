@@ -742,7 +742,7 @@ static const IntervalTimer<TimerGameEconomy> _stock_daily({TimerGameEconomy::DAY
 });
 
 /** Check the market every few game ticks. */
-static const IntervalTimer<TimerGameTick> _stock_tick({STOCK_TICK_INTERVAL, TimerGameTick::Priority::NONE}, [](auto)
+static const IntervalTimer<TimerGameTick> _stock_tick({TimerGameTick::Priority::NONE, STOCK_TICK_INTERVAL}, [](auto)
 {
 	_stock_market.UpdateTick();
 });
