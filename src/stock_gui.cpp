@@ -24,6 +24,7 @@
 #include "textbuf_gui.h"
 #include "window_func.h"
 #include "window_gui.h"
+#include "timer/timer_game_economy.h"
 #include "zoom_func.h"
 
 #include "widgets/stock_widget.h"
@@ -162,6 +163,7 @@ struct StockWindow : Window {
 	bool is_dragging_chart = false;     ///< Whether the mouse button is held down on the chart.
 	int drag_start_x = 0;               ///< X position (in the window) where the drag started, or where the last candle step was made.
 	int chart_scroll_offset = 0;        ///< Number of candles the chart is scrolled back into the past; 0 shows the newest candles at the right edge.
+	bool view_daily = false;            ///< Whether the chart shows one candle per day.
 	bool view_yearly = false;           ///< Whether the chart shows one candle per year instead of one per month.
 
 	StockWindow(WindowDesc &desc) : Window(desc)
@@ -169,10 +171,17 @@ struct StockWindow : Window {
 		this->CreateNestedTree();
 		this->vscroll = this->GetScrollbar(WID_ST_TOOL_SCROLLBAR);
 		this->FinishInitNested(0);
-		this->SetWidgetLoweredState(WID_ST_TF_MONTH, !this->view_yearly);
-		this->SetWidgetLoweredState(WID_ST_TF_YEAR, this->view_yearly);
+		this->UpdateTimeframeButtons();
 		this->EnsureValidSelection();
 		this->OnInvalidateData(0);
+	}
+
+	/** Show which timeframe button is active. */
+	void UpdateTimeframeButtons()
+	{
+		this->SetWidgetLoweredState(WID_ST_TF_DAY, this->view_daily);
+		this->SetWidgetLoweredState(WID_ST_TF_MONTH, !this->view_daily && !this->view_yearly);
+		this->SetWidgetLoweredState(WID_ST_TF_YEAR, this->view_yearly);
 	}
 
 	int RowHeight() const { return GetCharacterHeight(FS_NORMAL) + ScaleGUITrad(2); }
@@ -205,6 +214,11 @@ struct StockWindow : Window {
 		const size_t index = this->selected.base();
 		months = _stock_market.candles[index];
 		if (_stock_market.has_current[index]) months.push_back(_stock_market.current[index]);
+		if (this->view_daily) {
+			std::vector<StockCandle> days = _stock_market.daily[index];
+			if (_stock_market.has_daily_current[index]) days.push_back(_stock_market.daily_current[index]);
+			return days;
+		}
 		if (!this->view_yearly) return months;
 
 		std::vector<StockCandle> years;
@@ -387,15 +401,18 @@ struct StockWindow : Window {
 				break;
 			}
 
+			case WID_ST_TF_DAY:
 			case WID_ST_TF_MONTH:
 			case WID_ST_TF_YEAR: {
+				const bool daily = widget == WID_ST_TF_DAY;
 				const bool yearly = widget == WID_ST_TF_YEAR;
-				if (this->view_yearly != yearly) {
+				if (daily && !_stock_market.record_daily) Command<CMD_STOCK_ENABLE_DAILY>::Post(STR_STOCK_ERROR_CANT_MODIFY);
+				if (this->view_yearly != yearly || this->view_daily != daily) {
 					this->view_yearly = yearly;
+					this->view_daily = daily;
 					this->chart_scroll_offset = 0; // The units of the offset change with the timeframe.
 				}
-				this->SetWidgetLoweredState(WID_ST_TF_MONTH, !this->view_yearly);
-				this->SetWidgetLoweredState(WID_ST_TF_YEAR, this->view_yearly);
+				this->UpdateTimeframeButtons();
 				this->SetDirty();
 				break;
 			}
@@ -582,7 +599,10 @@ struct StockWindow : Window {
 		GfxFillRect(left, top, right, bottom, GREY_SCALE(2));
 		if (rsi_height > 0) GfxFillRect(left, bottom + gap, right, full_bottom, GREY_SCALE(2));
 
-		if (candles.empty()) return;
+		if (candles.empty()) {
+			if (this->view_daily) DrawString(left + 4, right - 4, top + 4, STR_STOCK_DAILY_WAIT, TC_WHITE, SA_LEFT);
+			return;
+		}
 
 		const int slot = std::max(1, ScaleGUITrad(10));
 		const int body_half = ScaleGUITrad(3);
@@ -638,6 +658,17 @@ struct StockWindow : Window {
 
 			/* One small tick for every candle (one month, or one year in the yearly view). */
 			GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(2), PC_WHITE);
+
+			if (this->view_daily) {
+				/* A month label at the first day of every month; the next one is about 30 candles further. */
+				const auto ymd = TimerGameEconomy::ConvertDateToYMD(TimerGameEconomy::Date{c.ym});
+				if (ymd.day == 1) {
+					static const char *const names[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+					GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(3), PC_WHITE);
+					DrawString(cx - ScaleGUITrad(20), cx + ScaleGUITrad(20), full_bottom + ScaleGUITrad(3), std::string(names[ymd.month % 12]), TC_WHITE, SA_HOR_CENTER, false, FS_SMALL);
+				}
+				continue;
+			}
 
 			if (this->view_yearly) {
 				/* A year label every five years; each label is wider than one candle. */
@@ -878,6 +909,7 @@ static constexpr std::initializer_list<NWidgetPart> _nested_stock_widgets = {
 			NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_SUMMARY), SetMinimalSize(400, 16), SetResize(1, 0), SetFill(1, 0), SetToolTip(STR_STOCK_TIP_SUMMARY),
 			EndContainer(),
 			NWidget(NWID_HORIZONTAL),
+				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_DAY), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_TF_DAY, STR_STOCK_TIP_TF_DAY),
 				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_MONTH), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_TF_MONTH, STR_STOCK_TIP_TF_MONTH),
 				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_YEAR), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_TF_YEAR, STR_STOCK_TIP_TF_YEAR),
 				NWidget(NWID_SPACER), SetFill(1, 0), SetResize(1, 0),

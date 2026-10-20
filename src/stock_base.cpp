@@ -39,6 +39,10 @@ void StockMarket::Reset()
 	this->impact.fill(0);
 	this->valuation.fill({});
 	this->trading_balance.fill(0);
+	for (auto &list : this->daily) list.clear();
+	this->daily_current.fill({});
+	this->has_daily_current.fill(false);
+	this->record_daily = false;
 	this->history.clear();
 	this->positions.clear();
 	this->pending.clear();
@@ -385,7 +389,7 @@ void StockMarket::HandleRemovedCompanies()
 	for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
 		if (Company::IsValidID(CompanyID{i})) continue;
 		const bool stale = !this->candles[i].empty() || this->has_current[i] || this->price_fp[i] != 0 ||
-				this->base_fp[i] != 0 || this->impact[i] != 0 || this->valuation[i].quarters != 0 || this->trading_balance[i] != 0;
+				this->base_fp[i] != 0 || this->impact[i] != 0 || this->valuation[i].quarters != 0 || this->trading_balance[i] != 0 || !this->daily[i].empty() || this->has_daily_current[i];
 		if (!stale) continue;
 		this->candles[i].clear();
 		this->current[i] = {};
@@ -395,6 +399,9 @@ void StockMarket::HandleRemovedCompanies()
 		this->impact[i] = 0;
 		this->valuation[i] = {};
 		this->trading_balance[i] = 0;
+		this->daily[i].clear();
+		this->daily_current[i] = {};
+		this->has_daily_current[i] = false;
 		std::erase_if(this->history, [i](const StockClosedTrade &t) { return t.owner == i; });
 	}
 }
@@ -728,6 +735,26 @@ void StockMarket::UpdateDaily()
 			cur.low = std::min(cur.low, price);
 			cur.close = price;
 		}
+
+		/* Daily candles: only recorded once the Daily view has been turned on. */
+		if (this->record_daily) {
+			const int32_t day = TimerGameEconomy::date.base();
+			StockCandle &d = this->daily_current[i];
+			if (!this->has_daily_current[i]) {
+				d = {day, price, price, price, price};
+				this->has_daily_current[i] = true;
+			} else if (d.ym != day) {
+				auto &days = this->daily[i];
+				days.push_back(d);
+				if (days.size() > STOCK_MAX_DAILY_CANDLES) days.erase(days.begin());
+				const int64_t prev_close = d.close;
+				d = {day, prev_close, std::max(prev_close, price), std::min(prev_close, price), price};
+			} else {
+				d.high = std::max(d.high, price);
+				d.low = std::min(d.low, price);
+				d.close = price;
+			}
+		}
 	}
 
 	this->HandleRemovedCompanies();
@@ -759,6 +786,14 @@ void StockMarket::UpdateTick()
 			cur.high = std::max(cur.high, price);
 			cur.low = std::min(cur.low, price);
 			cur.close = price;
+		}
+
+		if (this->record_daily && this->has_daily_current[i]) {
+			const int64_t price = FixedToPrice(this->price_fp[i]);
+			StockCandle &d = this->daily_current[i];
+			d.high = std::max(d.high, price);
+			d.low = std::min(d.low, price);
+			d.close = price;
 		}
 	}
 

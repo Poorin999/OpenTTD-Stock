@@ -14,3 +14,6 @@ STR_STOCK_TRADING_BALANCE                                       :{WHITE}   Tradi
 STR_STOCK_ERROR_CANT_TRANSFER                                   :{WHITE}Can't transfer the money...
 STR_STOCK_ERROR_BAD_AMOUNT                                      :{WHITE}Invalid amount
 STR_STOCK_ERROR_NO_FUNDS                                        :{WHITE}Not enough money
+STR_STOCK_TF_DAY                                                :Daily
+STR_STOCK_TIP_TF_DAY                                            :{BLACK}Show one candle per day. Daily candles are only recorded from the first time you open this view, so there is no history before that
+STR_STOCK_DAILY_WAIT                                            :{WHITE}Recording daily candles. They appear as the days pass

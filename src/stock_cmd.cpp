@@ -233,3 +233,19 @@ CommandCost CmdStockTransfer(DoCommandFlags flags, bool deposit, Money amount_in
 
 	return CommandCost();
 }
+
+/**
+ * Start recording daily candles. Nothing is recorded before the first player opens the Daily view, so the
+ * game does not keep data nobody looks at. Once turned on it stays on; there is no history from before.
+ * @param flags Type of operation.
+ * @return Zero cost, or an error.
+ */
+CommandCost CmdStockEnableDaily(DoCommandFlags flags)
+{
+	if (!Company::IsValidID(_current_company)) return CMD_ERROR;
+	if (flags.Test(DoCommandFlag::Execute) && !_stock_market.record_daily) {
+		_stock_market.record_daily = true;
+		InvalidateWindowData(WC_STOCK_MARKET, 0);
+	}
+	return CommandCost();
+}

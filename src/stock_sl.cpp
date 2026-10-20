@@ -26,6 +26,9 @@ enum StockRecordKind : uint8_t {
 	SRK_META = 6,     ///< Misc: ym = next order id, v1 = last seen quarter, v2 = days until the dividend is paid, v3 = quarter of that dividend.
 	SRK_VALUATION = 7, ///< Valuation: a = company, v1 = book value, v2 = earnings, v3 = number of quarters.
 	SRK_MARKET = 9,   ///< Market state: a = company, v1 = current price times STOCK_PRICE_SCALE, v2 = valuation price times STOCK_PRICE_SCALE, v3 = market impact.
+	SRK_DAILY = 11,   ///< Closed daily candle: a = company, ym = economy date, v1..v4 = open/high/low/close.
+	SRK_DAILY_RUNNING = 12, ///< Running daily candle, same fields.
+	SRK_DAILY_ON = 13, ///< The Daily view was turned on: daily candles are recorded.
 	SRK_BALANCE = 10, ///< Trading account: a = company, v1 = deposited money.
 	SRK_HISTORY = 8,  ///< Closed trade: a = owner, b = target, ym = id, v1 = volume, v2 = open price, v3 = close price, v4 = profit, v5 = type | reason << 8 | closed month << 16.
 };
@@ -104,6 +107,12 @@ struct STCKChunkHandler : ChunkHandler {
 		meta.v3 = _stock_market.dividend_quarter;
 		write(meta);
 
+		if (_stock_market.record_daily) {
+			StockRecord on;
+			on.kind = SRK_DAILY_ON;
+			write(on);
+		}
+
 		for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
 			for (const StockCandle &candle : _stock_market.candles[i]) write(CandleRecord(SRK_CANDLE, i, candle));
 			if (_stock_market.has_current[i]) write(CandleRecord(SRK_RUNNING, i, _stock_market.current[i]));
@@ -116,6 +125,8 @@ struct STCKChunkHandler : ChunkHandler {
 				r.v3 = _stock_market.impact[i];
 				write(r);
 			}
+			for (const StockCandle &candle : _stock_market.daily[i]) write(CandleRecord(SRK_DAILY, i, candle));
+			if (_stock_market.has_daily_current[i]) write(CandleRecord(SRK_DAILY_RUNNING, i, _stock_market.daily_current[i]));
 			if (_stock_market.trading_balance[i] != 0) {
 				StockRecord r;
 				r.kind = SRK_BALANCE;
@@ -200,6 +211,23 @@ struct STCKChunkHandler : ChunkHandler {
 						_stock_market.impact[r.a] = std::clamp<int64_t>(r.v3, -STOCK_IMPACT_MAX_PPM, STOCK_IMPACT_MAX_PPM);
 					}
 					break;
+
+				case SRK_DAILY_ON:
+					_stock_market.record_daily = true;
+					break;
+
+				case SRK_DAILY:
+				case SRK_DAILY_RUNNING: {
+					if (r.a >= MAX_COMPANIES) break;
+					StockCandle candle{r.ym, r.v1, r.v2, r.v3, r.v4};
+					if (r.kind == SRK_DAILY) {
+						_stock_market.daily[r.a].push_back(candle);
+					} else {
+						_stock_market.daily_current[r.a] = candle;
+						_stock_market.has_daily_current[r.a] = true;
+					}
+					break;
+				}
 
 				case SRK_BALANCE:
 					if (r.a < MAX_COMPANIES) _stock_market.trading_balance[r.a] = std::max<int64_t>(r.v1, 0);

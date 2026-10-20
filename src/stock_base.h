@@ -22,9 +22,9 @@ static constexpr int64_t STOCK_SHARES_PER_COMPANY = 100'000;
 static constexpr int64_t STOCK_SHARES_PER_LOT = 100;
 
 /** Largest size of a single order, as a percentage of the shares of a company. */
-static constexpr int64_t STOCK_MAX_ORDER_PERCENT = 1;
+static constexpr int64_t STOCK_MAX_ORDER_PERCENT = 10;
 
-/** Largest volume of a single order, in hundredths of a LOT. 1% of 1,000,000 shares is 10,000 (100.00 LOT). */
+/** Largest volume of a single order, in hundredths of a LOT. 10% of 100,000 shares is 10,000 (100.00 LOT). */
 static constexpr uint32_t STOCK_MAX_VOLUME = static_cast<uint32_t>(STOCK_SHARES_PER_COMPANY * STOCK_MAX_ORDER_PERCENT / 100);
 
 /** Parts per million: the unit of the fees and of the market impact. */
@@ -72,7 +72,7 @@ static constexpr int64_t STOCK_COMMISSION_PPM = 1'000;
 /** Swap (overnight financing), charged every economy day for every open position: parts per million of the value of the position (0.01%). */
 static constexpr int64_t STOCK_SWAP_PPM_PER_DAY = 100;
 
-/** Market impact: an order of the full size of the company moves the price by this many times its share of the company. 2 means that an order for 1% of the shares moves the price by 2%. */
+/** Market impact: an order of the full size of the company moves the price by this many times its share of the company. 2 means that an order for 10% of the shares moves the price by 20%. */
 static constexpr int64_t STOCK_IMPACT_FACTOR = 2;
 
 /** Market impact: the accumulated impact can not move the price by more than this, in parts per million (30%). */
@@ -98,6 +98,9 @@ static constexpr size_t STOCK_MAX_ORDERS_PER_COMPANY = 40;
 
 /** Maximum number of closed monthly candles that are remembered per company. */
 static constexpr size_t STOCK_MAX_CANDLES = 240;
+
+/** Maximum number of daily candles that are remembered per company: 365 per year for 150 years, so in practice all of them. Daily candles are only recorded after the Daily view was turned on. */
+static constexpr size_t STOCK_MAX_DAILY_CANDLES = 365 * 150;
 
 /** Kind of an order. The first two are executed at once (market execution), the others are pending orders. */
 enum class StockOrderType : uint8_t {
@@ -187,6 +190,10 @@ struct StockMarket {
 	std::array<int64_t, MAX_COMPANIES> base_fp{};                  ///< Mid price per share according to the valuation, times #STOCK_PRICE_SCALE, refreshed once per day.
 	std::array<int64_t, MAX_COMPANIES> impact{};                   ///< Accumulated market impact of the orders, in parts per million; positive when more was bought than sold.
 	std::array<StockValuation, MAX_COMPANIES> valuation{};         ///< Valuation per company, refreshed once per day.
+	std::array<std::vector<StockCandle>, MAX_COMPANIES> daily{};   ///< Closed daily candles per company; ym holds the economy date. Only filled when #record_daily is set.
+	std::array<StockCandle, MAX_COMPANIES> daily_current{};        ///< The running daily candle per company.
+	std::array<bool, MAX_COMPANIES> has_daily_current{};           ///< Whether #daily_current is valid.
+	bool record_daily = false;                                     ///< Whether daily candles are recorded; set once when the player opens the Daily view.
 	std::array<int64_t, MAX_COMPANIES> trading_balance{};          ///< Money per company that was deposited in the trading account; counts as equity.
 	std::vector<StockClosedTrade> history{};                       ///< Closed trades of all companies, the oldest first.
 	std::vector<StockOrder> positions{};                           ///< Open positions.

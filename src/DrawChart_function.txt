@@ -1,0 +1,162 @@
+	void DrawChart(const Rect &r) const
+	{
+		if (!Company::IsValidID(this->selected)) return;
+
+		const std::vector<StockCandle> candles = this->GetChartCandles();
+
+		const int small_height = GetCharacterHeight(FS_SMALL);
+		const int axis_width = ScaleGUITrad(64);
+		const int left = r.left + axis_width;
+		const int right = r.right - ScaleGUITrad(6);
+		const int top = r.top + ScaleGUITrad(6);
+		const int full_bottom = r.bottom - small_height - ScaleGUITrad(4);
+		if (right - left < 20 || full_bottom - top < 20) return;
+
+		/* The lower quarter of the chart shows the RSI, when there is enough room for it. */
+		const int rsi_height = (full_bottom - top) >= ScaleGUITrad(150) ? (full_bottom - top) / 4 : 0;
+		const int gap = rsi_height > 0 ? ScaleGUITrad(4) : 0;
+		const int bottom = full_bottom - rsi_height - gap;
+		if (bottom - top < 20) return;
+
+		GfxFillRect(left, top, right, bottom, GREY_SCALE(2));
+		if (rsi_height > 0) GfxFillRect(left, bottom + gap, right, full_bottom, GREY_SCALE(2));
+
+		if (candles.empty()) return;
+
+		const int slot = std::max(1, ScaleGUITrad(10));
+		const int body_half = ScaleGUITrad(3);
+		const size_t max_visible = static_cast<size_t>(std::max(1, (right - left) / slot));
+
+		/* The visible candles are [first, last). Scrolled back by chart_scroll_offset candles, but never past the oldest candle. */
+		const size_t offset = std::min(static_cast<size_t>(std::max(0, this->chart_scroll_offset)), candles.size() - 1);
+		const size_t last = candles.size() - offset;
+		const size_t first = last > max_visible ? last - max_visible : 0;
+
+		int64_t lo = INT64_MAX;
+		int64_t hi = INT64_MIN;
+		for (size_t i = first; i < last; i++) {
+			lo = std::min(lo, candles[i].low);
+			hi = std::max(hi, candles[i].high);
+		}
+		/* Cheap shares: when the price hardly moves, widen the range so that the candles keep a visible height. */
+		if (hi == lo || hi - lo < 20) {
+			hi += 10;
+			lo = std::max<int64_t>(0, lo - 10);
+		}
+		const int64_t margin = std::max<int64_t>((hi - lo) / 10, 1);
+		lo = std::max<int64_t>(lo - margin, 0);
+		hi += margin;
+		const double range = static_cast<double>(hi - lo);
+
+		auto to_y = [&](int64_t value) {
+			return bottom - static_cast<int>(static_cast<double>(value - lo) * (bottom - top) / range);
+		};
+
+		/* Horizontal grid lines with price labels. */
+		for (int i = 0; i <= 4; i++) {
+			const int64_t value = lo + (hi - lo) * i / 4;
+			const int y = to_y(value);
+			GfxDrawLine(left, y, right, y, GREY_SCALE(4));
+			DrawString(r.left + 2, left - 4, y - small_height / 2, GetString(STR_JUST_CURRENCY_SHORT, value), TC_WHITE, SA_RIGHT, false, FS_SMALL);
+		}
+
+		/* Candles, the newest at the right edge. */
+		const int count = static_cast<int>(last - first);
+		const int x0 = right - count * slot;
+		for (int i = 0; i < count; i++) {
+			const StockCandle &c = candles[first + i];
+			const int cx = x0 + i * slot + slot / 2;
+			const PixelColour colour = c.close >= c.open ? PC_GREEN : PC_RED;
+
+			GfxDrawLine(cx, to_y(c.high), cx, to_y(c.low), PC_WHITE);
+
+			const int body_top = to_y(std::max(c.open, c.close));
+			int body_bottom = to_y(std::min(c.open, c.close));
+			if (body_bottom <= body_top) body_bottom = body_top + 1;
+			GfxFillRect(cx - body_half, body_top, cx + body_half, body_bottom, colour);
+
+			/* One small tick for every candle (one month, or one year in the yearly view). */
+			GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(2), PC_WHITE);
+
+			if (this->view_yearly) {
+				/* A year label every five years; each label is wider than one candle. */
+				const int year = c.ym / 12;
+				if (year % 5 == 0) {
+					GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(3), PC_WHITE);
+					DrawString(cx - ScaleGUITrad(20), cx + ScaleGUITrad(20), full_bottom + ScaleGUITrad(3), fmt::format("{}", year), TC_WHITE, SA_HOR_CENTER, false, FS_SMALL);
+				}
+				continue;
+			}
+
+			/* A label every quarter (Jan, Apr, Jul, Oct); each label is wider than one candle, so not every month. */
+			const int month_index = c.ym % 12; // 0 = January.
+			if (month_index % 3 == 0) {
+				static const char *const month_names[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+				GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(3), PC_WHITE);
+				DrawString(cx - ScaleGUITrad(20), cx + ScaleGUITrad(20), full_bottom + ScaleGUITrad(3), std::string(month_names[month_index]), TC_WHITE, SA_HOR_CENTER, false, FS_SMALL);
+			}
+		}
+
+		/* Moving average of the closing price over 20 candles, drawn as a yellow line. */
+		static constexpr size_t MA_PERIOD = 20;
+		int prev_x = 0;
+		int prev_y = 0;
+		bool have_prev = false;
+		for (size_t i = first; i < last; i++) {
+			if (i + 1 < MA_PERIOD) {
+				have_prev = false;
+				continue;
+			}
+			int64_t sum = 0;
+			for (size_t k = i + 1 - MA_PERIOD; k <= i; k++) sum += candles[k].close;
+			const int x = x0 + static_cast<int>(i - first) * slot + slot / 2;
+			const int y = std::clamp(to_y(sum / static_cast<int64_t>(MA_PERIOD)), top, bottom);
+			if (have_prev) GfxDrawLine(prev_x, prev_y, x, y, PC_YELLOW);
+			prev_x = x;
+			prev_y = y;
+			have_prev = true;
+		}
+
+		/* RSI over 14 candles in the lower pane, with the 30 and 70 levels. */
+		if (rsi_height > 0) {
+			static constexpr size_t RSI_PERIOD = 14;
+			const int rsi_top = bottom + gap;
+			auto rsi_y = [&](int64_t value) {
+				return full_bottom - static_cast<int>(value * (full_bottom - rsi_top) / 100);
+			};
+
+			for (const int level : {30, 70}) {
+				const int y = rsi_y(level);
+				GfxDrawLine(left, y, right, y, GREY_SCALE(4));
+				DrawString(r.left + 2, left - 4, y - small_height / 2, GetString(STR_JUST_INT, level), TC_WHITE, SA_RIGHT, false, FS_SMALL);
+			}
+
+			int prev_rx = 0;
+			int prev_ry = 0;
+			bool have_prev_rsi = false;
+			for (size_t i = first; i < last; i++) {
+				if (i < RSI_PERIOD) {
+					have_prev_rsi = false;
+					continue;
+				}
+				int64_t gain = 0;
+				int64_t loss = 0;
+				for (size_t k = i + 1 - RSI_PERIOD; k <= i; k++) {
+					const int64_t change = candles[k].close - candles[k - 1].close;
+					if (change > 0) {
+						gain += change;
+					} else {
+						loss -= change;
+					}
+				}
+				const int64_t total = gain + loss;
+				const int64_t rsi = total > 0 ? gain * 100 / total : 50;
+				const int x = x0 + static_cast<int>(i - first) * slot + slot / 2;
+				const int y = rsi_y(rsi);
+				if (have_prev_rsi) GfxDrawLine(prev_rx, prev_ry, x, y, PC_LIGHT_BLUE);
+				prev_rx = x;
+				prev_ry = y;
+				have_prev_rsi = true;
+			}
+		}
+	}

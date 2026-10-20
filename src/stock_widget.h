@@ -16,6 +16,7 @@ enum StockWidgets : WidgetID {
 	WID_ST_HISTORY,          ///< Toggle button: show the history of closed trades instead of the open trades.
 	WID_ST_DEPOSIT,          ///< Button: move money from the company cash to the trading balance.
 	WID_ST_WITHDRAW,         ///< Button: move money from the trading balance back to the company cash.
+	WID_ST_TF_DAY,           ///< Toggle button: chart with daily candles; recording starts when it is first used.
 	WID_ST_TF_MONTH,         ///< Toggle button: chart with monthly candles.
 	WID_ST_TF_YEAR,          ///< Toggle button: chart with yearly candles.
 	WID_ST_ACCOUNT,          ///< Balance, equity, margin and free margin.
