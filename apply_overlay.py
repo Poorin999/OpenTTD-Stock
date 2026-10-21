@@ -21,6 +21,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "stock_gui.h": "src", "stock_gui.cpp": "src", "stock_order_gui.cpp": "src",
     "wallet_base.h": "src", "wallet_base.cpp": "src",
     "wallet_cmd.h": "src", "wallet_cmd.cpp": "src",
+    "central_bank.h": "src", "central_bank.cpp": "src",
     "stock_sl.cpp": "src/saveload",
     "stock_widget.h": "src/widgets",
 }
@@ -31,8 +32,10 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_WALLET_CREATE", "create a trading wallet"),
     ("CMD_WALLET_DELETE", "delete a trading wallet"),
     ("CMD_WALLET_TRANSFER", "move money between two wallets"),
+    ("CMD_BANK_BORROW", "borrow from the central bank"),
+    ("CMD_BANK_REPAY", "repay the central bank"),
 ]
-NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h"]
+NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h"]
 REPLACE_KEYS = {"STR_STOCK_TIP_TOOLBOX", "STR_STOCK_TIP_SUMMARY", "STR_STOCK_ORDER_INFO", "STR_STOCK_TIP_DEPOSIT", "STR_STOCK_TIP_WITHDRAW"}
 STRING_FILES = ["english_stock_strings.txt", "english_wallet_strings.txt", "english_round8_strings.txt"]
 ANCHORS = ["STR_STOCK_ERROR_NO_ORDER", "STR_STOCK_NEWS_ORDER_EXPIRED"]
