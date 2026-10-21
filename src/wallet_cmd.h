@@ -14,6 +14,8 @@
 #include "company_type.h"
 #include "economy_type.h"
 #include "wallet_base.h"
+/* The commands of the central bank are made known to the command system through this header. */
+#include "central_bank.h"
 
 CommandCost CmdWalletCreate(DoCommandFlags flags, WalletKind kind);
 CommandCost CmdWalletDelete(DoCommandFlags flags, uint8_t wallet);
@@ -24,3 +26,4 @@ DEF_CMD_TRAIT(CMD_WALLET_DELETE,   CmdWalletDelete,   {}, CommandType::MoneyMana
 DEF_CMD_TRAIT(CMD_WALLET_TRANSFER, CmdWalletTransfer, {}, CommandType::MoneyManagement)
 
 #endif /* WALLET_CMD_H */
+

@@ -11,6 +11,7 @@
 #include "3rdparty/fmt/format.h"
 #include "stock_base.h"
 #include "stock_gui.h"
+#include "central_bank.h"
 #include "command_type.h"
 #include "company_base.h"
 #include "company_func.h"
@@ -43,6 +44,7 @@ void StockMarket::Reset()
 	this->impact.fill(0);
 	this->valuation.fill({});
 	_wallets.Reset();
+	_central_bank.Reset();
 	for (auto &list : this->daily) list.clear();
 	this->daily_current.fill({});
 	this->has_daily_current.fill(false);
@@ -108,7 +110,8 @@ static StockValuation ComputeStockValuation(const Company *c)
 {
 	StockValuation v;
 	/* Money in the wallets still belongs to the company, so a deposit must not lower the share price. */
-	v.book = static_cast<int64_t>(CalculateCompanyValue(c)) + GetWalletsTotal(c->index);
+	/* A loan at the central bank raises the cash, but it has to be paid back, so it is taken off again. */
+	v.book = static_cast<int64_t>(CalculateCompanyValue(c)) + GetWalletsTotal(c->index) - GetCentralBankDebt(c->index);
 
 	int64_t sum = 0;
 	for (size_t q = 0; q < STOCK_EARNINGS_QUARTERS; q++) {
@@ -433,7 +436,7 @@ void StockMarket::HandleRemovedCompanies()
 		if (Company::IsValidID(CompanyID{i})) continue;
 		const bool stale = !this->candles[i].empty() || this->has_current[i] || this->price_fp[i] != 0 ||
 				this->base_fp[i] != 0 || this->impact[i] != 0 || this->valuation[i].quarters != 0 || _wallets.HasOwner(CompanyID{i}) || !this->daily[i].empty() || this->has_daily_current[i] ||
-				this->stats[i].closed != 0 || !this->stats[i].months.empty();
+				this->stats[i].closed != 0 || !this->stats[i].months.empty() || _central_bank.accounts[i].debt != 0;
 		if (!stale) continue;
 		this->candles[i].clear();
 		this->current[i] = {};
@@ -447,6 +450,7 @@ void StockMarket::HandleRemovedCompanies()
 		this->daily_current[i] = {};
 		this->has_daily_current[i] = false;
 		this->stats[i] = {};
+		_central_bank.accounts[i] = {};
 		std::erase_if(this->history, [i](const StockClosedTrade &t) { return t.owner == i; });
 	}
 }

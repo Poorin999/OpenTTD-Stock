@@ -32,6 +32,8 @@ enum StockWidgets : WidgetID {
 	WID_ST_WALLET_DELETE,    ///< Button: delete the selected trading wallet.
 	WID_ST_PORTFOLIO,        ///< Toggle: the toolbox shows the portfolio summary (profit and loss, win rate, profit per month).
 	WID_ST_RANKING,          ///< Toggle: the toolbox shows the ranking of the companies.
+	WID_ST_BANK,             ///< Toggle: the toolbox shows the loan at the central bank.
+	WID_ST_WATCH_SCROLLBAR,  ///< Scrollbar of the Market Watch.
 };
 
 /** Widgets of the #StockOrderWindow class. */

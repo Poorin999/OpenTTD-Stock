@@ -13,6 +13,7 @@
 #include "compat/stock_sl_compat.h"
 
 #include "../stock_base.h"
+#include "../central_bank.h"
 
 #include "../safeguards.h"
 
@@ -31,6 +32,7 @@ enum StockRecordKind : uint8_t {
 	SRK_DAILY_ON = 13, ///< The Daily view was turned on: daily candles are recorded.
 	SRK_BALANCE = 10, ///< Trading account of older savegames: a = company, v1 = deposited money. Only read.
 	SRK_WALLET = 14,  ///< Wallet: a = owner, b = number, v1 = balance, v2 = kind.
+	SRK_BANK = 18,    ///< Loan at the central bank: a = company, v1 = debt, v2 = interest that has been added.
 	SRK_POSITION_EXT = 15, ///< More data of an open position: a = owner, ym = id, v1 = trailing stop distance, v2 = month of opening.
 	SRK_STATS = 16,   ///< Trading results of a company: a = company, v1 = closed trades, v2 = winning trades, v3 = total profit.
 	SRK_STATS_MONTH = 17, ///< Profit of one month: a = company, ym = month, v1 = profit, v2 = trades, v3 = winning trades.
@@ -165,6 +167,17 @@ struct STCKChunkHandler : ChunkHandler {
 			r.ym = static_cast<int32_t>(o.id);
 			r.v1 = o.trail;
 			r.v2 = o.open_ym;
+			write(r);
+		}
+
+		for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
+			const BankAccount &b = _central_bank.accounts[i];
+			if (b.debt == 0 && b.interest_paid == 0) continue;
+			StockRecord r;
+			r.kind = SRK_BANK;
+			r.a = i;
+			r.v1 = b.debt;
+			r.v2 = b.interest_paid;
 			write(r);
 		}
 
@@ -363,6 +376,12 @@ struct STCKChunkHandler : ChunkHandler {
 						o.open_ym = static_cast<int32_t>(std::max<int64_t>(r.v2, 0));
 						break;
 					}
+					break;
+
+				case SRK_BANK:
+					if (r.a >= MAX_COMPANIES) break;
+					_central_bank.accounts[r.a].debt = std::max<int64_t>(r.v1, 0);
+					_central_bank.accounts[r.a].interest_paid = std::max<int64_t>(r.v2, 0);
 					break;
 
 				case SRK_STATS:
