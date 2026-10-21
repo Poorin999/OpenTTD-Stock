@@ -14,6 +14,7 @@
 
 #include "../stock_base.h"
 #include "../central_bank.h"
+#include "../game_time/game_time_manager.h"
 
 #include "../safeguards.h"
 
@@ -32,6 +33,7 @@ enum StockRecordKind : uint8_t {
 	SRK_DAILY_ON = 13, ///< The Daily view was turned on: daily candles are recorded.
 	SRK_BALANCE = 10, ///< Trading account of older savegames: a = company, v1 = deposited money. Only read.
 	SRK_WALLET = 14,  ///< Wallet: a = owner, b = number, v1 = balance, v2 = kind.
+	SRK_TIME = 19,    ///< The game clock: v1 = milliseconds since the start of the game.
 	SRK_BANK = 18,    ///< Loan at the central bank: a = company, v1 = debt, v2 = interest that has been added.
 	SRK_POSITION_EXT = 15, ///< More data of an open position: a = owner, ym = id, v1 = trailing stop distance, v2 = month of opening.
 	SRK_STATS = 16,   ///< Trading results of a company: a = company, v1 = closed trades, v2 = winning trades, v3 = total profit.
@@ -113,6 +115,13 @@ struct STCKChunkHandler : ChunkHandler {
 		meta.v2 = _stock_market.dividend_delay;
 		meta.v3 = _stock_market.dividend_quarter;
 		write(meta);
+
+		{
+			StockRecord t;
+			t.kind = SRK_TIME;
+			t.v1 = static_cast<int64_t>(GameTimeManager::Get().GetTotalMilliseconds());
+			write(t);
+		}
 
 		for (const Wallet &w : _wallets.wallets) {
 			StockRecord r;
@@ -376,6 +385,10 @@ struct STCKChunkHandler : ChunkHandler {
 						o.open_ym = static_cast<int32_t>(std::max<int64_t>(r.v2, 0));
 						break;
 					}
+					break;
+
+				case SRK_TIME:
+					GameTimeManager::Get().Restore(static_cast<uint64_t>(std::max<int64_t>(r.v1, 0)));
 					break;
 
 				case SRK_BANK:

@@ -30,6 +30,7 @@
 
 #include "widgets/stock_widget.h"
 #include "central_bank.h"
+#include "game_time/game_time_manager.h"
 
 #include "table/strings.h"
 
@@ -951,6 +952,16 @@ struct StockWindow : Window {
 	void DrawChart(const Rect &r) const
 	{
 		if (!Company::IsValidID(this->selected)) return;
+
+		/* Temporary: the chart is switched off while the clock of the game is rebuilt (see GAME_TIME_DECOUPLE_CHART). The candles are still recorded. */
+		if constexpr (GameTimeManager::IsChartDecoupled()) {
+			GfxFillRect(r.left + 1, r.top + 1, r.right - 1, r.bottom - 1, GREY_SCALE(2));
+			const GameTimeSnapshot now = GameTimeManager::Get().GetSnapshot();
+			DrawString(r.left + 8, r.right - 8, r.top + ScaleGUITrad(8), std::string("Chart switched off (game clock mode)"), TC_WHITE, SA_LEFT);
+			DrawString(r.left + 8, r.right - 8, r.top + ScaleGUITrad(8) + GetCharacterHeight(FS_NORMAL) + 2,
+					fmt::format("Game time: year {}, day {}, {:02}:{:02}", now.year, now.day, now.hour, now.minute), TC_LIGHT_BLUE, SA_LEFT);
+			return;
+		}
 
 		const std::vector<StockCandle> candles = this->GetChartCandles();
 
