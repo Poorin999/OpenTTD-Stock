@@ -29,6 +29,9 @@
 
 StockMarket _stock_market;
 
+/** Whether the margin call warning has already been shown to a company; it is shown again after the level has recovered. Not game state. */
+static std::array<bool, MAX_COMPANIES> _stock_margin_call_shown{};
+
 /** Forget everything, e.g. when a new game is started. */
 void StockMarket::Reset()
 {
@@ -51,6 +54,7 @@ void StockMarket::Reset()
 	this->dividend_quarter_id = 0;
 	this->dividend_delay = 0;
 	this->dividend_quarter = 0;
+	_stock_margin_call_shown.fill(false);
 }
 
 /** Convert a price with #STOCK_PRICE_SCALE steps to whole money units, rounded, at least 1. */
@@ -84,9 +88,6 @@ static void NotifyStockEvent(CompanyID owner, std::string text)
 	if (owner != _local_company) return;
 	AddNewsItem(GetEncodedString(STR_JUST_RAW_STRING, std::move(text)), NewsType::General, NewsStyle::Small, {});
 }
-
-/** Whether the margin call warning has already been shown to a company; it is shown again after the level has recovered. Not game state. */
-static std::array<bool, MAX_COMPANIES> _stock_margin_call_shown{};
 
 /**
  * Valuation model, step 1: collect the figures of a company.
