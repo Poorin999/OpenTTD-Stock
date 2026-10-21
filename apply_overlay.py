@@ -22,6 +22,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "wallet_base.h": "src", "wallet_base.cpp": "src",
     "wallet_cmd.h": "src", "wallet_cmd.cpp": "src",
     "central_bank.h": "src", "central_bank.cpp": "src",
+    "game_time_manager.h": "src/game_time", "game_time_manager.cpp": "src/game_time", "game_time_driver.cpp": "src/game_time",
     "stock_sl.cpp": "src/saveload",
     "stock_widget.h": "src/widgets",
 }
@@ -35,7 +36,8 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_BANK_BORROW", "borrow from the central bank"),
     ("CMD_BANK_REPAY", "repay the central bank"),
 ]
-NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h"]
+NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h",
+               "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp"]
 REPLACE_KEYS = {"STR_STOCK_TIP_TOOLBOX", "STR_STOCK_TIP_SUMMARY", "STR_STOCK_ORDER_INFO", "STR_STOCK_TIP_DEPOSIT", "STR_STOCK_TIP_WITHDRAW"}
 STRING_FILES = ["english_stock_strings.txt", "english_wallet_strings.txt", "english_round8_strings.txt"]
 ANCHORS = ["STR_STOCK_ERROR_NO_ORDER", "STR_STOCK_NEWS_ORDER_EXPIRED"]
@@ -95,6 +97,26 @@ def main(tree):
         s = s[:m.end()] + "".join(f"{m.group(1)}{f}\n" for f in missing) + s[m.end():]
         p.write_text(s, encoding="utf-8")
     print(f"CMakeLists.txt: {len(missing)} files added")
+
+    # economy.cpp: switch off the interest of the original OpenTTD loan (GAME_TIME_BYPASS_LEGACY_LOANS).
+    p = tree / "src" / "economy.cpp"
+    s = p.read_text(encoding="utf-8")
+    if "IsLegacyLoanBypassed" in s:
+        print("economy.cpp: already changed")
+    else:
+        old = re.search(r"([ \t]*)Money yearly_fee = c->current_loan \* _economy\.interest_rate / 100;\n([ \t]*)Money available_money = GetAvailableMoney\(c->index\);\n([ \t]*)if \(available_money < 0\) \{", s)
+        inc = re.search(r'^#include "company_func\.h"\n', s, re.M)
+        if old and inc:
+            i1, i2, i3 = old.group(1), old.group(2), old.group(3)
+            new = (f"{i1}Money yearly_fee = GameTimeManager::IsLegacyLoanBypassed() ? Money(0) : Money(c->current_loan * _economy.interest_rate / 100);\n"
+                   f"{i2}Money available_money = GetAvailableMoney(c->index);\n"
+                   f"{i3}if (available_money < 0 && !GameTimeManager::IsLegacyLoanBypassed()) {{")
+            s = s[:old.start()] + new + s[old.end():]
+            s = re.sub(r'^(#include "company_func\.h"\n)', r'\1#include "game_time/game_time_manager.h"\n', s, count=1, flags=re.M)
+            p.write_text(s, encoding="utf-8")
+            print("economy.cpp: interest of the original loan switched off")
+        else:
+            print("WARNING: economy.cpp has a different layout, the original loan interest was not changed")
 
     # english.txt
     wanted = {}
