@@ -34,15 +34,26 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
 ]
 NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h"]
 REPLACE_KEYS = {"STR_STOCK_TIP_TOOLBOX", "STR_STOCK_TIP_SUMMARY", "STR_STOCK_ORDER_INFO", "STR_STOCK_TIP_DEPOSIT", "STR_STOCK_TIP_WITHDRAW"}
-STRING_FILES = ["english_stock_strings.txt", "english_wallet_strings.txt"]
+STRING_FILES = ["english_stock_strings.txt", "english_wallet_strings.txt", "english_round8_strings.txt"]
 ANCHORS = ["STR_STOCK_ERROR_NO_ORDER", "STR_STOCK_NEWS_ORDER_EXPIRED"]
 
 
 def find(name):
-    hits = [p for p in HERE.rglob(name) if ".git" not in p.parts and "orig" not in p.parts]
+    """The file with this name (not case sensitive) anywhere next to this script."""
+    import os
+    hits = []
+    for root, dirs, files in os.walk(HERE):
+        dirs[:] = [d for d in dirs if d != ".git"]
+        for f in files:
+            if f.lower() == name.lower():
+                hits.append(Path(root) / f)
     if not hits:
-        sys.exit(f"ERROR: {name} not found next to this script")
-    return sorted(hits, key=lambda p: len(p.parts))[0]
+        stem = name.split(".")[0].lower()
+        similar = [str(Path(r, f).relative_to(HERE)) for r, d, fs in os.walk(HERE) if ".git" not in Path(r).parts
+                   for f in fs if stem[:8] in f.lower()]
+        sys.exit(f"ERROR: {name} not found next to this script. Files with a similar name: {similar or 'none'}")
+    # A copy inside a src/ folder wins over an old copy lying elsewhere; then the shortest path wins.
+    return sorted(hits, key=lambda p: (0 if "src" in p.relative_to(HERE).parts else 1, len(p.parts)))[0]
 
 
 def main(tree):
@@ -111,3 +122,4 @@ if __name__ == "__main__":
         print(__doc__)
         sys.exit(2)
     main(Path(sys.argv[1]).resolve())
+
