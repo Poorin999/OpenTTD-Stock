@@ -113,6 +113,7 @@ CommandCost CmdStockOpen(DoCommandFlags flags, CompanyID target, StockOrderType 
 		order.tp = tp;
 		order.expiry = expiry_days;
 		order.wallet = wallet;
+		order.open_ym = market ? GetStockCurrentMonth() : 0;
 		(market ? _stock_market.positions : _stock_market.pending).push_back(order);
 
 		if (market) {
@@ -181,11 +182,14 @@ CommandCost CmdStockClose(DoCommandFlags flags, uint32_t id, uint32_t close_volu
  * @param sl New Stop Loss, 0 for none.
  * @param tp New Take Profit, 0 for none.
  * @param price New trigger price of a pending order; ignored for an open position.
+ * @param trail New trailing stop distance of an open position, in price units; 0 switches the trailing stop off.
+ *              Must be 0 for a pending order. While it is set, the Stop Loss follows the price (see StockMarket::ApplyTrailingStops).
  * @return Zero cost, or an error.
  */
-CommandCost CmdStockModify(DoCommandFlags flags, uint32_t id, Money sl_in, Money tp_in, Money price_in)
+CommandCost CmdStockModify(DoCommandFlags flags, uint32_t id, Money sl_in, Money tp_in, Money price_in, Money trail_in)
 {
-	const int64_t sl = sl_in, tp = tp_in, price = price_in;
+	const int64_t sl = sl_in, tp = tp_in, price = price_in, trail = trail_in;
+	if (trail < 0) return CMD_ERROR;
 	if (!Company::IsValidID(_current_company)) return CMD_ERROR;
 
 	StockOrder *position = _stock_market.FindPosition(id, _current_company);
@@ -200,6 +204,7 @@ CommandCost CmdStockModify(DoCommandFlags flags, uint32_t id, Money sl_in, Money
 		if (flags.Test(DoCommandFlag::Execute)) {
 			position->sl = sl;
 			position->tp = tp;
+			position->trail = trail;
 			InvalidateWindowData(WC_STOCK_MARKET, 0);
 		}
 		return CommandCost(EXPENSES_OTHER);
@@ -211,6 +216,7 @@ CommandCost CmdStockModify(DoCommandFlags flags, uint32_t id, Money sl_in, Money
 	const CompanyID target{order->target};
 	if (!Company::IsValidID(target)) return CMD_ERROR;
 	if (price <= 0) return CommandCost(STR_STOCK_ERROR_BAD_PRICE);
+	if (trail != 0) return CommandCost(STR_STOCK_ERROR_BAD_STOPS); // Only an open position can trail.
 
 	/* The same rules as when the order was placed. */
 	const int64_t bid = GetStockBid(target);
@@ -267,3 +273,4 @@ CommandCost CmdStockEnableDaily(DoCommandFlags flags, bool enable)
 	}
 	return CommandCost();
 }
+

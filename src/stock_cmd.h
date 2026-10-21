@@ -19,7 +19,7 @@
 
 CommandCost CmdStockOpen(DoCommandFlags flags, CompanyID target, StockOrderType type, uint32_t volume, Money price, Money sl, Money tp, uint32_t expiry_days, uint8_t wallet);
 CommandCost CmdStockClose(DoCommandFlags flags, uint32_t id, uint32_t close_volume);
-CommandCost CmdStockModify(DoCommandFlags flags, uint32_t id, Money sl, Money tp, Money price);
+CommandCost CmdStockModify(DoCommandFlags flags, uint32_t id, Money sl, Money tp, Money price, Money trail);
 CommandCost CmdStockTransfer(DoCommandFlags flags, bool deposit, Money amount);
 CommandCost CmdStockEnableDaily(DoCommandFlags flags, bool enable);
 
@@ -30,3 +30,4 @@ DEF_CMD_TRAIT(CMD_STOCK_TRANSFER, CmdStockTransfer, {}, CommandType::MoneyManage
 DEF_CMD_TRAIT(CMD_STOCK_ENABLE_DAILY, CmdStockEnableDaily, {}, CommandType::MoneyManagement)
 
 #endif /* STOCK_CMD_H */
+

@@ -48,6 +48,7 @@ void StockMarket::Reset()
 	this->has_daily_current.fill(false);
 	this->record_daily = false;
 	this->history.clear();
+	this->stats.fill({});
 	this->positions.clear();
 	this->pending.clear();
 	this->next_id = 1;
@@ -55,6 +56,12 @@ void StockMarket::Reset()
 	this->dividend_delay = 0;
 	this->dividend_quarter = 0;
 	for (auto &row : _stock_margin_call_shown) row.fill(false);
+}
+
+/** The current economy month as year * 12 + month (month 0 = January). */
+int32_t GetStockCurrentMonth()
+{
+	return TimerGameEconomy::year.base() * 12 + TimerGameEconomy::month;
 }
 
 /** Convert a price with #STOCK_PRICE_SCALE steps to whole money units, rounded, at least 1. */
@@ -380,6 +387,10 @@ void StockMarket::ApplyImpact(CompanyID target, bool buy, uint32_t volume)
 	const size_t i = target.base();
 	if (this->price_fp[i] <= 0) return;
 
+	/* Every executed order is traded volume: it goes into the running candles, where the chart shows it as bars. */
+	if (this->has_current[i]) this->current[i].volume += volume;
+	if (this->record_daily && this->has_daily_current[i]) this->daily_current[i].volume += volume;
+
 	const int64_t shift = buy ? GetImpactPpm(volume) : -GetImpactPpm(volume);
 	this->impact[i] = std::clamp<int64_t>(this->impact[i] + shift, -STOCK_IMPACT_MAX_PPM, STOCK_IMPACT_MAX_PPM);
 	this->price_fp[i] = std::max<int64_t>(STOCK_MIN_PRICE * STOCK_PRICE_SCALE, this->price_fp[i] * (STOCK_PPM + shift) / STOCK_PPM);
@@ -421,7 +432,8 @@ void StockMarket::HandleRemovedCompanies()
 	for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
 		if (Company::IsValidID(CompanyID{i})) continue;
 		const bool stale = !this->candles[i].empty() || this->has_current[i] || this->price_fp[i] != 0 ||
-				this->base_fp[i] != 0 || this->impact[i] != 0 || this->valuation[i].quarters != 0 || _wallets.HasOwner(CompanyID{i}) || !this->daily[i].empty() || this->has_daily_current[i];
+				this->base_fp[i] != 0 || this->impact[i] != 0 || this->valuation[i].quarters != 0 || _wallets.HasOwner(CompanyID{i}) || !this->daily[i].empty() || this->has_daily_current[i] ||
+				this->stats[i].closed != 0 || !this->stats[i].months.empty();
 		if (!stale) continue;
 		this->candles[i].clear();
 		this->current[i] = {};
@@ -434,6 +446,7 @@ void StockMarket::HandleRemovedCompanies()
 		this->daily[i].clear();
 		this->daily_current[i] = {};
 		this->has_daily_current[i] = false;
+		this->stats[i] = {};
 		std::erase_if(this->history, [i](const StockClosedTrade &t) { return t.owner == i; });
 	}
 }
@@ -458,8 +471,10 @@ void StockMarket::AddHistory(const StockOrder &position, int64_t close_price, in
 	t.open_price = position.price;
 	t.close_price = close_price;
 	t.profit = profit;
-	t.closed_ym = TimerGameEconomy::year.base() * 12 + TimerGameEconomy::month;
+	t.closed_ym = GetStockCurrentMonth();
+	t.open_ym = position.open_ym;
 	this->history.push_back(t);
+	this->RecordStats(t);
 
 	size_t count = 0;
 	for (const StockClosedTrade &h : this->history) count += (h.owner == t.owner);
@@ -504,11 +519,121 @@ int64_t StockMarket::ClosePosition(size_t index, uint32_t volume, int64_t close_
 }
 
 /**
+ * Count a closed trade in the results of its company: the total, the win rate and the profit of the month.
+ * @param trade The trade that has been closed.
+ */
+void StockMarket::RecordStats(const StockClosedTrade &trade)
+{
+	if (trade.owner >= MAX_COMPANIES) return;
+	StockStats &s = this->stats[trade.owner];
+	const bool win = trade.profit > 0;
+	s.total_profit += trade.profit;
+	s.closed++;
+	if (win) s.wins++;
+
+	if (s.months.empty() || s.months.back().ym != trade.closed_ym) {
+		/* Trades are normally closed in the order of the months; a trade of an older month (rebuilding from the history) goes into its own entry. */
+		auto it = std::find_if(s.months.begin(), s.months.end(), [&](const StockMonthProfit &m) { return m.ym == trade.closed_ym; });
+		if (it == s.months.end()) {
+			StockMonthProfit m;
+			m.ym = trade.closed_ym;
+			s.months.push_back(m);
+			std::sort(s.months.begin(), s.months.end(), [](const StockMonthProfit &a, const StockMonthProfit &b) { return a.ym < b.ym; });
+			while (s.months.size() > STOCK_MAX_STATS_MONTHS) s.months.erase(s.months.begin());
+		}
+	}
+	auto it = std::find_if(s.months.begin(), s.months.end(), [&](const StockMonthProfit &m) { return m.ym == trade.closed_ym; });
+	if (it == s.months.end()) return; // The month is older than the months that are remembered.
+	it->profit += trade.profit;
+	it->trades++;
+	if (win) it->wins++;
+}
+
+/** Count all trades of the history again. Used for savegames from before the results were saved. */
+void StockMarket::RebuildStats()
+{
+	this->stats.fill({});
+	for (const StockClosedTrade &t : this->history) this->RecordStats(t);
+}
+
+/**
+ * Trailing stop: the Stop Loss of a position with a trailing distance follows the price, at that distance.
+ * A long position (which is closed at the Bid price) moves its Stop Loss up to Bid - distance, a short position
+ * (closed at the Ask price) moves it down to Ask + distance. The Stop Loss never moves the other way, so the
+ * profit that has been made is locked in when the price turns. A position that has no Stop Loss yet gets one.
+ * This runs in the game loop with integers only, so every client calculates exactly the same levels.
+ */
+void StockMarket::ApplyTrailingStops()
+{
+	for (StockOrder &p : this->positions) {
+		if (p.trail <= 0) continue;
+		const CompanyID target{p.target};
+		if (!Company::IsValidID(CompanyID{p.owner}) || !Company::IsValidID(target) || this->price_fp[p.target] <= 0) continue;
+
+		if (IsStockBuy(p.type)) {
+			const int64_t level = GetStockBid(target) - p.trail;
+			if (level > 0 && (p.sl == 0 || level > p.sl)) p.sl = level;
+		} else {
+			const int64_t level = GetStockAsk(target) + p.trail;
+			if (p.sl == 0 || level < p.sl) p.sl = level;
+		}
+	}
+}
+
+/**
+ * The price that the change of a symbol is measured against: the close of the last completed month, or the opening
+ * price of the running month when there is no completed month yet.
+ * @param company The company.
+ * @return The reference price, or the current price when nothing is known.
+ */
+int64_t GetStockReferencePrice(CompanyID company)
+{
+	if (!Company::IsValidID(company)) return 0;
+	const size_t index = company.base();
+	if (!_stock_market.candles[index].empty()) return _stock_market.candles[index].back().close;
+	if (_stock_market.has_current[index]) return _stock_market.current[index].open;
+	return GetStockPrice(company);
+}
+
+/**
+ * The companies in the order of the ranking. Ties are broken by the company number, so the order is stable.
+ * @param sort What the ranking is sorted by.
+ * @return One entry per company, the best first.
+ */
+std::vector<StockRankEntry> GetStockRanking(StockRankSort sort)
+{
+	std::vector<StockRankEntry> list;
+	for (const Company *c : Company::Iterate()) {
+		StockRankEntry e;
+		e.company = c->index;
+		e.price = GetStockPrice(c->index);
+		e.market_cap = GetStockMarketCap(c->index);
+		const int64_t reference = GetStockReferencePrice(c->index);
+		e.change_tenths = reference > 0 ? (e.price - reference) * 1000 / reference : 0;
+		list.push_back(e);
+	}
+
+	std::sort(list.begin(), list.end(), [sort](const StockRankEntry &a, const StockRankEntry &b) {
+		int64_t ka = 0, kb = 0;
+		switch (sort) {
+			case StockRankSort::MarketCap: ka = a.market_cap; kb = b.market_cap; break;
+			case StockRankSort::Price:     ka = a.price; kb = b.price; break;
+			case StockRankSort::Change:    ka = a.change_tenths; kb = b.change_tenths; break;
+		}
+		if (ka != kb) return ka > kb;
+		return a.company.base() < b.company.base();
+	});
+	return list;
+}
+
+/**
  * Close positions that have reached their Stop Loss or Take Profit.
  * The position is closed exactly at the level that was reached, not at the price the market has moved to since.
  */
 void StockMarket::CheckPositions()
 {
+	this->ApplyTrailingStops();
+
 	for (size_t i = 0; i < this->positions.size();) {
 		const StockOrder p = this->positions[i];
 		const CompanyID owner{p.owner};
@@ -637,6 +762,7 @@ void StockMarket::CheckPending()
 		const bool buy = IsStockBuy(o.type);
 		o.type = buy ? StockOrderType::Buy : StockOrderType::Sell;
 		o.expiry = 0;
+		o.open_ym = GetStockCurrentMonth();
 
 		/* Not enough free margin: the order is dropped. */
 		if (!IsTradingWallet(owner, o.wallet) || GetStockUsedMargin(owner, o.wallet) + GetStockMargin(o) > GetStockEquity(owner, o.wallet)) {
@@ -906,3 +1032,4 @@ static const IntervalTimer<TimerGameTick> _stock_tick({TimerGameTick::Priority::
 {
 	_stock_market.UpdateTick();
 });
+

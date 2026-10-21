@@ -31,6 +31,9 @@ enum StockRecordKind : uint8_t {
 	SRK_DAILY_ON = 13, ///< The Daily view was turned on: daily candles are recorded.
 	SRK_BALANCE = 10, ///< Trading account of older savegames: a = company, v1 = deposited money. Only read.
 	SRK_WALLET = 14,  ///< Wallet: a = owner, b = number, v1 = balance, v2 = kind.
+	SRK_POSITION_EXT = 15, ///< More data of an open position: a = owner, ym = id, v1 = trailing stop distance, v2 = month of opening.
+	SRK_STATS = 16,   ///< Trading results of a company: a = company, v1 = closed trades, v2 = winning trades, v3 = total profit.
+	SRK_STATS_MONTH = 17, ///< Profit of one month: a = company, ym = month, v1 = profit, v2 = trades, v3 = winning trades.
 	SRK_HISTORY = 8,  ///< Closed trade: a = owner, b = target, ym = id, v1 = volume, v2 = open price, v3 = close price, v4 = profit, v5 = type | reason << 8 | closed month << 16.
 };
 
@@ -69,6 +72,7 @@ static StockRecord CandleRecord(uint8_t kind, uint8_t company, const StockCandle
 	r.v2 = candle.high;
 	r.v3 = candle.low;
 	r.v4 = candle.close;
+	r.v5 = candle.volume;
 	return r;
 }
 
@@ -153,7 +157,42 @@ struct STCKChunkHandler : ChunkHandler {
 		for (const StockOrder &o : _stock_market.positions) write(OrderRecord(SRK_POSITION, o));
 		for (const StockOrder &o : _stock_market.pending) write(OrderRecord(SRK_PENDING, o));
 
+		for (const StockOrder &o : _stock_market.positions) {
+			if (o.trail == 0 && o.open_ym == 0) continue;
+			StockRecord r;
+			r.kind = SRK_POSITION_EXT;
+			r.a = o.owner;
+			r.ym = static_cast<int32_t>(o.id);
+			r.v1 = o.trail;
+			r.v2 = o.open_ym;
+			write(r);
+		}
+
+		for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
+			const StockStats &s = _stock_market.stats[i];
+			if (s.closed == 0 && s.months.empty()) continue;
+			StockRecord r;
+			r.kind = SRK_STATS;
+			r.a = i;
+			r.v1 = s.closed;
+			r.v2 = s.wins;
+			r.v3 = s.total_profit;
+			write(r);
+			for (const StockMonthProfit &m : s.months) {
+				StockRecord mr;
+				mr.kind = SRK_STATS_MONTH;
+				mr.a = i;
+				mr.ym = m.ym;
+				mr.v1 = m.profit;
+				mr.v2 = m.trades;
+				mr.v3 = m.wins;
+				write(mr);
+			}
+		}
+
 		for (const StockClosedTrade &t : _stock_market.history) {
+			/* The month of opening is saved as the number of months before the closing, plus one; 0 means not known. */
+			const int64_t open_months = t.open_ym > 0 ? std::clamp<int64_t>(static_cast<int64_t>(t.closed_ym) - t.open_ym + 1, 1, 0x7FFF) : 0;
 			StockRecord r;
 			r.kind = SRK_HISTORY;
 			r.a = t.owner;
@@ -163,7 +202,7 @@ struct STCKChunkHandler : ChunkHandler {
 			r.v2 = t.open_price;
 			r.v3 = t.close_price;
 			r.v4 = t.profit;
-			r.v5 = static_cast<int64_t>(t.type) | (static_cast<int64_t>(t.reason) << 8) | (static_cast<int64_t>(t.closed_ym) << 16) | (static_cast<int64_t>(t.wallet) << 40);
+			r.v5 = static_cast<int64_t>(t.type) | (static_cast<int64_t>(t.reason) << 8) | (static_cast<int64_t>(t.closed_ym) << 16) | (static_cast<int64_t>(t.wallet) << 40) | (open_months << 48);
 			write(r);
 		}
 	}
@@ -174,6 +213,7 @@ struct STCKChunkHandler : ChunkHandler {
 
 		_stock_market.Reset();
 
+		bool have_stats = false;
 		int index;
 		while ((index = SlIterateArray()) != -1) {
 			StockRecord r;
@@ -191,6 +231,7 @@ struct STCKChunkHandler : ChunkHandler {
 				case SRK_RUNNING: {
 					if (r.a >= MAX_COMPANIES) break;
 					StockCandle candle{r.ym, r.v1, r.v2, r.v3, r.v4};
+					candle.volume = std::max<int64_t>(r.v5, 0);
 					if (r.kind == SRK_CANDLE) {
 						_stock_market.candles[r.a].push_back(candle);
 					} else {
@@ -224,6 +265,7 @@ struct STCKChunkHandler : ChunkHandler {
 				case SRK_DAILY_RUNNING: {
 					if (r.a >= MAX_COMPANIES) break;
 					StockCandle candle{r.ym, r.v1, r.v2, r.v3, r.v4};
+					candle.volume = std::max<int64_t>(r.v5, 0);
 					if (r.kind == SRK_DAILY) {
 						_stock_market.daily[r.a].push_back(candle);
 					} else {
@@ -308,13 +350,46 @@ struct STCKChunkHandler : ChunkHandler {
 					t.profit = r.v4;
 					t.closed_ym = static_cast<int32_t>((r.v5 >> 16) & 0xFFFFFF);
 					t.wallet = static_cast<uint8_t>((r.v5 >> 40) & 0xFF);
+					const int64_t open_months = (r.v5 >> 48) & 0x7FFF;
+					t.open_ym = open_months > 0 ? static_cast<int32_t>(std::max<int64_t>(t.closed_ym - (open_months - 1), 1)) : 0;
 					_stock_market.history.push_back(t);
+					break;
+				}
+
+				case SRK_POSITION_EXT:
+					for (StockOrder &o : _stock_market.positions) {
+						if (o.id != static_cast<uint32_t>(r.ym) || o.owner != r.a) continue;
+						o.trail = std::max<int64_t>(r.v1, 0);
+						o.open_ym = static_cast<int32_t>(std::max<int64_t>(r.v2, 0));
+						break;
+					}
+					break;
+
+				case SRK_STATS:
+					if (r.a >= MAX_COMPANIES) break;
+					have_stats = true;
+					_stock_market.stats[r.a].closed = static_cast<uint32_t>(std::max<int64_t>(r.v1, 0));
+					_stock_market.stats[r.a].wins = static_cast<uint32_t>(std::max<int64_t>(r.v2, 0));
+					_stock_market.stats[r.a].total_profit = r.v3;
+					break;
+
+				case SRK_STATS_MONTH: {
+					if (r.a >= MAX_COMPANIES) break;
+					StockMonthProfit m;
+					m.ym = r.ym;
+					m.profit = r.v1;
+					m.trades = static_cast<uint32_t>(std::max<int64_t>(r.v2, 0));
+					m.wins = static_cast<uint32_t>(std::max<int64_t>(r.v3, 0));
+					_stock_market.stats[r.a].months.push_back(m);
 					break;
 				}
 
 				default: break;
 			}
 		}
+
+		/* Savegames from before the results were saved: count the trades of the history. */
+		if (!have_stats) _stock_market.RebuildStats();
 
 		/* Savegames from before the wallets: the trades have no wallet. They belong to the first trading wallet. */
 		auto migrate = [](uint8_t owner, uint8_t &wallet) {
@@ -339,3 +414,4 @@ static const ChunkHandlerRef stock_chunk_handlers[] = {
 };
 
 extern const ChunkHandlerTable _stock_chunk_handlers(stock_chunk_handlers);
+

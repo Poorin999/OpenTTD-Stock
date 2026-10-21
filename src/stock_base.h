@@ -94,6 +94,9 @@ static constexpr uint32_t STOCK_MAX_EXPIRY_DAYS = 3650;
 /** Maximum number of closed trades that are remembered per company; the oldest ones are forgotten first. */
 static constexpr size_t STOCK_MAX_HISTORY_PER_COMPANY = 100;
 
+/** Number of months (the newest ones) of which the profit is remembered per company, for the portfolio summary. */
+static constexpr size_t STOCK_MAX_STATS_MONTHS = 24;
+
 /** Maximum number of positions plus pending orders per company. */
 static constexpr size_t STOCK_MAX_ORDERS_PER_COMPANY = 40;
 
@@ -132,6 +135,8 @@ struct StockOrder {
 	int64_t tp = 0;                          ///< Take Profit, 0 when not set.
 	uint32_t expiry = 0;                     ///< Pending orders only: economy days left before the order expires; 0 means it never expires.
 	uint8_t wallet = 0;                      ///< Trading wallet of the owner that pays the fees of the order and gets its results.
+	int64_t trail = 0;                       ///< Positions only: trailing stop distance in price units; 0 when the trailing stop is off.
+	int32_t open_ym = 0;                     ///< Positions only: economy year * 12 + month in which the position was opened; 0 when not known.
 };
 
 /** One candle of the chart; covers one economy month. */
@@ -141,6 +146,7 @@ struct StockCandle {
 	int64_t high = 0;    ///< Highest price of the month.
 	int64_t low = 0;     ///< Lowest price of the month.
 	int64_t close = 0;   ///< Price at the end of the month (or the latest price for the running month).
+	int64_t volume = 0;  ///< Shares traded in this period by the orders of the players (the volume bars of the chart).
 };
 
 /** Why a position was closed. */
@@ -166,6 +172,41 @@ struct StockClosedTrade {
 	int64_t profit = 0;                           ///< Realised profit; negative for a loss.
 	int32_t closed_ym = 0;                        ///< Economy year * 12 + month of the closing.
 	uint8_t wallet = 0;                           ///< Trading wallet that the result was booked in.
+	int32_t open_ym = 0;                          ///< Economy year * 12 + month of the opening; 0 when not known (savegames from before).
+};
+
+/** The profit of one company in one economy month, part of #StockStats. */
+struct StockMonthProfit {
+	int32_t ym = 0;        ///< Economy year * 12 + month.
+	int64_t profit = 0;    ///< Realised profit of the trades closed in that month; negative for a loss.
+	uint32_t trades = 0;   ///< Number of trades closed in that month.
+	uint32_t wins = 0;     ///< Number of those trades that made a profit.
+};
+
+/**
+ * The trading results of one company. They are counted when a trade is closed, so they stay complete after the
+ * oldest trades have been dropped from the history.
+ */
+struct StockStats {
+	int64_t total_profit = 0;                ///< Realised profit of all closed trades; negative for a loss.
+	uint32_t closed = 0;                     ///< Number of closed trades (a partial close counts as one trade).
+	uint32_t wins = 0;                       ///< Number of closed trades with a profit above zero.
+	std::vector<StockMonthProfit> months{};  ///< The newest #STOCK_MAX_STATS_MONTHS months with trades, the oldest first.
+};
+
+/** What the ranking of the companies is sorted by. */
+enum class StockRankSort : uint8_t {
+	MarketCap, ///< Market capitalisation, the highest first.
+	Price,     ///< Price of one share, the highest first.
+	Change,    ///< Change of the price since the last month, the best first.
+};
+
+/** One line of the ranking of the companies. */
+struct StockRankEntry {
+	CompanyID company{};         ///< The company.
+	int64_t price = 0;           ///< Price of one share.
+	int64_t market_cap = 0;      ///< Market capitalisation.
+	int64_t change_tenths = 0;   ///< Change of the price since the last month, in tenths of a percent.
 };
 
 /** Valuation of one company, refreshed once per day. */
@@ -198,6 +239,7 @@ struct StockMarket {
 	std::array<bool, MAX_COMPANIES> has_daily_current{};           ///< Whether #daily_current is valid.
 	bool record_daily = false;                                     ///< Whether daily candles are recorded; set once when the player opens the Daily view.
 	std::vector<StockClosedTrade> history{};                       ///< Closed trades of all companies, the oldest first.
+	std::array<StockStats, MAX_COMPANIES> stats{};                 ///< Trading results per company (the portfolio summary).
 	std::vector<StockOrder> positions{};                           ///< Open positions.
 	std::vector<StockOrder> pending{};                             ///< Pending orders.
 	uint32_t next_id = 1;                                          ///< Number of the next order.
@@ -218,9 +260,12 @@ struct StockMarket {
 	void AddHistory(const StockOrder &position, int64_t close_price, int64_t profit, StockCloseReason reason);
 	int64_t ClosePosition(size_t index, uint32_t volume, int64_t close_price, StockCloseReason reason);
 	void ApplyImpact(CompanyID target, bool buy, uint32_t volume);
+	void RecordStats(const StockClosedTrade &trade);
+	void RebuildStats();
 
 private:
 	void HandleRemovedCompanies();
+	void ApplyTrailingStops();
 	void CheckPositions();
 	void CheckPending();
 	void CheckMarginCall();
@@ -240,6 +285,10 @@ int64_t GetStockAsk(CompanyID company);
 int64_t GetStockExecutionPrice(CompanyID company, bool buy, uint32_t volume);
 int64_t GetStockCommission(int64_t value);
 
+int32_t GetStockCurrentMonth();
+int64_t GetStockReferencePrice(CompanyID company);
+std::vector<StockRankEntry> GetStockRanking(StockRankSort sort);
+
 int64_t GetStockProfit(const StockOrder &position);
 int64_t GetStockMargin(const StockOrder &position);
 int64_t GetStockUsedMargin(CompanyID owner, uint8_t wallet);
@@ -250,3 +299,4 @@ int64_t GetStockMarginLevel(CompanyID owner, uint8_t wallet);
 void PayStockProfit(CompanyID owner, uint8_t wallet, int64_t profit);
 
 #endif /* STOCK_BASE_H */
+

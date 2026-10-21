@@ -1,0 +1,1 @@
+STR_STOCK_QUERY_TRAIL                                           :Trailing stop distance (empty to switch off)
