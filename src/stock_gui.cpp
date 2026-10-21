@@ -153,6 +153,7 @@ struct StockWindow : Window {
 		TakeProfit,   ///< New Take Profit of a position.
 		Deposit,      ///< Amount to move from the company cash to the trading balance.
 		Withdraw,     ///< Amount to move from the trading balance to the company cash.
+		PendingPrice, ///< New trigger price of a pending order.
 	};
 
 	CompanyID selected = INVALID_OWNER; ///< Symbol (company) whose chart is shown.
@@ -236,6 +237,26 @@ struct StockWindow : Window {
 		return years;
 	}
 
+	/** An open position or a pending order of the local company with this number, or nullptr. */
+	static const StockOrder *FindOwnOrder(uint32_t id)
+	{
+		if (!Company::IsValidID(_local_company)) return nullptr;
+		const StockOrder *order = _stock_market.FindPosition(id, _local_company);
+		if (order == nullptr) order = _stock_market.FindPending(id, _local_company);
+		return order;
+	}
+
+	/**
+	 * Keep the scroll offset of the chart inside the candles that exist in the active timeframe. The offset is counted
+	 * in candles of that timeframe, so it can be out of range after the timeframe or the symbol was changed, or when
+	 * old candles were dropped.
+	 */
+	void ClampChartScroll()
+	{
+		const int count = static_cast<int>(this->GetChartCandles().size());
+		this->chart_scroll_offset = std::clamp(this->chart_scroll_offset, 0, std::max(0, count - 1));
+	}
+
 	/** The rows of the toolbox: first the open positions, then the pending orders of the local company. */
 	std::vector<const StockOrder *> GetRows() const
 	{
@@ -278,6 +299,7 @@ struct StockWindow : Window {
 	void OnPaint() override
 	{
 		this->EnsureValidSelection();
+		this->ClampChartScroll();
 		this->DrawWidgets();
 	}
 
@@ -304,6 +326,10 @@ struct StockWindow : Window {
 				ShowQueryString(position.tp != 0 ? StockMoneyToEditString(position.tp) : std::string{}, STR_STOCK_QUERY_TP, 24, this, CS_ALPHANUMERAL, {});
 				break;
 
+			case QueryKind::PendingPrice:
+				ShowQueryString(StockMoneyToEditString(position.price), STR_STOCK_COL_PRICE, 24, this, CS_ALPHANUMERAL, {});
+				break;
+
 			default: break;
 		}
 	}
@@ -321,12 +347,13 @@ struct StockWindow : Window {
 			return;
 		}
 
-		/* The position may have been closed while the query window was open. */
-		const StockOrder *position = _stock_market.FindPosition(this->query_id, _local_company);
+		/* The position or order may have been closed or cancelled while the query window was open. */
+		const StockOrder *position = FindOwnOrder(this->query_id);
 		if (position == nullptr) return;
 
 		switch (kind) {
 			case QueryKind::CloseVolume: {
+				if (_stock_market.FindPosition(position->id, _local_company) == nullptr) return; // Only open positions can be closed in parts.
 				double lots = 0;
 				if (!ParseStockNumber(*str, lots) || lots <= 0) return;
 				const double units = std::round(lots * 100.0);
@@ -346,7 +373,15 @@ struct StockWindow : Window {
 				}
 				const int64_t sl = kind == QueryKind::StopLoss ? value : position->sl;
 				const int64_t tp = kind == QueryKind::TakeProfit ? value : position->tp;
-				Command<CMD_STOCK_MODIFY>::Post(STR_STOCK_ERROR_CANT_MODIFY, position->id, Money(sl), Money(tp));
+				Command<CMD_STOCK_MODIFY>::Post(STR_STOCK_ERROR_CANT_MODIFY, position->id, Money(sl), Money(tp), Money(position->price));
+				break;
+			}
+
+			case QueryKind::PendingPrice: {
+				/* The trigger price of a pending order is changed in place, without deleting and placing the order again. */
+				double number = 0;
+				if (!ParseStockNumber(*str, number) || number <= 0) return;
+				Command<CMD_STOCK_MODIFY>::Post(STR_STOCK_ERROR_CANT_MODIFY, position->id, Money(position->sl), Money(position->tp), Money(StockDisplayToMoney(number)));
 				break;
 			}
 
@@ -392,6 +427,19 @@ struct StockWindow : Window {
 				ShowStockOrderWindow(this->selected);
 				break;
 
+			case WID_ST_CLOSE_ALL: {
+				if (!Company::IsValidID(_local_company)) break;
+				/* Collect the numbers first: with a single player the commands change the list of positions at once. */
+				std::vector<std::pair<uint32_t, uint32_t>> to_close;
+				for (const StockOrder &p : _stock_market.positions) {
+					if (p.owner == _local_company.base()) to_close.emplace_back(p.id, p.volume);
+				}
+				for (const auto &[id, volume] : to_close) {
+					Command<CMD_STOCK_CLOSE>::Post(STR_STOCK_ERROR_CANT_CLOSE, id, volume);
+				}
+				break;
+			}
+
 			case WID_ST_DEPOSIT:
 			case WID_ST_WITHDRAW: {
 				if (!Company::IsValidID(_local_company)) break;
@@ -406,7 +454,7 @@ struct StockWindow : Window {
 			case WID_ST_TF_YEAR: {
 				const bool daily = widget == WID_ST_TF_DAY;
 				const bool yearly = widget == WID_ST_TF_YEAR;
-				if (daily && !_stock_market.record_daily) Command<CMD_STOCK_ENABLE_DAILY>::Post(STR_STOCK_ERROR_CANT_MODIFY, true);
+				if (daily && !_stock_market.record_daily) Command<CMD_STOCK_ENABLE_DAILY>::Post(STR_STOCK_ERROR_CANT_MODIFY);
 				if (this->view_yearly != yearly || this->view_daily != daily) {
 					this->view_yearly = yearly;
 					this->view_daily = daily;
@@ -460,9 +508,12 @@ struct StockWindow : Window {
 					} else {
 						Command<CMD_STOCK_CLOSE>::Post(STR_STOCK_ERROR_CANT_CLOSE, o.id, o.volume);
 					}
-				} else if (is_position && pt.x >= col.open && pt.x < col.sl) {
+				} else if (!is_position && pt.x >= col.volume && pt.x < col.open) {
+					/* The price of a pending order is its trigger price: click it to change it. */
+					this->OpenQuery(QueryKind::PendingPrice, o);
+				} else if (pt.x >= col.open && pt.x < col.sl) {
 					this->OpenQuery(QueryKind::StopLoss, o);
-				} else if (is_position && pt.x >= col.sl && pt.x < col.tp) {
+				} else if (pt.x >= col.sl && pt.x < col.tp) {
 					this->OpenQuery(QueryKind::TakeProfit, o);
 				}
 				break;
@@ -481,6 +532,9 @@ struct StockWindow : Window {
 			case WID_ST_SUMMARY: this->DrawSummary(r); break;
 			case WID_ST_CHART:   this->DrawChart(r); break;
 			case WID_ST_TOOLBOX: this->DrawToolbox(r); break;
+			case WID_ST_CLOSE_ALL:
+				DrawString(r.left + 2, r.right - 2, CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL)), std::string("Close All"), TC_BLACK, SA_HOR_CENTER);
+				break;
 			default: break;
 		}
 	}
@@ -690,6 +744,23 @@ struct StockWindow : Window {
 			}
 		}
 
+		/* Position lines: the entry price (green), Stop Loss (red) and Take Profit (blue) of the open positions of the local
+		 * company in this symbol, as dashed horizontal lines. Levels outside of the visible price range are not drawn. */
+		if (Company::IsValidID(_local_company)) {
+			auto dashed_line = [&](int64_t price, PixelColour colour) {
+				const int y = to_y(price);
+				if (y < top || y > bottom) return;
+				const int dash = std::max(1, ScaleGUITrad(4));
+				for (int x = left; x < right; x += 2 * dash) GfxDrawLine(x, y, std::min(x + dash - 1, right), y, colour);
+			};
+			for (const StockOrder &p : _stock_market.positions) {
+				if (p.owner != _local_company.base() || p.target != this->selected.base()) continue;
+				dashed_line(p.price, PC_GREEN);
+				if (p.sl > 0) dashed_line(p.sl, PC_RED);
+				if (p.tp > 0) dashed_line(p.tp, PC_LIGHT_BLUE);
+			}
+		}
+
 		/* Moving average of the closing price over 20 candles, drawn as a yellow line. */
 		static constexpr size_t MA_PERIOD = 20;
 		int prev_x = 0;
@@ -862,9 +933,9 @@ struct StockWindow : Window {
 			DrawString(c_symbol, c_type, y, GetString(STR_STOCK_SYMBOL, target), TC_WHITE, SA_LEFT);
 			DrawString(c_type, c_volume - ScaleGUITrad(60), y, GetStockOrderTypeString(o.type), IsStockBuy(o.type) ? TC_LIGHT_BLUE : TC_ORANGE, SA_LEFT);
 			DrawString(c_volume - ScaleGUITrad(60), c_volume, y, StockVolumeToString(o.volume), TC_WHITE, SA_RIGHT);
-			DrawString(c_volume, c_open, y, GetString(STR_JUST_CURRENCY_LONG, o.price), TC_WHITE, SA_RIGHT);
-			/* The levels of an open position can be clicked to change them, which the colour shows. */
-			const TextColour level_colour = is_position ? TC_LIGHT_BLUE : TC_WHITE;
+			/* The price of a pending order and the levels of every trade can be clicked to change them, which the colour shows. */
+			DrawString(c_volume, c_open, y, GetString(STR_JUST_CURRENCY_LONG, o.price), is_position ? TC_WHITE : TC_LIGHT_BLUE, SA_RIGHT);
+			const TextColour level_colour = TC_LIGHT_BLUE;
 			DrawString(c_open, c_sl, y, o.sl != 0 ? GetString(STR_JUST_CURRENCY_LONG, o.sl) : std::string("-"), level_colour, SA_RIGHT);
 			DrawString(c_sl, c_tp, y, o.tp != 0 ? GetString(STR_JUST_CURRENCY_LONG, o.tp) : std::string("-"), level_colour, SA_RIGHT);
 
@@ -918,6 +989,10 @@ static constexpr std::initializer_list<NWidgetPart> _nested_stock_widgets = {
 			NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_CHART), SetMinimalSize(400, 184), SetResize(1, 1), SetFill(1, 1),
 			EndContainer(),
 		EndContainer(),
+	EndContainer(),
+	NWidget(NWID_HORIZONTAL),
+		NWidget(WWT_PUSHBTN, COLOUR_GREY, WID_ST_CLOSE_ALL), SetMinimalSize(90, 14),
+		NWidget(NWID_SPACER), SetFill(1, 0), SetResize(1, 0),
 	EndContainer(),
 	NWidget(NWID_HORIZONTAL),
 		NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_TOOLBOX), SetMinimalSize(630, 100), SetResize(1, 0), SetFill(1, 1), SetScrollbar(WID_ST_TOOL_SCROLLBAR), SetToolTip(STR_STOCK_TIP_TOOLBOX),

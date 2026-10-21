@@ -166,32 +166,63 @@ CommandCost CmdStockClose(DoCommandFlags flags, uint32_t id, uint32_t close_volu
 }
 
 /**
- * Change the Stop Loss and Take Profit of an open position.
- * The levels must be on the correct side of the price at which the position would be closed now, otherwise it would close at once.
+ * Change an open position or a pending order.
+ * For an open position the Stop Loss and Take Profit can be changed; they must be on the correct side of the price
+ * at which the position would be closed now, otherwise it would close at once. The price is ignored.
+ * For a pending order the trigger price, the Stop Loss and the Take Profit can be changed; the price must lie on
+ * the correct side of the current price for the type of the order, and the stops on the correct side of the new price.
  * @param flags Type of operation.
- * @param id Number of the position.
+ * @param id Number of the position or pending order.
  * @param sl New Stop Loss, 0 for none.
  * @param tp New Take Profit, 0 for none.
+ * @param price New trigger price of a pending order; ignored for an open position.
  * @return Zero cost, or an error.
  */
-CommandCost CmdStockModify(DoCommandFlags flags, uint32_t id, Money sl_in, Money tp_in)
+CommandCost CmdStockModify(DoCommandFlags flags, uint32_t id, Money sl_in, Money tp_in, Money price_in)
 {
-	const int64_t sl = sl_in, tp = tp_in;
+	const int64_t sl = sl_in, tp = tp_in, price = price_in;
 	if (!Company::IsValidID(_current_company)) return CMD_ERROR;
 
 	StockOrder *position = _stock_market.FindPosition(id, _current_company);
-	if (position == nullptr) return CommandCost(STR_STOCK_ERROR_NO_ORDER);
+	if (position != nullptr) {
+		const CompanyID target{position->target};
+		if (!Company::IsValidID(target)) return CMD_ERROR;
 
-	const CompanyID target{position->target};
+		const bool buy = IsStockBuy(position->type);
+		const int64_t reference = buy ? GetStockBid(target) : GetStockAsk(target);
+		if (!AreStopsValid(buy, reference, sl, tp)) return CommandCost(STR_STOCK_ERROR_BAD_STOPS);
+
+		if (flags.Test(DoCommandFlag::Execute)) {
+			position->sl = sl;
+			position->tp = tp;
+			InvalidateWindowData(WC_STOCK_MARKET, 0);
+		}
+		return CommandCost(EXPENSES_OTHER);
+	}
+
+	StockOrder *order = _stock_market.FindPending(id, _current_company);
+	if (order == nullptr) return CommandCost(STR_STOCK_ERROR_NO_ORDER);
+
+	const CompanyID target{order->target};
 	if (!Company::IsValidID(target)) return CMD_ERROR;
+	if (price <= 0) return CommandCost(STR_STOCK_ERROR_BAD_PRICE);
 
-	const bool buy = IsStockBuy(position->type);
-	const int64_t reference = buy ? GetStockBid(target) : GetStockAsk(target);
-	if (!AreStopsValid(buy, reference, sl, tp)) return CommandCost(STR_STOCK_ERROR_BAD_STOPS);
+	/* The same rules as when the order was placed. */
+	const int64_t bid = GetStockBid(target);
+	const int64_t ask = GetStockAsk(target);
+	switch (order->type) {
+		case StockOrderType::BuyLimit:  if (price >= ask) return CommandCost(STR_STOCK_ERROR_BAD_PRICE); break;
+		case StockOrderType::BuyStop:   if (price <= ask) return CommandCost(STR_STOCK_ERROR_BAD_PRICE); break;
+		case StockOrderType::SellLimit: if (price <= bid) return CommandCost(STR_STOCK_ERROR_BAD_PRICE); break;
+		case StockOrderType::SellStop:  if (price >= bid) return CommandCost(STR_STOCK_ERROR_BAD_PRICE); break;
+		default: return CMD_ERROR;
+	}
+	if (!AreStopsValid(IsStockBuy(order->type), price, sl, tp)) return CommandCost(STR_STOCK_ERROR_BAD_STOPS);
 
 	if (flags.Test(DoCommandFlag::Execute)) {
-		position->sl = sl;
-		position->tp = tp;
+		order->price = price;
+		order->sl = sl;
+		order->tp = tp;
 		InvalidateWindowData(WC_STOCK_MARKET, 0);
 	}
 
@@ -237,15 +268,12 @@ CommandCost CmdStockTransfer(DoCommandFlags flags, bool deposit, Money amount_in
 /**
  * Start recording daily candles. Nothing is recorded before the first player opens the Daily view, so the
  * game does not keep data nobody looks at. Once turned on it stays on; there is no history from before.
- * The parameter is needed because a command without any parameter besides the flags can not be built by the command system.
  * @param flags Type of operation.
- * @param enable Must be true; recording can not be turned off again.
  * @return Zero cost, or an error.
  */
-CommandCost CmdStockEnableDaily(DoCommandFlags flags, bool enable)
+CommandCost CmdStockEnableDaily(DoCommandFlags flags)
 {
 	if (!Company::IsValidID(_current_company)) return CMD_ERROR;
-	if (!enable) return CMD_ERROR;
 	if (flags.Test(DoCommandFlag::Execute) && !_stock_market.record_daily) {
 		_stock_market.record_daily = true;
 		InvalidateWindowData(WC_STOCK_MARKET, 0);

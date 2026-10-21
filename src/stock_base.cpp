@@ -8,6 +8,7 @@
 /** @file stock_base.cpp Implementation of the in-game trading terminal. */
 
 #include "stdafx.h"
+#include "3rdparty/fmt/format.h"
 #include "stock_base.h"
 #include "stock_gui.h"
 #include "command_type.h"
@@ -71,6 +72,21 @@ static int64_t GetImpactPpm(uint32_t volume)
 {
 	return static_cast<int64_t>(volume) * STOCK_IMPACT_FACTOR * STOCK_PPM / STOCK_SHARES_PER_COMPANY;
 }
+
+/**
+ * Show a news item about a trading event. Only the company that the event is about is told, and a news item
+ * does not change the game state, so this is safe in a network game.
+ * @param owner Company that the event is about.
+ * @param text The message.
+ */
+static void NotifyStockEvent(CompanyID owner, std::string text)
+{
+	if (owner != _local_company) return;
+	AddNewsItem(GetEncodedString(STR_JUST_RAW_STRING, std::move(text)), NewsType::General, NewsStyle::Small, {});
+}
+
+/** Whether the margin call warning has already been shown to a company; it is shown again after the level has recovered. Not game state. */
+static std::array<bool, MAX_COMPANIES> _stock_margin_call_shown{};
 
 /**
  * Valuation model, step 1: collect the figures of a company.
@@ -506,6 +522,7 @@ void StockMarket::CheckPositions()
 
 		/* The position is removed, so the index stays the same for the next one. */
 		this->ClosePosition(i, p.volume, hit_sl ? p.sl : p.tp, hit_sl ? StockCloseReason::StopLoss : StockCloseReason::TakeProfit);
+		NotifyStockEvent(owner, fmt::format("Stock Market: Company [{}] closed Position #{} at {} price.", GetString(STR_STOCK_SYMBOL, owner), p.id, hit_sl ? "SL" : "TP"));
 	}
 }
 
@@ -520,6 +537,7 @@ void StockMarket::CheckMarginCall()
 		const CompanyID owner{i};
 		if (!Company::IsValidID(owner)) continue;
 
+		bool stopped_out = false;
 		for (;;) {
 			const int64_t used = GetStockUsedMargin(owner);
 			if (used <= 0) break;
@@ -542,7 +560,21 @@ void StockMarket::CheckMarginCall()
 			const CompanyID target{w.target};
 			const int64_t price = IsStockBuy(w.type) ? GetStockBid(target) : GetStockAsk(target);
 			this->ClosePosition(worst, w.volume, price, StockCloseReason::StopOut);
+			stopped_out = true;
 		}
+
+		/* One message per check, however many positions were closed. */
+		if (stopped_out) {
+			NotifyStockEvent(owner, fmt::format("CRITICAL: Broker enforced Stop-Out on Company [{}] due to low Margin Level!", GetString(STR_STOCK_SYMBOL, owner)));
+		}
+
+		/* The margin call warning: shown once when the margin level falls below the margin call level, and again after it has recovered. */
+		const int64_t level = GetStockMarginLevel(owner);
+		const bool warning = level >= 0 && level < STOCK_MARGIN_CALL_LEVEL;
+		if (warning && !_stock_margin_call_shown[i]) {
+			NotifyStockEvent(owner, fmt::format("WARNING: Margin Call warning active for Company [{}]!", GetString(STR_STOCK_SYMBOL, owner)));
+		}
+		_stock_margin_call_shown[i] = warning;
 	}
 }
 
@@ -585,7 +617,10 @@ void StockMarket::CheckPending()
 		o.expiry = 0;
 
 		/* Not enough free margin: the order is dropped. */
-		if (GetStockUsedMargin(owner) + GetStockMargin(o) > GetStockEquity(owner)) continue;
+		if (GetStockUsedMargin(owner) + GetStockMargin(o) > GetStockEquity(owner)) {
+			NotifyStockEvent(owner, "Stock Market: Pending order expired or cancelled due to insufficient margin.");
+			continue;
+		}
 
 		PayStockProfit(owner, -GetStockCommission(o.price * static_cast<int64_t>(o.volume)));
 		this->positions.push_back(o);
