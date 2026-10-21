@@ -454,7 +454,7 @@ struct StockWindow : Window {
 			case WID_ST_TF_YEAR: {
 				const bool daily = widget == WID_ST_TF_DAY;
 				const bool yearly = widget == WID_ST_TF_YEAR;
-				if (daily && !_stock_market.record_daily) Command<CMD_STOCK_ENABLE_DAILY>::Post(STR_STOCK_ERROR_CANT_MODIFY);
+				if (daily && !_stock_market.record_daily) Command<CMD_STOCK_ENABLE_DAILY>::Post(STR_STOCK_ERROR_CANT_MODIFY, true);
 				if (this->view_yearly != yearly || this->view_daily != daily) {
 					this->view_yearly = yearly;
 					this->view_daily = daily;
