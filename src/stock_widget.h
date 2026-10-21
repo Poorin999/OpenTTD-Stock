@@ -26,10 +26,6 @@ enum StockWidgets : WidgetID {
 	WID_ST_CHART,            ///< The candlestick chart.
 	WID_ST_TOOLBOX,          ///< Toolbox: open positions and pending orders.
 	WID_ST_TOOL_SCROLLBAR,   ///< Scrollbar of the toolbox.
-	WID_ST_CLOSE_ALL,        ///< Button: close all open positions of the selected wallet at once.
-	WID_ST_WALLET,           ///< Panel: the selected wallet with its balance; click to switch to the next wallet.
-	WID_ST_WALLET_NEW,       ///< Button: create a new trading wallet.
-	WID_ST_WALLET_DELETE,    ///< Button: delete the selected trading wallet.
 };
 
 /** Widgets of the #StockOrderWindow class. */
