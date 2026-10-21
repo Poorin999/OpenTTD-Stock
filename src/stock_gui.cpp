@@ -34,6 +34,12 @@
 #include "safeguards.h"
 
 /**
+ * Widget number of the Close All button. It is defined here, right after the last widget of #StockWidgets, and
+ * not in widgets/stock_widget.h, so that this file also builds when an older copy of that header is in use.
+ */
+static constexpr WidgetID WID_STOCK_CLOSE_ALL = WID_ST_TOOL_SCROLLBAR + 1;
+
+/**
  * Read a number the player typed. Both '.' and ',' are accepted as decimal separator.
  * @param text The text of an edit box or query window.
  * @param[out] value The parsed value.
@@ -427,7 +433,7 @@ struct StockWindow : Window {
 				ShowStockOrderWindow(this->selected);
 				break;
 
-			case WID_ST_CLOSE_ALL: {
+			case WID_STOCK_CLOSE_ALL: {
 				if (!Company::IsValidID(_local_company)) break;
 				/* Collect the numbers first: with a single player the commands change the list of positions at once. */
 				std::vector<std::pair<uint32_t, uint32_t>> to_close;
@@ -532,7 +538,7 @@ struct StockWindow : Window {
 			case WID_ST_SUMMARY: this->DrawSummary(r); break;
 			case WID_ST_CHART:   this->DrawChart(r); break;
 			case WID_ST_TOOLBOX: this->DrawToolbox(r); break;
-			case WID_ST_CLOSE_ALL:
+			case WID_STOCK_CLOSE_ALL:
 				DrawString(r.left + 2, r.right - 2, CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL)), std::string("Close All"), TC_BLACK, SA_HOR_CENTER);
 				break;
 			default: break;
@@ -991,7 +997,7 @@ static constexpr std::initializer_list<NWidgetPart> _nested_stock_widgets = {
 		EndContainer(),
 	EndContainer(),
 	NWidget(NWID_HORIZONTAL),
-		NWidget(WWT_PUSHBTN, COLOUR_GREY, WID_ST_CLOSE_ALL), SetMinimalSize(90, 14),
+		NWidget(WWT_PUSHBTN, COLOUR_GREY, WID_STOCK_CLOSE_ALL), SetMinimalSize(90, 14),
 		NWidget(NWID_SPACER), SetFill(1, 0), SetResize(1, 0),
 	EndContainer(),
 	NWidget(NWID_HORIZONTAL),
