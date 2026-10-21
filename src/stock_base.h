@@ -12,6 +12,7 @@
 
 #include "company_type.h"
 #include "economy_type.h"
+#include "wallet_base.h"
 #include <array>
 #include <vector>
 
@@ -130,6 +131,7 @@ struct StockOrder {
 	int64_t sl = 0;                          ///< Stop Loss, 0 when not set.
 	int64_t tp = 0;                          ///< Take Profit, 0 when not set.
 	uint32_t expiry = 0;                     ///< Pending orders only: economy days left before the order expires; 0 means it never expires.
+	uint8_t wallet = 0;                      ///< Trading wallet of the owner that pays the fees of the order and gets its results.
 };
 
 /** One candle of the chart; covers one economy month. */
@@ -163,6 +165,7 @@ struct StockClosedTrade {
 	int64_t close_price = 0;                      ///< Price at which it was closed.
 	int64_t profit = 0;                           ///< Realised profit; negative for a loss.
 	int32_t closed_ym = 0;                        ///< Economy year * 12 + month of the closing.
+	uint8_t wallet = 0;                           ///< Trading wallet that the result was booked in.
 };
 
 /** Valuation of one company, refreshed once per day. */
@@ -194,7 +197,6 @@ struct StockMarket {
 	std::array<StockCandle, MAX_COMPANIES> daily_current{};        ///< The running daily candle per company.
 	std::array<bool, MAX_COMPANIES> has_daily_current{};           ///< Whether #daily_current is valid.
 	bool record_daily = false;                                     ///< Whether daily candles are recorded; set once when the player opens the Daily view.
-	std::array<int64_t, MAX_COMPANIES> trading_balance{};          ///< Money per company that was deposited in the trading account; counts as equity.
 	std::vector<StockClosedTrade> history{};                       ///< Closed trades of all companies, the oldest first.
 	std::vector<StockOrder> positions{};                           ///< Open positions.
 	std::vector<StockOrder> pending{};                             ///< Pending orders.
@@ -212,6 +214,7 @@ struct StockMarket {
 	StockOrder *FindPosition(uint32_t id, CompanyID owner);
 	StockOrder *FindPending(uint32_t id, CompanyID owner);
 	size_t CountOrders(CompanyID owner) const;
+	size_t CountWalletOrders(CompanyID owner, uint8_t wallet) const;
 	void AddHistory(const StockOrder &position, int64_t close_price, int64_t profit, StockCloseReason reason);
 	int64_t ClosePosition(size_t index, uint32_t volume, int64_t close_price, StockCloseReason reason);
 	void ApplyImpact(CompanyID target, bool buy, uint32_t volume);
@@ -239,10 +242,11 @@ int64_t GetStockCommission(int64_t value);
 
 int64_t GetStockProfit(const StockOrder &position);
 int64_t GetStockMargin(const StockOrder &position);
-int64_t GetStockUsedMargin(CompanyID owner);
-int64_t GetStockFloatingProfit(CompanyID owner);
-int64_t GetStockEquity(CompanyID owner);
-int64_t GetStockMarginLevel(CompanyID owner);
-void PayStockProfit(CompanyID owner, int64_t profit);
+int64_t GetStockUsedMargin(CompanyID owner, uint8_t wallet);
+int64_t GetStockFloatingProfit(CompanyID owner, uint8_t wallet);
+int64_t GetStockEquity(CompanyID owner, uint8_t wallet);
+int64_t GetStockFreeMargin(CompanyID owner, uint8_t wallet);
+int64_t GetStockMarginLevel(CompanyID owner, uint8_t wallet);
+void PayStockProfit(CompanyID owner, uint8_t wallet, int64_t profit);
 
 #endif /* STOCK_BASE_H */

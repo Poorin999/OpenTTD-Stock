@@ -14,8 +14,10 @@
 #include "company_type.h"
 #include "economy_type.h"
 #include "stock_base.h"
+/* The commands of the wallets are made known to the command system through this header. */
+#include "wallet_cmd.h"
 
-CommandCost CmdStockOpen(DoCommandFlags flags, CompanyID target, StockOrderType type, uint32_t volume, Money price, Money sl, Money tp, uint32_t expiry_days);
+CommandCost CmdStockOpen(DoCommandFlags flags, CompanyID target, StockOrderType type, uint32_t volume, Money price, Money sl, Money tp, uint32_t expiry_days, uint8_t wallet);
 CommandCost CmdStockClose(DoCommandFlags flags, uint32_t id, uint32_t close_volume);
 CommandCost CmdStockModify(DoCommandFlags flags, uint32_t id, Money sl, Money tp, Money price);
 CommandCost CmdStockTransfer(DoCommandFlags flags, bool deposit, Money amount);

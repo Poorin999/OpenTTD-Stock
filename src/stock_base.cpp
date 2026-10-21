@@ -30,7 +30,7 @@
 StockMarket _stock_market;
 
 /** Whether the margin call warning has already been shown to a company; it is shown again after the level has recovered. Not game state. */
-static std::array<bool, MAX_COMPANIES> _stock_margin_call_shown{};
+static std::array<std::array<bool, 256>, MAX_COMPANIES> _stock_margin_call_shown{}; ///< Per company and wallet: whether the margin call warning is showing.
 
 /** Forget everything, e.g. when a new game is started. */
 void StockMarket::Reset()
@@ -42,7 +42,7 @@ void StockMarket::Reset()
 	this->base_fp.fill(0);
 	this->impact.fill(0);
 	this->valuation.fill({});
-	this->trading_balance.fill(0);
+	_wallets.Reset();
 	for (auto &list : this->daily) list.clear();
 	this->daily_current.fill({});
 	this->has_daily_current.fill(false);
@@ -54,7 +54,7 @@ void StockMarket::Reset()
 	this->dividend_quarter_id = 0;
 	this->dividend_delay = 0;
 	this->dividend_quarter = 0;
-	_stock_margin_call_shown.fill(false);
+	for (auto &row : _stock_margin_call_shown) row.fill(false);
 }
 
 /** Convert a price with #STOCK_PRICE_SCALE steps to whole money units, rounded, at least 1. */
@@ -100,8 +100,8 @@ static void NotifyStockEvent(CompanyID owner, std::string text)
 static StockValuation ComputeStockValuation(const Company *c)
 {
 	StockValuation v;
-	/* Money in the trading account still belongs to the company, so a deposit must not lower the share price. */
-	v.book = static_cast<int64_t>(CalculateCompanyValue(c)) + _stock_market.trading_balance[c->index.base()];
+	/* Money in the wallets still belongs to the company, so a deposit must not lower the share price. */
+	v.book = static_cast<int64_t>(CalculateCompanyValue(c)) + GetWalletsTotal(c->index);
 
 	int64_t sum = 0;
 	for (size_t q = 0; q < STOCK_EARNINGS_QUARTERS; q++) {
@@ -269,60 +269,66 @@ int64_t GetStockMargin(const StockOrder &position)
 	return position.price * static_cast<int64_t>(position.volume) / STOCK_MARGIN_DIVISOR;
 }
 
-/** Sum of the margins of all open positions of a company. */
-int64_t GetStockUsedMargin(CompanyID owner)
+/** Sum of the margins of the open positions in one wallet. */
+int64_t GetStockUsedMargin(CompanyID owner, uint8_t wallet)
 {
 	int64_t sum = 0;
 	for (const StockOrder &p : _stock_market.positions) {
-		if (p.owner == owner.base()) sum += GetStockMargin(p);
+		if (p.owner == owner.base() && p.wallet == wallet) sum += GetStockMargin(p);
 	}
 	return sum;
 }
 
-/** Sum of the floating profit of all open positions of a company. */
-int64_t GetStockFloatingProfit(CompanyID owner)
+/** Sum of the floating profit of the open positions in one wallet. */
+int64_t GetStockFloatingProfit(CompanyID owner, uint8_t wallet)
 {
 	int64_t sum = 0;
 	for (const StockOrder &p : _stock_market.positions) {
-		if (p.owner == owner.base() && Company::IsValidID(CompanyID{p.target})) sum += GetStockProfit(p);
+		if (p.owner == owner.base() && p.wallet == wallet && Company::IsValidID(CompanyID{p.target})) sum += GetStockProfit(p);
 	}
 	return sum;
 }
 
-/** Equity of a company: its money plus the floating profit of its open positions. */
-int64_t GetStockEquity(CompanyID owner)
+/** Equity of a wallet: its money plus the floating profit of its open positions. Every wallet is judged on its own. */
+int64_t GetStockEquity(CompanyID owner, uint8_t wallet)
 {
-	const Company *c = Company::GetIfValid(owner);
-	if (c == nullptr) return 0;
-	return static_cast<int64_t>(c->money) + _stock_market.trading_balance[owner.base()] + GetStockFloatingProfit(owner);
+	if (!Company::IsValidID(owner)) return 0;
+	return GetWalletBalance(owner, wallet) + GetStockFloatingProfit(owner, wallet);
+}
+
+/** Equity of a wallet minus the margin that its open positions hold. */
+int64_t GetStockFreeMargin(CompanyID owner, uint8_t wallet)
+{
+	return GetStockEquity(owner, wallet) - GetStockUsedMargin(owner, wallet);
 }
 
 /**
- * Margin level of a company: equity divided by the used margin, in percent.
+ * Margin level of a wallet: equity divided by the used margin, in percent.
  * @param owner The company.
- * @return The margin level, or -1 when the company has no open positions.
+ * @param wallet The wallet.
+ * @return The margin level, or -1 when the wallet has no open positions.
  */
-int64_t GetStockMarginLevel(CompanyID owner)
+int64_t GetStockMarginLevel(CompanyID owner, uint8_t wallet)
 {
-	const int64_t used = GetStockUsedMargin(owner);
+	const int64_t used = GetStockUsedMargin(owner, wallet);
 	if (used <= 0) return -1;
-	const int64_t equity = GetStockEquity(owner);
+	const int64_t equity = GetStockEquity(owner, wallet);
 	if (equity <= 0) return 0;
 	/* Split the division so that a huge equity can not overflow. */
 	return std::min<int64_t>(equity / used, 99999) * 100 + (equity % used) * 100 / used;
 }
 
 /**
- * Add a realised profit or loss to the money of a company. Also used for dividends (profit) and fees (loss).
+ * Add a realised profit or loss to a wallet. Also used for dividends (profit) and fees (loss).
+ * A trading wallet never goes below zero; see AddToWallet().
  * @param owner Company that gets (or pays) the money.
+ * @param wallet Wallet of the company; WALLET_CASH for the company cash.
  * @param profit Profit; negative for a loss.
  */
-void PayStockProfit(CompanyID owner, int64_t profit)
+void PayStockProfit(CompanyID owner, uint8_t wallet, int64_t profit)
 {
-	if (!Company::IsValidID(owner) || profit == 0) return;
-	AutoRestoreBackup cur_company(_current_company, owner);
-	SubtractMoneyFromCompany(CommandCost(EXPENSES_OTHER, Money(-profit)));
-	InvalidateWindowData(WC_FINANCES, owner.base());
+	if (!Company::IsValidID(owner)) return;
+	AddToWallet(owner, wallet, profit);
 }
 
 StockOrder *StockMarket::FindPosition(uint32_t id, CompanyID owner)
@@ -347,6 +353,15 @@ size_t StockMarket::CountOrders(CompanyID owner) const
 	size_t n = 0;
 	for (const StockOrder &p : this->positions) n += (p.owner == owner.base());
 	for (const StockOrder &p : this->pending) n += (p.owner == owner.base());
+	return n;
+}
+
+/** Number of positions and pending orders that use a wallet. */
+size_t StockMarket::CountWalletOrders(CompanyID owner, uint8_t wallet) const
+{
+	size_t n = 0;
+	for (const StockOrder &p : this->positions) n += (p.owner == owner.base() && p.wallet == wallet);
+	for (const StockOrder &p : this->pending) n += (p.owner == owner.base() && p.wallet == wallet);
 	return n;
 }
 
@@ -388,7 +403,7 @@ void StockMarket::HandleRemovedCompanies()
 			const int64_t last = this->price_fp[p.target] > 0 ? FixedToPrice(this->price_fp[p.target]) : p.price;
 			const int64_t units = p.volume;
 			const int64_t profit = IsStockBuy(p.type) ? (last - p.price) * units : (p.price - last) * units;
-			PayStockProfit(CompanyID{p.owner}, profit);
+			PayStockProfit(CompanyID{p.owner}, p.wallet, profit);
 			this->AddHistory(p, last, profit, StockCloseReason::Delisted);
 		}
 		this->positions.erase(this->positions.begin() + i);
@@ -406,7 +421,7 @@ void StockMarket::HandleRemovedCompanies()
 	for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
 		if (Company::IsValidID(CompanyID{i})) continue;
 		const bool stale = !this->candles[i].empty() || this->has_current[i] || this->price_fp[i] != 0 ||
-				this->base_fp[i] != 0 || this->impact[i] != 0 || this->valuation[i].quarters != 0 || this->trading_balance[i] != 0 || !this->daily[i].empty() || this->has_daily_current[i];
+				this->base_fp[i] != 0 || this->impact[i] != 0 || this->valuation[i].quarters != 0 || _wallets.HasOwner(CompanyID{i}) || !this->daily[i].empty() || this->has_daily_current[i];
 		if (!stale) continue;
 		this->candles[i].clear();
 		this->current[i] = {};
@@ -415,7 +430,7 @@ void StockMarket::HandleRemovedCompanies()
 		this->base_fp[i] = 0;
 		this->impact[i] = 0;
 		this->valuation[i] = {};
-		this->trading_balance[i] = 0;
+		_wallets.RemoveOwner(CompanyID{i});
 		this->daily[i].clear();
 		this->daily_current[i] = {};
 		this->has_daily_current[i] = false;
@@ -438,6 +453,7 @@ void StockMarket::AddHistory(const StockOrder &position, int64_t close_price, in
 	t.target = position.target;
 	t.type = IsStockBuy(position.type) ? StockOrderType::Buy : StockOrderType::Sell;
 	t.reason = reason;
+	t.wallet = position.wallet;
 	t.volume = position.volume;
 	t.open_price = position.price;
 	t.close_price = close_price;
@@ -481,7 +497,7 @@ int64_t StockMarket::ClosePosition(size_t index, uint32_t volume, int64_t close_
 		this->positions[index].volume -= volume;
 	}
 
-	PayStockProfit(CompanyID{closed.owner}, profit);
+	PayStockProfit(CompanyID{closed.owner}, closed.wallet, profit);
 	this->AddHistory(closed, close_price, profit, reason);
 	this->ApplyImpact(CompanyID{closed.target}, !was_long, volume);
 	return profit;
@@ -538,44 +554,49 @@ void StockMarket::CheckMarginCall()
 		const CompanyID owner{i};
 		if (!Company::IsValidID(owner)) continue;
 
-		bool stopped_out = false;
-		for (;;) {
-			const int64_t used = GetStockUsedMargin(owner);
-			if (used <= 0) break;
-			if (GetStockEquity(owner) >= used * STOCK_STOP_OUT_LEVEL / 100) break;
+		/* Every trading wallet is judged on its own: one wallet running out of margin does not close the positions of another. */
+		for (const uint8_t wallet : _wallets.GetIds(owner)) {
+			if (!IsTradingWallet(owner, wallet)) continue;
 
-			size_t worst = this->positions.size();
-			int64_t worst_profit = 0;
-			for (size_t k = 0; k < this->positions.size(); k++) {
-				const StockOrder &p = this->positions[k];
-				if (p.owner != owner.base() || !Company::IsValidID(CompanyID{p.target})) continue;
-				const int64_t profit = GetStockProfit(p);
-				if (worst == this->positions.size() || profit < worst_profit) {
-					worst = k;
-					worst_profit = profit;
+			bool stopped_out = false;
+			for (;;) {
+				const int64_t used = GetStockUsedMargin(owner, wallet);
+				if (used <= 0) break;
+				if (GetStockEquity(owner, wallet) >= used * STOCK_STOP_OUT_LEVEL / 100) break;
+
+				size_t worst = this->positions.size();
+				int64_t worst_profit = 0;
+				for (size_t k = 0; k < this->positions.size(); k++) {
+					const StockOrder &p = this->positions[k];
+					if (p.owner != owner.base() || p.wallet != wallet || !Company::IsValidID(CompanyID{p.target})) continue;
+					const int64_t profit = GetStockProfit(p);
+					if (worst == this->positions.size() || profit < worst_profit) {
+						worst = k;
+						worst_profit = profit;
+					}
 				}
+				if (worst == this->positions.size()) break;
+
+				const StockOrder &w = this->positions[worst];
+				const CompanyID target{w.target};
+				const int64_t price = IsStockBuy(w.type) ? GetStockBid(target) : GetStockAsk(target);
+				this->ClosePosition(worst, w.volume, price, StockCloseReason::StopOut);
+				stopped_out = true;
 			}
-			if (worst == this->positions.size()) break;
 
-			const StockOrder &w = this->positions[worst];
-			const CompanyID target{w.target};
-			const int64_t price = IsStockBuy(w.type) ? GetStockBid(target) : GetStockAsk(target);
-			this->ClosePosition(worst, w.volume, price, StockCloseReason::StopOut);
-			stopped_out = true;
-		}
+			/* One message per check, however many positions were closed. */
+			if (stopped_out) {
+				NotifyStockEvent(owner, fmt::format("CRITICAL: Broker enforced Stop-Out on Company [{}], {}, due to low Margin Level!", GetString(STR_STOCK_SYMBOL, owner), GetWalletName(owner, wallet)));
+			}
 
-		/* One message per check, however many positions were closed. */
-		if (stopped_out) {
-			NotifyStockEvent(owner, fmt::format("CRITICAL: Broker enforced Stop-Out on Company [{}] due to low Margin Level!", GetString(STR_STOCK_SYMBOL, owner)));
+			/* The margin call warning: shown once when the margin level falls below the margin call level, and again after it has recovered. */
+			const int64_t level = GetStockMarginLevel(owner, wallet);
+			const bool warning = level >= 0 && level < STOCK_MARGIN_CALL_LEVEL;
+			if (warning && !_stock_margin_call_shown[i][wallet]) {
+				NotifyStockEvent(owner, fmt::format("WARNING: Margin Call warning active for Company [{}], {}!", GetString(STR_STOCK_SYMBOL, owner), GetWalletName(owner, wallet)));
+			}
+			_stock_margin_call_shown[i][wallet] = warning;
 		}
-
-		/* The margin call warning: shown once when the margin level falls below the margin call level, and again after it has recovered. */
-		const int64_t level = GetStockMarginLevel(owner);
-		const bool warning = level >= 0 && level < STOCK_MARGIN_CALL_LEVEL;
-		if (warning && !_stock_margin_call_shown[i]) {
-			NotifyStockEvent(owner, fmt::format("WARNING: Margin Call warning active for Company [{}]!", GetString(STR_STOCK_SYMBOL, owner)));
-		}
-		_stock_margin_call_shown[i] = warning;
 	}
 }
 
@@ -618,12 +639,12 @@ void StockMarket::CheckPending()
 		o.expiry = 0;
 
 		/* Not enough free margin: the order is dropped. */
-		if (GetStockUsedMargin(owner) + GetStockMargin(o) > GetStockEquity(owner)) {
+		if (!IsTradingWallet(owner, o.wallet) || GetStockUsedMargin(owner, o.wallet) + GetStockMargin(o) > GetStockEquity(owner, o.wallet)) {
 			NotifyStockEvent(owner, "Stock Market: Pending order expired or cancelled due to insufficient margin.");
 			continue;
 		}
 
-		PayStockProfit(owner, -GetStockCommission(o.price * static_cast<int64_t>(o.volume)));
+		PayStockProfit(owner, o.wallet, -GetStockCommission(o.price * static_cast<int64_t>(o.volume)));
 		this->positions.push_back(o);
 		this->ApplyImpact(target, buy, o.volume);
 	}
@@ -643,13 +664,11 @@ void StockMarket::CheckExecutions()
  */
 void StockMarket::ChargeSwap()
 {
-	std::array<int64_t, MAX_COMPANIES> fees{};
 	for (const StockOrder &p : this->positions) {
 		if (!Company::IsValidID(CompanyID{p.owner}) || !Company::IsValidID(CompanyID{p.target})) continue;
 		const int64_t value = GetStockPrice(CompanyID{p.target}) * static_cast<int64_t>(p.volume);
-		fees[p.owner] += value * STOCK_SWAP_PPM_PER_DAY / STOCK_PPM;
+		PayStockProfit(CompanyID{p.owner}, p.wallet, -(value * STOCK_SWAP_PPM_PER_DAY / STOCK_PPM));
 	}
-	for (uint8_t i = 0; i < MAX_COMPANIES; i++) PayStockProfit(CompanyID{i}, -fees[i]);
 }
 
 /** Tell the player that a pending order has expired. Only the owner is told; this does not change the game state. */
@@ -687,7 +706,13 @@ void StockMarket::ExpireOrders()
  */
 void StockMarket::PayDividends(size_t quarters)
 {
-	std::array<int64_t, MAX_COMPANIES> received{}; ///< Dividend that each company receives as a holder.
+	/** A dividend that a holder gets, paid into the wallet of the position. */
+	struct Credit {
+		uint8_t owner;
+		uint8_t wallet;
+		int64_t amount;
+	};
+	std::vector<Credit> credits;
 	std::array<int64_t, MAX_COMPANIES> paid{};     ///< Dividend that each company pays out as the issuer.
 
 	for (const Company *c : Company::Iterate()) {
@@ -722,14 +747,15 @@ void StockMarket::PayDividends(size_t quarters)
 			if (p.target != c->index.base() || !IsStockBuy(p.type) || !Company::IsValidID(CompanyID{p.owner})) continue;
 			const int64_t share = payout * static_cast<int64_t>(p.volume) / STOCK_SHARES_PER_COMPANY;
 			const int64_t amount = fraction >= STOCK_PPM ? share : share * fraction / STOCK_PPM;
-			received[p.owner] += amount;
+			credits.push_back({p.owner, p.wallet, amount});
 			given += amount;
 		}
 		paid[c->index.base()] += given;
 	}
 
 	/* Pay out only after all amounts are known, so that the cash of a company does not depend on the order of the companies. */
-	for (uint8_t i = 0; i < MAX_COMPANIES; i++) PayStockProfit(CompanyID{i}, received[i] - paid[i]);
+	for (const Credit &credit : credits) PayStockProfit(CompanyID{credit.owner}, credit.wallet, credit.amount);
+	for (uint8_t i = 0; i < MAX_COMPANIES; i++) PayStockProfit(CompanyID{i}, WALLET_CASH, -paid[i]);
 }
 
 /**
@@ -837,6 +863,9 @@ void StockMarket::UpdateDaily()
 void StockMarket::UpdateTick()
 {
 	this->HandleRemovedCompanies();
+
+	/* Every company has a trading wallet and a fuel reserve from the first moment. */
+	for (const Company *c : Company::Iterate()) _wallets.EnsureDefaults(c->index);
 
 	for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
 		if (!Company::IsValidID(CompanyID{i}) || this->price_fp[i] <= 0) continue;

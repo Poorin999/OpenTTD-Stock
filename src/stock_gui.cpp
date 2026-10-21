@@ -14,6 +14,7 @@
 #include "stock_gui.h"
 #include "stock_base.h"
 #include "stock_cmd.h"
+#include "wallet_cmd.h"
 #include "command_func.h"
 #include "company_base.h"
 #include "company_func.h"
@@ -34,10 +35,10 @@
 #include "safeguards.h"
 
 /**
- * Widget number of the Close All button. It is defined here, right after the last widget of #StockWidgets, and
- * not in widgets/stock_widget.h, so that this file also builds when an older copy of that header is in use.
+ * Widget number of the Close All button. It has this name in this file; the number is defined in widgets/stock_widget.h,
+ * together with the wallet widgets that follow it.
  */
-static constexpr WidgetID WID_STOCK_CLOSE_ALL = WID_ST_TOOL_SCROLLBAR + 1;
+static constexpr WidgetID WID_STOCK_CLOSE_ALL = WID_ST_CLOSE_ALL;
 
 /**
  * Read a number the player typed. Both '.' and ',' are accepted as decimal separator.
@@ -121,6 +122,29 @@ static std::string StockMonthToString(int32_t ym)
 {
 	const int month = ym % 12 + 1;
 	return fmt::format("{}-{:02}", ym / 12, month);
+}
+
+static uint8_t _stock_active_wallet = WALLET_CASH; ///< The wallet that the terminal shows and trades with; only for the local company.
+
+/**
+ * The wallet that the terminal shows and that new trades are opened with. When the remembered wallet does not exist
+ * (any more) for the local company, the first trading wallet is used.
+ * @return Number of the wallet; WALLET_CASH when the local company has no wallet.
+ */
+uint8_t GetStockActiveWallet()
+{
+	if (!Company::IsValidID(_local_company)) return WALLET_CASH;
+	if (_stock_active_wallet != WALLET_CASH && GetWalletKind(_local_company, _stock_active_wallet) != WalletKind::End) return _stock_active_wallet;
+
+	const Wallet *wallet = _wallets.FindFirst(_local_company, WalletKind::Trading);
+	_stock_active_wallet = wallet != nullptr ? wallet->id : WALLET_CASH;
+	return _stock_active_wallet;
+}
+
+/** Choose the wallet that the terminal shows and trades with. */
+void SetStockActiveWallet(uint8_t wallet)
+{
+	_stock_active_wallet = wallet;
 }
 
 /** Horizontal layout of the toolbox with the open trades. It is shared by the drawing and the click handling. */
@@ -263,16 +287,17 @@ struct StockWindow : Window {
 		this->chart_scroll_offset = std::clamp(this->chart_scroll_offset, 0, std::max(0, count - 1));
 	}
 
-	/** The rows of the toolbox: first the open positions, then the pending orders of the local company. */
+	/** The rows of the toolbox: first the open positions, then the pending orders of the selected wallet of the local company. */
 	std::vector<const StockOrder *> GetRows() const
 	{
 		std::vector<const StockOrder *> rows;
 		if (!Company::IsValidID(_local_company)) return rows;
+		const uint8_t wallet = GetStockActiveWallet();
 		for (const StockOrder &p : _stock_market.positions) {
-			if (p.owner == _local_company.base()) rows.push_back(&p);
+			if (p.owner == _local_company.base() && p.wallet == wallet) rows.push_back(&p);
 		}
 		for (const StockOrder &p : _stock_market.pending) {
-			if (p.owner == _local_company.base()) rows.push_back(&p);
+			if (p.owner == _local_company.base() && p.wallet == wallet) rows.push_back(&p);
 		}
 		return rows;
 	}
@@ -349,7 +374,11 @@ struct StockWindow : Window {
 		if (kind == QueryKind::Deposit || kind == QueryKind::Withdraw) {
 			double amount = 0;
 			if (!ParseStockNumber(*str, amount) || amount <= 0) return;
-			Command<CMD_STOCK_TRANSFER>::Post(STR_STOCK_ERROR_CANT_TRANSFER, kind == QueryKind::Deposit, Money(StockDisplayToMoney(amount)));
+			/* Deposit: from the company cash to the selected wallet. Withdraw: from the selected wallet back to the cash. */
+			const uint8_t wallet = GetStockActiveWallet();
+			if (wallet == WALLET_CASH) return;
+			const bool deposit = kind == QueryKind::Deposit;
+			Command<CMD_WALLET_TRANSFER>::Post(STR_STOCK_ERROR_CANT_TRANSFER, deposit ? WALLET_CASH : wallet, deposit ? wallet : WALLET_CASH, Money(StockDisplayToMoney(amount)));
 			return;
 		}
 
@@ -438,13 +467,36 @@ struct StockWindow : Window {
 				/* Collect the numbers first: with a single player the commands change the list of positions at once. */
 				std::vector<std::pair<uint32_t, uint32_t>> to_close;
 				for (const StockOrder &p : _stock_market.positions) {
-					if (p.owner == _local_company.base()) to_close.emplace_back(p.id, p.volume);
+					if (p.owner == _local_company.base() && p.wallet == GetStockActiveWallet()) to_close.emplace_back(p.id, p.volume);
 				}
 				for (const auto &[id, volume] : to_close) {
 					Command<CMD_STOCK_CLOSE>::Post(STR_STOCK_ERROR_CANT_CLOSE, id, volume);
 				}
 				break;
 			}
+
+			case WID_ST_WALLET: {
+				/* Switch to the next wallet of the local company. */
+				if (!Company::IsValidID(_local_company)) break;
+				const std::vector<uint8_t> ids = _wallets.GetIds(_local_company);
+				if (ids.empty()) break;
+				const uint8_t current = GetStockActiveWallet();
+				size_t pos = 0;
+				for (size_t i = 0; i < ids.size(); i++) {
+					if (ids[i] == current) pos = i;
+				}
+				SetStockActiveWallet(ids[(pos + 1) % ids.size()]);
+				this->OnInvalidateData();
+				break;
+			}
+
+			case WID_ST_WALLET_NEW:
+				if (Company::IsValidID(_local_company)) Command<CMD_WALLET_CREATE>::Post(STR_WALLET_ERROR_CANT_CREATE, WalletKind::Trading);
+				break;
+
+			case WID_ST_WALLET_DELETE:
+				if (Company::IsValidID(_local_company)) Command<CMD_WALLET_DELETE>::Post(STR_WALLET_ERROR_CANT_DELETE, GetStockActiveWallet());
+				break;
 
 			case WID_ST_DEPOSIT:
 			case WID_ST_WITHDRAW: {
@@ -533,6 +585,7 @@ struct StockWindow : Window {
 	{
 		switch (widget) {
 			case WID_ST_ACCOUNT: this->DrawAccount(r); break;
+			case WID_ST_WALLET: this->DrawWallet(r); break;
 			case WID_ST_WATCH:   this->DrawWatch(r); break;
 			case WID_ST_TITLE:   this->DrawTitle(r); break;
 			case WID_ST_SUMMARY: this->DrawSummary(r); break;
@@ -552,13 +605,19 @@ struct StockWindow : Window {
 			DrawString(r.left + 4, r.right - 4, top, STR_STOCK_SPECTATOR, TC_FROMSTRING, SA_LEFT);
 			return;
 		}
-		/* The deposited money counts as part of the balance, so that equity = balance + floating profit still holds.
+		/* Every wallet has its own balance, margin and margin level; the account line shows the selected one.
 		 * This must match GetStockEquity(), which is what the margin checks and the margin level use. */
-		const int64_t balance = static_cast<int64_t>(Company::Get(_local_company)->money) + _stock_market.trading_balance[_local_company.base()];
-		const int64_t floating = GetStockFloatingProfit(_local_company);
-		const int64_t margin = GetStockUsedMargin(_local_company);
+		const uint8_t wallet = GetStockActiveWallet();
+		if (!IsTradingWallet(_local_company, wallet)) {
+			/* The fuel reserve has no positions, so there is nothing to show but how to fill it. */
+			DrawString(r.left + 4, r.right - 4, top, GetString(STR_STOCK_ACCOUNT_RESERVE, GetWalletName(_local_company, wallet)), TC_FROMSTRING, SA_LEFT);
+			return;
+		}
+		const int64_t balance = GetWalletBalance(_local_company, wallet);
+		const int64_t floating = GetStockFloatingProfit(_local_company, wallet);
+		const int64_t margin = GetStockUsedMargin(_local_company, wallet);
 		const int64_t equity = balance + floating;
-		const int64_t level = GetStockMarginLevel(_local_company);
+		const int64_t level = GetStockMarginLevel(_local_company, wallet);
 		std::string text;
 		if (level < 0) {
 			text = GetString(STR_STOCK_ACCOUNT, balance, equity, margin, equity - margin);
@@ -566,8 +625,16 @@ struct StockWindow : Window {
 			/* Below the margin call level the line turns red; below the stop-out level positions are closed by force. */
 			text = GetString(level < STOCK_MARGIN_CALL_LEVEL ? STR_STOCK_ACCOUNT_CALL : STR_STOCK_ACCOUNT_LEVEL, balance, equity, margin, equity - margin, level);
 		}
-		text += GetString(STR_STOCK_TRADING_BALANCE, _stock_market.trading_balance[_local_company.base()]);
 		DrawString(r.left + 4, r.right - 4, top, text, TC_FROMSTRING, SA_LEFT);
+	}
+
+	/** The selected wallet with its balance. */
+	void DrawWallet(const Rect &r) const
+	{
+		if (!Company::IsValidID(_local_company)) return;
+		const int top = CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL));
+		const uint8_t wallet = GetStockActiveWallet();
+		DrawString(r.left + 4, r.right - 4, top, GetString(STR_STOCK_WALLET, GetWalletName(_local_company, wallet), GetWalletBalance(_local_company, wallet)), TC_FROMSTRING, SA_LEFT);
 	}
 
 	/** Market Watch: one row per symbol with the Bid and Ask price. */
@@ -979,6 +1046,12 @@ static constexpr std::initializer_list<NWidgetPart> _nested_stock_widgets = {
 		EndContainer(),
 	EndContainer(),
 	NWidget(NWID_HORIZONTAL),
+		NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_WALLET), SetMinimalSize(230, 14), SetResize(1, 0), SetFill(1, 0), SetToolTip(STR_STOCK_TIP_WALLET),
+		EndContainer(),
+		NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_ST_WALLET_NEW), SetMinimalSize(90, 14), SetStringTip(STR_STOCK_WALLET_NEW, STR_STOCK_TIP_WALLET_NEW),
+		NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_ST_WALLET_DELETE), SetMinimalSize(90, 14), SetStringTip(STR_STOCK_WALLET_DELETE, STR_STOCK_TIP_WALLET_DELETE),
+	EndContainer(),
+	NWidget(NWID_HORIZONTAL),
 		NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_WATCH), SetMinimalSize(230, 200), SetFill(0, 1), SetToolTip(STR_STOCK_TIP_WATCH),
 		EndContainer(),
 		NWidget(NWID_VERTICAL),
@@ -990,8 +1063,7 @@ static constexpr std::initializer_list<NWidgetPart> _nested_stock_widgets = {
 				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_DAY), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_TF_DAY, STR_STOCK_TIP_TF_DAY),
 				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_MONTH), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_TF_MONTH, STR_STOCK_TIP_TF_MONTH),
 				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_YEAR), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_TF_YEAR, STR_STOCK_TIP_TF_YEAR),
-				NWidget(WWT_PANEL, COLOUR_GREY), SetFill(1, 1), SetResize(1, 0),
-				EndContainer(),
+				NWidget(NWID_SPACER), SetFill(1, 0), SetResize(1, 0),
 			EndContainer(),
 			NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_CHART), SetMinimalSize(400, 184), SetResize(1, 1), SetFill(1, 1),
 			EndContainer(),
@@ -999,8 +1071,7 @@ static constexpr std::initializer_list<NWidgetPart> _nested_stock_widgets = {
 	EndContainer(),
 	NWidget(NWID_HORIZONTAL),
 		NWidget(WWT_PUSHBTN, COLOUR_GREY, WID_STOCK_CLOSE_ALL), SetMinimalSize(90, 14),
-		NWidget(WWT_PANEL, COLOUR_GREY), SetFill(1, 1), SetResize(1, 0),
-		EndContainer(),
+		NWidget(NWID_SPACER), SetFill(1, 0), SetResize(1, 0),
 	EndContainer(),
 	NWidget(NWID_HORIZONTAL),
 		NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_TOOLBOX), SetMinimalSize(630, 100), SetResize(1, 0), SetFill(1, 1), SetScrollbar(WID_ST_TOOL_SCROLLBAR), SetToolTip(STR_STOCK_TIP_TOOLBOX),
