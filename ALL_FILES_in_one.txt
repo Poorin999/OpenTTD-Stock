@@ -1,0 +1,17 @@
+    - name: Bundle all mod files into one text file
+      shell: bash
+      run: |
+        cd mod
+        out=../ALL_FILES_in_one.txt
+        : > "$out"
+        git ls-files src '*.py' '*.txt' '*.md' | sort | while IFS= read -r f; do
+          printf '\n===== FILE: %s =====\n' "$f" >> "$out"
+          cat "$f" >> "$out"
+          printf '\n===== END: %s =====\n' "$f" >> "$out"
+        done
+
+    - name: Upload the bundle
+      uses: actions/upload-artifact@v4
+      with:
+        name: ALL_FILES_in_one
+        path: ALL_FILES_in_one.txt
