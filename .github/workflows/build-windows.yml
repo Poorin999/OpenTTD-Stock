@@ -47,7 +47,11 @@ jobs:
         done < <(find . -type f | sed 's|^\./||' | sort)
         [ "$status" -eq 0 ] || exit 1
         cp -rv . ../../openttd/src/
-
+        
+    - name: Register wallet commands, sources and strings
+      shell: bash
+      run: python3 mod/apply_overlay.py openttd
+      
     - name: Setup vcpkg
       id: vcpkg
       uses: OpenTTD/actions/setup-vcpkg@v6
