@@ -14,6 +14,7 @@
 #include "stock_gui.h"
 #include "stock_base.h"
 #include "stock_cmd.h"
+#include "wallet_cmd.h"
 #include "command_func.h"
 #include "company_base.h"
 #include "company_func.h"
@@ -28,10 +29,18 @@
 #include "zoom_func.h"
 
 #include "widgets/stock_widget.h"
+#include "central_bank.h"
+#include "game_time/game_time_manager.h"
 
 #include "table/strings.h"
 
 #include "safeguards.h"
+
+/**
+ * Widget number of the Close All button. It has this name in this file; the number is defined in widgets/stock_widget.h,
+ * together with the wallet widgets that follow it.
+ */
+static constexpr WidgetID WID_STOCK_CLOSE_ALL = WID_ST_CLOSE_ALL;
 
 /**
  * Read a number the player typed. Both '.' and ',' are accepted as decimal separator.
@@ -117,6 +126,60 @@ static std::string StockMonthToString(int32_t ym)
 	return fmt::format("{}-{:02}", ym / 12, month);
 }
 
+static uint8_t _stock_active_wallet = WALLET_CASH; ///< The wallet that the terminal shows and trades with; only for the local company.
+
+/**
+ * The wallet that the terminal shows and that new trades are opened with. When the remembered wallet does not exist
+ * (any more) for the local company, the first trading wallet is used.
+ * @return Number of the wallet; WALLET_CASH when the local company has no wallet.
+ */
+uint8_t GetStockActiveWallet()
+{
+	if (!Company::IsValidID(_local_company)) return WALLET_CASH;
+	if (_stock_active_wallet != WALLET_CASH && GetWalletKind(_local_company, _stock_active_wallet) != WalletKind::End) return _stock_active_wallet;
+
+	const Wallet *wallet = _wallets.FindFirst(_local_company, WalletKind::Trading);
+	_stock_active_wallet = wallet != nullptr ? wallet->id : WALLET_CASH;
+	return _stock_active_wallet;
+}
+
+/** Choose the wallet that the terminal shows and trades with. */
+void SetStockActiveWallet(uint8_t wallet)
+{
+	_stock_active_wallet = wallet;
+}
+
+/** Number of candles of the fast and of the slow simple moving average. */
+static constexpr size_t STOCK_SMA_FAST = 10;
+static constexpr size_t STOCK_SMA_SLOW = 30;
+
+/**
+ * Simple moving average of the closing price. Entry i is the average of the closes of the candles i + 1 - period .. i
+ * and is only valid for i + 1 >= period. It is calculated in one pass with a running sum.
+ * @param candles The candles, the oldest first.
+ * @param period Number of candles in the average, at least 1.
+ * @return One value per candle; 0 where there are not enough candles before it.
+ */
+static std::vector<int64_t> ComputeSMA(const std::vector<StockCandle> &candles, size_t period)
+{
+	std::vector<int64_t> out(candles.size(), 0);
+	if (period == 0) return out;
+	int64_t sum = 0;
+	for (size_t i = 0; i < candles.size(); i++) {
+		sum += candles[i].close;
+		if (i >= period) sum -= candles[i - period].close;
+		if (i + 1 >= period) out[i] = sum / static_cast<int64_t>(period);
+	}
+	return out;
+}
+
+/** A tenths value as text with one decimal, e.g. 123 -> "12.3". */
+static std::string StockTenths(int64_t tenths)
+{
+	const int64_t a = tenths < 0 ? -tenths : tenths;
+	return fmt::format("{}{}.{}", tenths < 0 ? "-" : "", a / 10, a % 10);
+}
+
 /** Horizontal layout of the toolbox with the open trades. It is shared by the drawing and the click handling. */
 struct StockToolboxColumns {
 	int id;      ///< Left edge of the ticket column.
@@ -125,26 +188,30 @@ struct StockToolboxColumns {
 	int volume;  ///< Right edge of the volume column.
 	int open;    ///< Right edge of the open price column, left edge of the S / L column.
 	int sl;      ///< Right edge of the S / L column, left edge of the T / P column.
-	int tp;      ///< Right edge of the T / P column, left edge of the price column.
+	int tp;      ///< Right edge of the T / P column, left edge of the trailing stop column.
+	int trail;   ///< Right edge of the trailing stop column, left edge of the price column.
 	int price;   ///< Right edge of the price column, left edge of the profit column.
 	int profit;  ///< Right edge of the profit column.
 	int close;   ///< Left edge of the close button.
 
 	explicit StockToolboxColumns(const Rect &r) :
 		id(r.left + ScaleGUITrad(4)),
-		symbol(r.left + ScaleGUITrad(48)),
-		type(r.left + ScaleGUITrad(168)),
-		volume(r.left + ScaleGUITrad(300)),
-		open(r.left + ScaleGUITrad(380)),
-		sl(r.left + ScaleGUITrad(450)),
-		tp(r.left + ScaleGUITrad(520)),
-		price(r.left + ScaleGUITrad(590)),
-		profit(r.left + ScaleGUITrad(680)),
+		symbol(r.left + ScaleGUITrad(44)),
+		type(r.left + ScaleGUITrad(132)),
+		volume(r.left + ScaleGUITrad(250)),
+		open(r.left + ScaleGUITrad(326)),
+		sl(r.left + ScaleGUITrad(394)),
+		tp(r.left + ScaleGUITrad(462)),
+		trail(r.left + ScaleGUITrad(530)),
+		price(r.left + ScaleGUITrad(598)),
+		profit(r.left + ScaleGUITrad(684)),
 		close(r.right - ScaleGUITrad(26))
 	{}
 };
 
 struct StockWindow : Window {
+	static constexpr size_t PORTFOLIO_FIXED_ROWS = 3; ///< Lines of the portfolio that do not scroll: two summary lines and the table header.
+
 	/** What the open query window is for. */
 	enum class QueryKind : uint8_t {
 		None,         ///< No query window is open.
@@ -154,23 +221,37 @@ struct StockWindow : Window {
 		Deposit,      ///< Amount to move from the company cash to the trading balance.
 		Withdraw,     ///< Amount to move from the trading balance to the company cash.
 		PendingPrice, ///< New trigger price of a pending order.
+		Trail,        ///< New trailing stop distance of a position.
+		Borrow,       ///< Amount to borrow from the central bank.
+		Repay,        ///< Amount to repay to the central bank.
+	};
+
+	/** What the toolbox shows. */
+	enum class ToolView : uint8_t {
+		Orders,     ///< The open positions and the pending orders.
+		History,    ///< The closed trades.
+		Portfolio,  ///< The portfolio summary.
+		Ranking,    ///< The ranking of the companies.
+		Bank,       ///< The loan at the central bank.
 	};
 
 	CompanyID selected = INVALID_OWNER; ///< Symbol (company) whose chart is shown.
 	Scrollbar *vscroll = nullptr;       ///< Scrollbar of the toolbox.
-	bool show_history = false;          ///< Whether the toolbox shows the closed trades instead of the open ones.
+	Scrollbar *watch_scroll = nullptr;  ///< Scrollbar of the Market Watch.
+	ToolView view = ToolView::Orders;   ///< What the toolbox shows.
+	StockRankSort rank_sort = StockRankSort::MarketCap; ///< How the ranking is sorted.
 	QueryKind query_kind = QueryKind::None; ///< What the query window is asking for.
 	uint32_t query_id = 0;              ///< Number of the position that the query window is about.
 	bool is_dragging_chart = false;     ///< Whether the mouse button is held down on the chart.
 	int drag_start_x = 0;               ///< X position (in the window) where the drag started, or where the last candle step was made.
 	int chart_scroll_offset = 0;        ///< Number of candles the chart is scrolled back into the past; 0 shows the newest candles at the right edge.
-	bool view_daily = false;            ///< Whether the chart shows one candle per day.
-	bool view_yearly = false;           ///< Whether the chart shows one candle per year instead of one per month.
+	GameTimeframe frame = GameTimeframe::H1; ///< Timeframe of the chart: one candle per 1, 4 or 12 game hours.
 
 	StockWindow(WindowDesc &desc) : Window(desc)
 	{
 		this->CreateNestedTree();
 		this->vscroll = this->GetScrollbar(WID_ST_TOOL_SCROLLBAR);
+		this->watch_scroll = this->GetScrollbar(WID_ST_WATCH_SCROLLBAR);
 		this->FinishInitNested(0);
 		this->UpdateTimeframeButtons();
 		this->EnsureValidSelection();
@@ -180,9 +261,9 @@ struct StockWindow : Window {
 	/** Show which timeframe button is active. */
 	void UpdateTimeframeButtons()
 	{
-		this->SetWidgetLoweredState(WID_ST_TF_DAY, this->view_daily);
-		this->SetWidgetLoweredState(WID_ST_TF_MONTH, !this->view_daily && !this->view_yearly);
-		this->SetWidgetLoweredState(WID_ST_TF_YEAR, this->view_yearly);
+		this->SetWidgetLoweredState(WID_ST_TF_DAY, this->frame == GameTimeframe::H1);   // The widgets keep their old names: they are the 1h, 4h and 12h buttons now.
+		this->SetWidgetLoweredState(WID_ST_TF_MONTH, this->frame == GameTimeframe::H4);
+		this->SetWidgetLoweredState(WID_ST_TF_YEAR, this->frame == GameTimeframe::H12);
 	}
 
 	int RowHeight() const { return GetCharacterHeight(FS_NORMAL) + ScaleGUITrad(2); }
@@ -204,37 +285,29 @@ struct StockWindow : Window {
 	}
 
 	/**
-	 * The candles of the selected symbol in the active timeframe, the oldest first.
-	 * In the yearly view the monthly candles of one calendar year are combined: the open of the first month,
-	 * the highest high, the lowest low and the close of the last month. The year is stored as year * 12 in ym.
+	 * The candles of the selected symbol in the active timeframe of game time, the oldest first: the closed candles and
+	 * the running one. ym holds the number of the candle (game hours since the start, divided by the length of the
+	 * candle); the prices are converted to whole money units, like the other candles.
 	 */
 	std::vector<StockCandle> GetChartCandles() const
 	{
-		std::vector<StockCandle> months;
-		if (!Company::IsValidID(this->selected)) return months;
-		const size_t index = this->selected.base();
-		months = _stock_market.candles[index];
-		if (_stock_market.has_current[index]) months.push_back(_stock_market.current[index]);
-		if (this->view_daily) {
-			std::vector<StockCandle> days = _stock_market.daily[index];
-			if (_stock_market.has_daily_current[index]) days.push_back(_stock_market.daily_current[index]);
-			return days;
-		}
-		if (!this->view_yearly) return months;
+		std::vector<StockCandle> candles;
+		if (!Company::IsValidID(this->selected)) return candles;
+		const TimeframeAggregator &frames = _stock_market.frames[this->selected.base()];
 
-		std::vector<StockCandle> years;
-		for (const StockCandle &m : months) {
-			const int32_t year_ym = (m.ym / 12) * 12;
-			if (!years.empty() && years.back().ym == year_ym) {
-				StockCandle &y = years.back();
-				y.high = std::max(y.high, m.high);
-				y.low = std::min(y.low, m.low);
-				y.close = m.close;
-			} else {
-				years.push_back({year_ym, m.open, m.high, m.low, m.close});
-			}
-		}
-		return years;
+		auto convert = [](const TimeframeBucket &b) {
+			StockCandle c;
+			c.ym = static_cast<int32_t>(std::min<uint64_t>(b.index, INT32_MAX));
+			c.open = StockFixedToPrice(b.open);
+			c.high = StockFixedToPrice(b.high);
+			c.low = StockFixedToPrice(b.low);
+			c.close = StockFixedToPrice(b.close);
+			c.volume = b.volume;
+			return c;
+		};
+		for (const TimeframeBucket &b : frames.Closed(this->frame)) candles.push_back(convert(b));
+		if (frames.HasRunning(this->frame)) candles.push_back(convert(frames.Running(this->frame)));
+		return candles;
 	}
 
 	/** An open position or a pending order of the local company with this number, or nullptr. */
@@ -257,16 +330,17 @@ struct StockWindow : Window {
 		this->chart_scroll_offset = std::clamp(this->chart_scroll_offset, 0, std::max(0, count - 1));
 	}
 
-	/** The rows of the toolbox: first the open positions, then the pending orders of the local company. */
+	/** The rows of the toolbox: first the open positions, then the pending orders of the selected wallet of the local company. */
 	std::vector<const StockOrder *> GetRows() const
 	{
 		std::vector<const StockOrder *> rows;
 		if (!Company::IsValidID(_local_company)) return rows;
+		const uint8_t wallet = GetStockActiveWallet();
 		for (const StockOrder &p : _stock_market.positions) {
-			if (p.owner == _local_company.base()) rows.push_back(&p);
+			if (p.owner == _local_company.base() && p.wallet == wallet) rows.push_back(&p);
 		}
 		for (const StockOrder &p : _stock_market.pending) {
-			if (p.owner == _local_company.base()) rows.push_back(&p);
+			if (p.owner == _local_company.base() && p.wallet == wallet) rows.push_back(&p);
 		}
 		return rows;
 	}
@@ -282,17 +356,44 @@ struct StockWindow : Window {
 		return rows;
 	}
 
+	/** Number of scrollable rows of what the toolbox shows. The portfolio has three fixed lines above its months. */
+	size_t GetViewRowCount() const
+	{
+		switch (this->view) {
+			case ToolView::History:   return this->GetHistoryRows().size();
+			case ToolView::Portfolio: return this->GetPortfolioMonths().size() + PORTFOLIO_FIXED_ROWS;
+			case ToolView::Ranking:   return Company::GetNumItems();
+			case ToolView::Bank:      return 0;
+			default:                  return this->GetRows().size();
+		}
+	}
+
+	/** The months of the portfolio table of the local company, the newest first. */
+	std::vector<StockMonthProfit> GetPortfolioMonths() const
+	{
+		std::vector<StockMonthProfit> months;
+		if (!Company::IsValidID(_local_company)) return months;
+		months = _stock_market.stats[_local_company.base()].months;
+		std::reverse(months.begin(), months.end());
+		return months;
+	}
+
 	void OnResize() override
 	{
 		/* The toolbox widget has no vertical resize step, so compute the number of visible rows by hand. */
 		const NWidgetBase *toolbox = this->GetWidget<NWidgetBase>(WID_ST_TOOLBOX);
 		this->vscroll->SetCapacity(static_cast<size_t>(std::max(1, (static_cast<int>(toolbox->current_y) - this->HeaderHeight()) / std::max(1, this->RowHeight()))));
+
+		/* The same for the Market Watch. */
+		const NWidgetBase *watch = this->GetWidget<NWidgetBase>(WID_ST_WATCH);
+		this->watch_scroll->SetCapacity(static_cast<size_t>(std::max(1, (static_cast<int>(watch->current_y) - this->HeaderHeight()) / std::max(1, this->RowHeight()))));
 	}
 
 	void OnInvalidateData([[maybe_unused]] int data = 0, [[maybe_unused]] bool gui_scope = true) override
 	{
 		if (!gui_scope) return;
-		this->vscroll->SetCount(this->show_history ? this->GetHistoryRows().size() : this->GetRows().size());
+		this->vscroll->SetCount(this->GetViewRowCount());
+		this->watch_scroll->SetCount(Company::GetNumItems());
 		this->SetDirty();
 	}
 
@@ -330,6 +431,10 @@ struct StockWindow : Window {
 				ShowQueryString(StockMoneyToEditString(position.price), STR_STOCK_COL_PRICE, 24, this, CS_ALPHANUMERAL, {});
 				break;
 
+			case QueryKind::Trail:
+				ShowQueryString(position.trail != 0 ? StockMoneyToEditString(position.trail) : std::string{}, STR_STOCK_QUERY_TRAIL, 24, this, CS_ALPHANUMERAL, {});
+				break;
+
 			default: break;
 		}
 	}
@@ -343,7 +448,23 @@ struct StockWindow : Window {
 		if (kind == QueryKind::Deposit || kind == QueryKind::Withdraw) {
 			double amount = 0;
 			if (!ParseStockNumber(*str, amount) || amount <= 0) return;
-			Command<CMD_STOCK_TRANSFER>::Post(STR_STOCK_ERROR_CANT_TRANSFER, kind == QueryKind::Deposit, Money(StockDisplayToMoney(amount)));
+			/* Deposit: from the company cash to the selected wallet. Withdraw: from the selected wallet back to the cash. */
+			const uint8_t wallet = GetStockActiveWallet();
+			if (wallet == WALLET_CASH) return;
+			const bool deposit = kind == QueryKind::Deposit;
+			Command<CMD_WALLET_TRANSFER>::Post(STR_STOCK_ERROR_CANT_TRANSFER, deposit ? WALLET_CASH : wallet, deposit ? wallet : WALLET_CASH, Money(StockDisplayToMoney(amount)));
+			return;
+		}
+
+		if (kind == QueryKind::Borrow || kind == QueryKind::Repay) {
+			double amount = 0;
+			if (!ParseStockNumber(*str, amount) || amount <= 0) return;
+			const uint8_t wallet = GetStockActiveWallet();
+			if (kind == QueryKind::Borrow) {
+				Command<CMD_BANK_BORROW>::Post(STR_BANK_ERROR_CANT_BORROW, wallet, Money(StockDisplayToMoney(amount)));
+			} else {
+				Command<CMD_BANK_REPAY>::Post(STR_BANK_ERROR_CANT_REPAY, wallet, Money(StockDisplayToMoney(amount)));
+			}
 			return;
 		}
 
@@ -373,7 +494,7 @@ struct StockWindow : Window {
 				}
 				const int64_t sl = kind == QueryKind::StopLoss ? value : position->sl;
 				const int64_t tp = kind == QueryKind::TakeProfit ? value : position->tp;
-				Command<CMD_STOCK_MODIFY>::Post(STR_STOCK_ERROR_CANT_MODIFY, position->id, Money(sl), Money(tp), Money(position->price));
+				Command<CMD_STOCK_MODIFY>::Post(STR_STOCK_ERROR_CANT_MODIFY, position->id, Money(sl), Money(tp), Money(position->price), Money(position->trail));
 				break;
 			}
 
@@ -381,7 +502,20 @@ struct StockWindow : Window {
 				/* The trigger price of a pending order is changed in place, without deleting and placing the order again. */
 				double number = 0;
 				if (!ParseStockNumber(*str, number) || number <= 0) return;
-				Command<CMD_STOCK_MODIFY>::Post(STR_STOCK_ERROR_CANT_MODIFY, position->id, Money(position->sl), Money(position->tp), Money(StockDisplayToMoney(number)));
+				Command<CMD_STOCK_MODIFY>::Post(STR_STOCK_ERROR_CANT_MODIFY, position->id, Money(position->sl), Money(position->tp), Money(StockDisplayToMoney(number)), Money(0));
+				break;
+			}
+
+			case QueryKind::Trail: {
+				/* An empty text switches the trailing stop off. Only open positions can trail. */
+				if (_stock_market.FindPosition(position->id, _local_company) == nullptr) return;
+				int64_t distance = 0;
+				if (str->find_first_not_of(' ') != std::string::npos) {
+					double number = 0;
+					if (!ParseStockNumber(*str, number) || number <= 0) return;
+					distance = StockDisplayToMoney(number);
+				}
+				Command<CMD_STOCK_MODIFY>::Post(STR_STOCK_ERROR_CANT_MODIFY, position->id, Money(position->sl), Money(position->tp), Money(position->price), Money(distance));
 				break;
 			}
 
@@ -427,18 +561,41 @@ struct StockWindow : Window {
 				ShowStockOrderWindow(this->selected);
 				break;
 
-			case WID_ST_CLOSE_ALL: {
+			case WID_STOCK_CLOSE_ALL: {
 				if (!Company::IsValidID(_local_company)) break;
 				/* Collect the numbers first: with a single player the commands change the list of positions at once. */
 				std::vector<std::pair<uint32_t, uint32_t>> to_close;
 				for (const StockOrder &p : _stock_market.positions) {
-					if (p.owner == _local_company.base()) to_close.emplace_back(p.id, p.volume);
+					if (p.owner == _local_company.base() && p.wallet == GetStockActiveWallet()) to_close.emplace_back(p.id, p.volume);
 				}
 				for (const auto &[id, volume] : to_close) {
 					Command<CMD_STOCK_CLOSE>::Post(STR_STOCK_ERROR_CANT_CLOSE, id, volume);
 				}
 				break;
 			}
+
+			case WID_ST_WALLET: {
+				/* Switch to the next wallet of the local company. */
+				if (!Company::IsValidID(_local_company)) break;
+				const std::vector<uint8_t> ids = _wallets.GetIds(_local_company);
+				if (ids.empty()) break;
+				const uint8_t current = GetStockActiveWallet();
+				size_t pos = 0;
+				for (size_t i = 0; i < ids.size(); i++) {
+					if (ids[i] == current) pos = i;
+				}
+				SetStockActiveWallet(ids[(pos + 1) % ids.size()]);
+				this->OnInvalidateData();
+				break;
+			}
+
+			case WID_ST_WALLET_NEW:
+				if (Company::IsValidID(_local_company)) Command<CMD_WALLET_CREATE>::Post(STR_WALLET_ERROR_CANT_CREATE, WalletKind::Trading);
+				break;
+
+			case WID_ST_WALLET_DELETE:
+				if (Company::IsValidID(_local_company)) Command<CMD_WALLET_DELETE>::Post(STR_WALLET_ERROR_CANT_DELETE, GetStockActiveWallet());
+				break;
 
 			case WID_ST_DEPOSIT:
 			case WID_ST_WITHDRAW: {
@@ -452,12 +609,9 @@ struct StockWindow : Window {
 			case WID_ST_TF_DAY:
 			case WID_ST_TF_MONTH:
 			case WID_ST_TF_YEAR: {
-				const bool daily = widget == WID_ST_TF_DAY;
-				const bool yearly = widget == WID_ST_TF_YEAR;
-				if (daily && !_stock_market.record_daily) Command<CMD_STOCK_ENABLE_DAILY>::Post(STR_STOCK_ERROR_CANT_MODIFY, true);
-				if (this->view_yearly != yearly || this->view_daily != daily) {
-					this->view_yearly = yearly;
-					this->view_daily = daily;
+				const GameTimeframe wanted = widget == WID_ST_TF_DAY ? GameTimeframe::H1 : widget == WID_ST_TF_MONTH ? GameTimeframe::H4 : GameTimeframe::H12;
+				if (this->frame != wanted) {
+					this->frame = wanted;
 					this->chart_scroll_offset = 0; // The units of the offset change with the timeframe.
 				}
 				this->UpdateTimeframeButtons();
@@ -466,19 +620,29 @@ struct StockWindow : Window {
 			}
 
 			case WID_ST_HISTORY:
-				this->show_history = !this->show_history;
-				this->SetWidgetLoweredState(WID_ST_HISTORY, this->show_history);
+			case WID_ST_PORTFOLIO:
+			case WID_ST_RANKING:
+			case WID_ST_BANK: {
+				/* These buttons are toggles; pressing the active one goes back to the open trades. */
+				const ToolView wanted = widget == WID_ST_HISTORY ? ToolView::History : widget == WID_ST_PORTFOLIO ? ToolView::Portfolio : widget == WID_ST_BANK ? ToolView::Bank : ToolView::Ranking;
+				this->view = this->view == wanted ? ToolView::Orders : wanted;
+				this->SetWidgetLoweredState(WID_ST_HISTORY, this->view == ToolView::History);
+				this->SetWidgetLoweredState(WID_ST_PORTFOLIO, this->view == ToolView::Portfolio);
+				this->SetWidgetLoweredState(WID_ST_RANKING, this->view == ToolView::Ranking);
+				this->SetWidgetLoweredState(WID_ST_BANK, this->view == ToolView::Bank);
 				this->vscroll->SetPosition(0);
 				this->OnInvalidateData();
 				break;
+			}
 
 			case WID_ST_WATCH: {
 				const NWidgetBase *nw = this->GetWidget<NWidgetBase>(WID_ST_WATCH);
 				if (pt.y - nw->pos_y < this->HeaderHeight()) break;
 				const int row = (pt.y - nw->pos_y - this->HeaderHeight()) / this->RowHeight();
-				int n = 0;
+				const size_t wanted = static_cast<size_t>(std::max(0, row)) + this->watch_scroll->GetPosition();
+				size_t n = 0;
 				for (const Company *c : Company::Iterate()) {
-					if (n++ == row) {
+					if (n++ == wanted) {
 						this->selected = c->index;
 						this->chart_scroll_offset = 0;
 						SetStockOrderSymbol(c->index);
@@ -490,8 +654,16 @@ struct StockWindow : Window {
 			}
 
 			case WID_ST_TOOLBOX: {
-				if (this->show_history) break; // Closed trades can not be changed.
 				const NWidgetBase *nw = this->GetWidget<NWidgetBase>(WID_ST_TOOLBOX);
+				if (this->view == ToolView::Ranking) {
+					this->ClickRanking(pt, nw);
+					break;
+				}
+				if (this->view == ToolView::Bank) {
+					this->ClickBank(pt, nw);
+					break;
+				}
+				if (this->view != ToolView::Orders) break; // Closed trades and the portfolio can not be changed.
 				if (pt.y - nw->pos_y < this->HeaderHeight()) break;
 				const size_t row = this->vscroll->GetScrolledRowFromWidget(pt.y, this, WID_ST_TOOLBOX, this->HeaderHeight(), this->RowHeight());
 				const std::vector<const StockOrder *> rows = this->GetRows();
@@ -515,6 +687,8 @@ struct StockWindow : Window {
 					this->OpenQuery(QueryKind::StopLoss, o);
 				} else if (pt.x >= col.sl && pt.x < col.tp) {
 					this->OpenQuery(QueryKind::TakeProfit, o);
+				} else if (is_position && pt.x >= col.tp && pt.x < col.trail) {
+					this->OpenQuery(QueryKind::Trail, o);
 				}
 				break;
 			}
@@ -523,16 +697,127 @@ struct StockWindow : Window {
 		}
 	}
 
+	/** The most that the selected wallet can repay now: its balance, for a trading wallet only the free margin. */
+	int64_t GetRepayable() const
+	{
+		if (!Company::IsValidID(_local_company)) return 0;
+		const uint8_t wallet = GetStockActiveWallet();
+		int64_t available = GetWalletBalance(_local_company, wallet);
+		if (IsTradingWallet(_local_company, wallet)) available = std::min(available, GetStockFreeMargin(_local_company, wallet));
+		return std::max<int64_t>(0, std::min(available, GetCentralBankDebt(_local_company)));
+	}
+
+	/** A click in the bank view: the rows 2, 3 and 4 are the buttons Borrow, Repay and Repay all. */
+	void ClickBank(Point pt, const NWidgetBase *nw)
+	{
+		if (!Company::IsValidID(_local_company)) return;
+		const int row = (pt.y - static_cast<int>(nw->pos_y) - ScaleGUITrad(2)) / std::max(1, this->RowHeight());
+		const uint8_t wallet = GetStockActiveWallet();
+		if (row == 2) {
+			this->query_kind = QueryKind::Borrow;
+			ShowQueryString({}, STR_STOCK_QUERY_BORROW, 24, this, CS_ALPHANUMERAL, {});
+		} else if (row == 3) {
+			this->query_kind = QueryKind::Repay;
+			ShowQueryString({}, STR_STOCK_QUERY_REPAY, 24, this, CS_ALPHANUMERAL, {});
+		} else if (row == 4) {
+			const int64_t amount = this->GetRepayable();
+			if (amount > 0) Command<CMD_BANK_REPAY>::Post(STR_BANK_ERROR_CANT_REPAY, wallet, Money(amount));
+		}
+	}
+
+	/** The toolbox in bank mode: the loan at the central bank of the local company. */
+	void DrawBank(const Rect &r) const
+	{
+		const int row_h = this->RowHeight();
+		const int left = r.left + ScaleGUITrad(4);
+		if (!Company::IsValidID(_local_company)) {
+			DrawString(left, r.right - 4, r.top + ScaleGUITrad(2), STR_STOCK_SPECTATOR, TC_FROMSTRING, SA_LEFT);
+			return;
+		}
+
+		const BankAccount &a = _central_bank.accounts[_local_company.base()];
+		const int64_t limit = GetCentralBankCreditLimit(_local_company);
+		const int64_t available = GetCentralBankAvailable(_local_company);
+		const int64_t per_day = a.debt * CENTRAL_BANK_RATE_PPM_PER_DAY / STOCK_PPM;
+		const int64_t rate_tenths = CENTRAL_BANK_RATE_PPM_PER_DAY * 365 / 1000; // Tenths of a percent per year.
+		auto money = [](int64_t v) { return GetString(STR_JUST_CURRENCY_LONG, v); };
+		const std::string wallet = GetWalletName(_local_company, GetStockActiveWallet());
+
+		int y = r.top + ScaleGUITrad(2);
+		DrawString(left, r.right - 4, y, "Central bank loan: " + money(a.debt) + "     Credit limit: " + money(limit) + "     Available: " + money(available),
+				a.debt > limit ? TC_RED : TC_WHITE, SA_LEFT);
+		y += row_h;
+		DrawString(left, r.right - 4, y, fmt::format("Interest: {}% a year, added to the debt every day (about ", StockTenths(rate_tenths)) + money(per_day) + " a day). Added so far: " + money(a.interest_paid),
+				TC_GREY, SA_LEFT);
+		y += row_h;
+
+		const int right = std::min(r.right - ScaleGUITrad(8), r.left + ScaleGUITrad(420));
+		const std::pair<std::string, bool> buttons[3] = {
+			{"Borrow into " + wallet + "...", available > 0},
+			{"Repay from " + wallet + "...", a.debt > 0},
+			{"Repay as much as possible from " + wallet + " (" + money(this->GetRepayable()) + ")", this->GetRepayable() > 0},
+		};
+		for (const auto &[text, enabled] : buttons) {
+			GfxFillRect(left, y, right, y + row_h - 3, GREY_SCALE(5));
+			DrawString(left + ScaleGUITrad(4), right - ScaleGUITrad(4), y, text, enabled ? TC_WHITE : TC_GREY, SA_LEFT);
+			y += row_h;
+		}
+	}
+
+	/** Column edges of the ranking; shared by the drawing and the clicks. */
+	struct RankColumns {
+		int rank, symbol, price, change, cap, bar;
+		explicit RankColumns(const Rect &r) :
+			rank(r.left + ScaleGUITrad(4)), symbol(r.left + ScaleGUITrad(44)), price(r.left + ScaleGUITrad(250)),
+			change(r.left + ScaleGUITrad(340)), cap(r.left + ScaleGUITrad(470)), bar(r.left + ScaleGUITrad(486))
+		{}
+	};
+
+	/** A click in the ranking: the header changes the sorting, a row selects the symbol. */
+	void ClickRanking(Point pt, const NWidgetBase *nw)
+	{
+		const RankColumns col(nw->GetCurrentRect());
+		if (pt.y - static_cast<int>(nw->pos_y) < this->HeaderHeight()) {
+			if (pt.x < col.symbol + ScaleGUITrad(60)) return;
+			if (pt.x < col.price) {
+				this->rank_sort = StockRankSort::Price;
+			} else if (pt.x < col.change) {
+				this->rank_sort = StockRankSort::Change;
+			} else {
+				this->rank_sort = StockRankSort::MarketCap;
+			}
+			this->SetDirty();
+			return;
+		}
+		const size_t row = this->vscroll->GetScrolledRowFromWidget(pt.y, this, WID_ST_TOOLBOX, this->HeaderHeight(), this->RowHeight());
+		const std::vector<StockRankEntry> list = GetStockRanking(this->rank_sort);
+		if (row >= list.size()) return;
+		this->selected = list[row].company;
+		this->chart_scroll_offset = 0;
+		SetStockOrderSymbol(this->selected);
+		this->SetDirty();
+	}
+
 	void DrawWidget(const Rect &r, WidgetID widget) const override
 	{
 		switch (widget) {
 			case WID_ST_ACCOUNT: this->DrawAccount(r); break;
+			case WID_ST_WALLET: this->DrawWallet(r); break;
 			case WID_ST_WATCH:   this->DrawWatch(r); break;
 			case WID_ST_TITLE:   this->DrawTitle(r); break;
 			case WID_ST_SUMMARY: this->DrawSummary(r); break;
 			case WID_ST_CHART:   this->DrawChart(r); break;
 			case WID_ST_TOOLBOX: this->DrawToolbox(r); break;
-			case WID_ST_CLOSE_ALL:
+			case WID_ST_PORTFOLIO:
+				DrawString(r.left + 2, r.right - 2, CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL)), std::string("Portfolio"), TC_BLACK, SA_HOR_CENTER);
+				break;
+			case WID_ST_BANK:
+				DrawString(r.left + 2, r.right - 2, CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL)), std::string("Bank"), TC_BLACK, SA_HOR_CENTER);
+				break;
+			case WID_ST_RANKING:
+				DrawString(r.left + 2, r.right - 2, CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL)), std::string("Ranking"), TC_BLACK, SA_HOR_CENTER);
+				break;
+			case WID_STOCK_CLOSE_ALL:
 				DrawString(r.left + 2, r.right - 2, CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL)), std::string("Close All"), TC_BLACK, SA_HOR_CENTER);
 				break;
 			default: break;
@@ -546,13 +831,19 @@ struct StockWindow : Window {
 			DrawString(r.left + 4, r.right - 4, top, STR_STOCK_SPECTATOR, TC_FROMSTRING, SA_LEFT);
 			return;
 		}
-		/* The deposited money counts as part of the balance, so that equity = balance + floating profit still holds.
+		/* Every wallet has its own balance, margin and margin level; the account line shows the selected one.
 		 * This must match GetStockEquity(), which is what the margin checks and the margin level use. */
-		const int64_t balance = static_cast<int64_t>(Company::Get(_local_company)->money) + _stock_market.trading_balance[_local_company.base()];
-		const int64_t floating = GetStockFloatingProfit(_local_company);
-		const int64_t margin = GetStockUsedMargin(_local_company);
+		const uint8_t wallet = GetStockActiveWallet();
+		if (!IsTradingWallet(_local_company, wallet)) {
+			/* The fuel reserve has no positions, so there is nothing to show but how to fill it. */
+			DrawString(r.left + 4, r.right - 4, top, GetString(STR_STOCK_ACCOUNT_RESERVE, GetWalletName(_local_company, wallet)), TC_FROMSTRING, SA_LEFT);
+			return;
+		}
+		const int64_t balance = GetWalletBalance(_local_company, wallet);
+		const int64_t floating = GetStockFloatingProfit(_local_company, wallet);
+		const int64_t margin = GetStockUsedMargin(_local_company, wallet);
 		const int64_t equity = balance + floating;
-		const int64_t level = GetStockMarginLevel(_local_company);
+		const int64_t level = GetStockMarginLevel(_local_company, wallet);
 		std::string text;
 		if (level < 0) {
 			text = GetString(STR_STOCK_ACCOUNT, balance, equity, margin, equity - margin);
@@ -560,8 +851,16 @@ struct StockWindow : Window {
 			/* Below the margin call level the line turns red; below the stop-out level positions are closed by force. */
 			text = GetString(level < STOCK_MARGIN_CALL_LEVEL ? STR_STOCK_ACCOUNT_CALL : STR_STOCK_ACCOUNT_LEVEL, balance, equity, margin, equity - margin, level);
 		}
-		text += GetString(STR_STOCK_TRADING_BALANCE, _stock_market.trading_balance[_local_company.base()]);
 		DrawString(r.left + 4, r.right - 4, top, text, TC_FROMSTRING, SA_LEFT);
+	}
+
+	/** The selected wallet with its balance. */
+	void DrawWallet(const Rect &r) const
+	{
+		if (!Company::IsValidID(_local_company)) return;
+		const int top = CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL));
+		const uint8_t wallet = GetStockActiveWallet();
+		DrawString(r.left + 4, r.right - 4, top, GetString(STR_STOCK_WALLET, GetWalletName(_local_company, wallet), GetWalletBalance(_local_company, wallet)), TC_FROMSTRING, SA_LEFT);
 	}
 
 	/** Market Watch: one row per symbol with the Bid and Ask price. */
@@ -579,7 +878,11 @@ struct StockWindow : Window {
 		y = r.top + this->HeaderHeight();
 		GfxDrawLine(r.left + 1, y - 2, r.right - 1, y - 2, GREY_SCALE(4));
 
+		/* Companies that have been scrolled out of the top of the list are skipped. */
+		const size_t first = this->watch_scroll->GetPosition();
+		size_t n = 0;
 		for (const Company *c : Company::Iterate()) {
+			if (n++ < first) continue;
 			if (y + row_h > r.bottom) break;
 			if (c->index == this->selected) GfxFillRect(r.left + 1, y - 1, r.right - 1, y + row_h - 2, GREY_SCALE(4));
 
@@ -635,6 +938,16 @@ struct StockWindow : Window {
 	{
 		if (!Company::IsValidID(this->selected)) return;
 
+		/* Temporary: the chart is switched off while the clock of the game is rebuilt (see GAME_TIME_DECOUPLE_CHART). The candles are still recorded. */
+		if constexpr (GameTimeManager::IsChartDecoupled()) {
+			GfxFillRect(r.left + 1, r.top + 1, r.right - 1, r.bottom - 1, GREY_SCALE(2));
+			const GameTimeSnapshot now = GameTimeManager::Get().GetSnapshot();
+			DrawString(r.left + 8, r.right - 8, r.top + ScaleGUITrad(8), std::string("Chart switched off (game clock mode)"), TC_WHITE, SA_LEFT);
+			DrawString(r.left + 8, r.right - 8, r.top + ScaleGUITrad(8) + GetCharacterHeight(FS_NORMAL) + 2,
+					fmt::format("Game time: year {}, day {}, {:02}:{:02}", now.year, now.day, now.hour, now.minute), TC_LIGHT_BLUE, SA_LEFT);
+			return;
+		}
+
 		const std::vector<StockCandle> candles = this->GetChartCandles();
 
 		const int small_height = GetCharacterHeight(FS_SMALL);
@@ -645,17 +958,22 @@ struct StockWindow : Window {
 		const int full_bottom = r.bottom - small_height - ScaleGUITrad(4);
 		if (right - left < 20 || full_bottom - top < 20) return;
 
-		/* The lower quarter of the chart shows the RSI, when there is enough room for it. */
-		const int rsi_height = (full_bottom - top) >= ScaleGUITrad(150) ? (full_bottom - top) / 4 : 0;
-		const int gap = rsi_height > 0 ? ScaleGUITrad(4) : 0;
-		const int bottom = full_bottom - rsi_height - gap;
+		/* When there is enough room, the chart has three panes: the price on top, the volume bars under it and the RSI at the bottom. */
+		const bool panes = (full_bottom - top) >= ScaleGUITrad(150);
+		const int rsi_height = panes ? (full_bottom - top) / 4 : 0;
+		const int vol_height = panes ? (full_bottom - top) / 6 : 0;
+		const int gap = panes ? ScaleGUITrad(4) : 0;
+		const int bottom = full_bottom - rsi_height - vol_height - 2 * gap;
 		if (bottom - top < 20) return;
+		const int vol_top = bottom + gap;
+		const int vol_bottom = vol_top + vol_height;
 
 		GfxFillRect(left, top, right, bottom, GREY_SCALE(2));
-		if (rsi_height > 0) GfxFillRect(left, bottom + gap, right, full_bottom, GREY_SCALE(2));
+		if (vol_height > 0) GfxFillRect(left, vol_top, right, vol_bottom, GREY_SCALE(2));
+		if (rsi_height > 0) GfxFillRect(left, full_bottom - rsi_height, right, full_bottom, GREY_SCALE(2));
 
 		if (candles.empty()) {
-			if (this->view_daily) DrawString(left + 4, right - 4, top + 4, STR_STOCK_DAILY_WAIT, TC_WHITE, SA_LEFT);
+			DrawString(left + 4, right - 4, top + 4, STR_STOCK_FRAME_WAIT, TC_WHITE, SA_LEFT);
 			return;
 		}
 
@@ -711,36 +1029,18 @@ struct StockWindow : Window {
 			if (body_bottom <= body_top) body_bottom = body_top + 1;
 			GfxFillRect(cx - body_half, body_top, cx + body_half, body_bottom, colour);
 
-			/* One small tick for every candle (one month, or one year in the yearly view). */
+			/* One small tick for every candle. */
 			GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(2), PC_WHITE);
 
-			if (this->view_daily) {
-				/* A month label at the first day of every month; the next one is about 30 candles further. */
-				const auto ymd = TimerGameEconomy::ConvertDateToYMD(TimerGameEconomy::Date{c.ym});
-				if (ymd.day == 1) {
-					static const char *const names[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-					GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(3), PC_WHITE);
-					DrawString(cx - ScaleGUITrad(20), cx + ScaleGUITrad(20), full_bottom + ScaleGUITrad(3), std::string(names[ymd.month % 12]), TC_WHITE, SA_HOR_CENTER, false, FS_SMALL);
-				}
-				continue;
-			}
-
-			if (this->view_yearly) {
-				/* A year label every five years; each label is wider than one candle. */
-				const int year = c.ym / 12;
-				if (year % 5 == 0) {
-					GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(3), PC_WHITE);
-					DrawString(cx - ScaleGUITrad(20), cx + ScaleGUITrad(20), full_bottom + ScaleGUITrad(3), fmt::format("{}", year), TC_WHITE, SA_HOR_CENTER, false, FS_SMALL);
-				}
-				continue;
-			}
-
-			/* A label every quarter (Jan, Apr, Jul, Oct); each label is wider than one candle, so not every month. */
-			const int month_index = c.ym % 12; // 0 = January.
-			if (month_index % 3 == 0) {
-				static const char *const month_names[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+			/* Labels in game time. Each label is wider than one candle, so only some candles get one: every 6 hours on
+			 * the 1h chart (the time, or the day at midnight), every day on the 4h chart and every 4 days on the 12h chart. */
+			const uint64_t start_hour = static_cast<uint64_t>(c.ym) * static_cast<uint64_t>(GameTimeframeHours(this->frame));
+			const uint64_t label_every = this->frame == GameTimeframe::H1 ? 6 : this->frame == GameTimeframe::H4 ? 24 : 96;
+			if (start_hour % label_every == 0) {
 				GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(3), PC_WHITE);
-				DrawString(cx - ScaleGUITrad(20), cx + ScaleGUITrad(20), full_bottom + ScaleGUITrad(3), std::string(month_names[month_index]), TC_WHITE, SA_HOR_CENTER, false, FS_SMALL);
+				const std::string label = (this->frame == GameTimeframe::H1 && start_hour % 24 != 0) ?
+						fmt::format("{:02}:00", start_hour % 24) : fmt::format("D{}", start_hour / 24 + 1);
+				DrawString(cx - ScaleGUITrad(20), cx + ScaleGUITrad(20), full_bottom + ScaleGUITrad(3), label, TC_WHITE, SA_HOR_CENTER, false, FS_SMALL);
 			}
 		}
 
@@ -761,30 +1061,53 @@ struct StockWindow : Window {
 			}
 		}
 
-		/* Moving average of the closing price over 20 candles, drawn as a yellow line. */
-		static constexpr size_t MA_PERIOD = 20;
-		int prev_x = 0;
-		int prev_y = 0;
-		bool have_prev = false;
-		for (size_t i = first; i < last; i++) {
-			if (i + 1 < MA_PERIOD) {
-				have_prev = false;
-				continue;
+		/* Two simple moving averages of the closing price: a fast one (yellow) and a slow one (orange). */
+		auto draw_sma = [&](size_t period, PixelColour colour) {
+			const std::vector<int64_t> sma = ComputeSMA(candles, period);
+			int prev_x = 0;
+			int prev_y = 0;
+			bool have_prev = false;
+			for (size_t i = first; i < last; i++) {
+				if (i + 1 < period) {
+					have_prev = false;
+					continue;
+				}
+				const int x = x0 + static_cast<int>(i - first) * slot + slot / 2;
+				const int y = std::clamp(to_y(sma[i]), top, bottom);
+				if (have_prev) GfxDrawLine(prev_x, prev_y, x, y, colour);
+				prev_x = x;
+				prev_y = y;
+				have_prev = true;
 			}
-			int64_t sum = 0;
-			for (size_t k = i + 1 - MA_PERIOD; k <= i; k++) sum += candles[k].close;
-			const int x = x0 + static_cast<int>(i - first) * slot + slot / 2;
-			const int y = std::clamp(to_y(sum / static_cast<int64_t>(MA_PERIOD)), top, bottom);
-			if (have_prev) GfxDrawLine(prev_x, prev_y, x, y, PC_YELLOW);
-			prev_x = x;
-			prev_y = y;
-			have_prev = true;
+		};
+		draw_sma(STOCK_SMA_SLOW, PC_ORANGE);
+		draw_sma(STOCK_SMA_FAST, PC_YELLOW);
+		DrawString(left + ScaleGUITrad(4), right - 4, top + ScaleGUITrad(2), fmt::format("SMA {}", STOCK_SMA_FAST), TC_YELLOW, SA_LEFT, false, FS_SMALL);
+		DrawString(left + ScaleGUITrad(54), right - 4, top + ScaleGUITrad(2), fmt::format("SMA {}", STOCK_SMA_SLOW), TC_ORANGE, SA_LEFT, false, FS_SMALL);
+
+		/* Volume bars under the price: the shares traded by the orders of the players in every candle. */
+		if (vol_height > 0) {
+			int64_t max_volume = 0;
+			for (size_t i = first; i < last; i++) max_volume = std::max(max_volume, candles[i].volume);
+			DrawString(r.left + 2, left - 4, vol_top, std::string("Vol"), TC_WHITE, SA_RIGHT, false, FS_SMALL);
+			if (max_volume > 0) {
+				DrawString(r.left + 2, left - 4, vol_top + small_height, StockVolumeToString(static_cast<uint32_t>(std::min<int64_t>(max_volume, UINT32_MAX))), TC_WHITE, SA_RIGHT, false, FS_SMALL);
+				for (int i = 0; i < count; i++) {
+					const StockCandle &c = candles[first + i];
+					if (c.volume <= 0) continue;
+					const int cx = x0 + i * slot + slot / 2;
+					const int h = std::max<int>(1, static_cast<int>(c.volume * (vol_height - 2) / max_volume));
+					GfxFillRect(cx - body_half, vol_bottom - h, cx + body_half, vol_bottom - 1, c.close >= c.open ? PC_GREEN : PC_RED);
+				}
+			} else {
+				DrawString(left + ScaleGUITrad(4), right - 4, vol_top + ScaleGUITrad(2), std::string("No trades in this period"), TC_GREY, SA_LEFT, false, FS_SMALL);
+			}
 		}
 
 		/* RSI over 14 candles in the lower pane, with the 30 and 70 levels. */
 		if (rsi_height > 0) {
 			static constexpr size_t RSI_PERIOD = 14;
-			const int rsi_top = bottom + gap;
+			const int rsi_top = full_bottom - rsi_height;
 			auto rsi_y = [&](int64_t value) {
 				return full_bottom - static_cast<int>(value * (full_bottom - rsi_top) / 100);
 			};
@@ -831,15 +1154,16 @@ struct StockWindow : Window {
 		const int row_h = this->RowHeight();
 		const int header_h = this->HeaderHeight();
 
-		/* The same column edges as the open trades. */
+		/* The same column edges as the open trades, with the dates of opening and closing. */
 		const int c_id = r.left + ScaleGUITrad(4);
-		const int c_symbol = r.left + ScaleGUITrad(48);
-		const int c_type = r.left + ScaleGUITrad(168);
-		const int c_volume = r.left + ScaleGUITrad(300);
-		const int c_open = r.left + ScaleGUITrad(380);
-		const int c_close = r.left + ScaleGUITrad(450);
-		const int c_date = r.left + ScaleGUITrad(520);
-		const int c_reason = r.left + ScaleGUITrad(590);
+		const int c_symbol = r.left + ScaleGUITrad(44);
+		const int c_type = r.left + ScaleGUITrad(120);
+		const int c_volume = r.left + ScaleGUITrad(230);
+		const int c_open = r.left + ScaleGUITrad(300);
+		const int c_close = r.left + ScaleGUITrad(370);
+		const int c_opened = r.left + ScaleGUITrad(440);
+		const int c_date = r.left + ScaleGUITrad(510);
+		const int c_reason = r.left + ScaleGUITrad(580);
 		const int c_profit = r.left + ScaleGUITrad(680);
 
 		int y = r.top + ScaleGUITrad(2);
@@ -849,7 +1173,8 @@ struct StockWindow : Window {
 		DrawString(c_volume - ScaleGUITrad(60), c_volume, y, STR_STOCK_COL_VOLUME, TC_BLACK, SA_RIGHT);
 		DrawString(c_volume, c_open, y, STR_STOCK_COL_OPEN, TC_BLACK, SA_RIGHT);
 		DrawString(c_open, c_close, y, STR_STOCK_COL_CLOSE_PRICE, TC_BLACK, SA_RIGHT);
-		DrawString(c_close, c_date, y, STR_STOCK_COL_CLOSED, TC_BLACK, SA_RIGHT);
+		DrawString(c_close, c_opened, y, std::string("Opened"), TC_BLACK, SA_RIGHT);
+		DrawString(c_opened, c_date, y, STR_STOCK_COL_CLOSED, TC_BLACK, SA_RIGHT);
 		DrawString(c_date, c_reason, y, STR_STOCK_COL_REASON, TC_BLACK, SA_RIGHT);
 		DrawString(c_reason, c_profit, y, STR_STOCK_COL_PROFIT, TC_BLACK, SA_RIGHT);
 		GfxDrawLine(r.left + 1, r.top + header_h - 2, r.right - 1, r.top + header_h - 2, GREY_SCALE(4));
@@ -873,18 +1198,139 @@ struct StockWindow : Window {
 			DrawString(c_volume - ScaleGUITrad(60), c_volume, y, StockVolumeToString(t.volume), TC_WHITE, SA_RIGHT);
 			DrawString(c_volume, c_open, y, GetString(STR_JUST_CURRENCY_LONG, t.open_price), TC_WHITE, SA_RIGHT);
 			DrawString(c_open, c_close, y, GetString(STR_JUST_CURRENCY_LONG, t.close_price), TC_WHITE, SA_RIGHT);
-			DrawString(c_close, c_date, y, StockMonthToString(t.closed_ym), TC_WHITE, SA_RIGHT);
+			DrawString(c_close, c_opened, y, t.open_ym > 0 ? StockMonthToString(t.open_ym) : std::string("-"), TC_WHITE, SA_RIGHT);
+			DrawString(c_opened, c_date, y, StockMonthToString(t.closed_ym), TC_WHITE, SA_RIGHT);
 			DrawString(c_date, c_reason, y, GetStockCloseReasonString(t.reason), t.reason == StockCloseReason::StopOut ? TC_RED : TC_WHITE, SA_RIGHT);
 			DrawString(c_reason, c_profit, y, GetString(STR_JUST_CURRENCY_LONG, t.profit), t.profit >= 0 ? TC_GREEN : TC_RED, SA_RIGHT);
+		}
+	}
+
+	/** The toolbox in portfolio mode: the results of the local company and its profit per month. */
+	void DrawPortfolio(const Rect &r) const
+	{
+		const int row_h = this->RowHeight();
+		const int header_h = this->HeaderHeight();
+		const int left = r.left + ScaleGUITrad(4);
+		if (!Company::IsValidID(_local_company)) {
+			DrawString(left, r.right - 4, r.top + ScaleGUITrad(2), STR_STOCK_SPECTATOR, TC_FROMSTRING, SA_LEFT);
+			return;
+		}
+
+		const StockStats &s = _stock_market.stats[_local_company.base()];
+		int64_t floating = 0;
+		size_t open_positions = 0;
+		for (const StockOrder &p : _stock_market.positions) {
+			if (p.owner != _local_company.base()) continue;
+			floating += GetStockProfit(p);
+			open_positions++;
+		}
+		const int64_t win_tenths = s.closed > 0 ? static_cast<int64_t>(s.wins) * 1000 / s.closed : 0;
+		const int32_t now = GetStockCurrentMonth();
+		int64_t month_profit = 0;
+		for (const StockMonthProfit &m : s.months) {
+			if (m.ym == now) month_profit = m.profit;
+		}
+
+		int y = r.top + ScaleGUITrad(2);
+		auto money = [](int64_t v) { return GetString(STR_JUST_CURRENCY_LONG, v); };
+		DrawString(left, r.right - 4, y, "Total profit/loss: " + money(s.total_profit) + "     Floating: " + money(floating) + "     This month: " + money(month_profit),
+				s.total_profit >= 0 ? TC_GREEN : TC_RED, SA_LEFT);
+		y += row_h;
+		DrawString(left, r.right - 4, y, fmt::format("Closed trades: {}     Wins: {}     Win rate: {}%     Open positions: {}", s.closed, s.wins, StockTenths(win_tenths), open_positions),
+				TC_WHITE, SA_LEFT);
+		y += row_h;
+
+		const int c_month = left;
+		const int c_trades = r.left + ScaleGUITrad(200);
+		const int c_rate = r.left + ScaleGUITrad(300);
+		const int c_profit = r.left + ScaleGUITrad(440);
+		const int c_total = r.left + ScaleGUITrad(580);
+		DrawString(c_month, c_trades, y, std::string("Month"), TC_BLACK, SA_LEFT);
+		DrawString(c_month, c_trades, y, std::string("Trades"), TC_BLACK, SA_RIGHT);
+		DrawString(c_trades, c_rate, y, std::string("Win rate"), TC_BLACK, SA_RIGHT);
+		DrawString(c_rate, c_profit, y, std::string("Profit"), TC_BLACK, SA_RIGHT);
+		DrawString(c_profit, c_total, y, std::string("Cumulative"), TC_BLACK, SA_RIGHT);
+		GfxDrawLine(r.left + 1, y + row_h - 1, r.right - 1, y + row_h - 1, GREY_SCALE(4));
+		y = r.top + header_h + (PORTFOLIO_FIXED_ROWS - 1) * row_h;
+
+		const std::vector<StockMonthProfit> months = this->GetPortfolioMonths(); // The newest first.
+		if (months.empty()) {
+			DrawString(left, r.right - 4, y, std::string("No closed trades yet."), TC_GREY, SA_LEFT);
+			return;
+		}
+
+		/* The cumulative profit of a month is the sum of that month and all older ones that are remembered. */
+		std::vector<int64_t> cumulative(months.size(), 0);
+		int64_t run = 0;
+		for (size_t i = months.size(); i-- > 0;) {
+			run += months[i].profit;
+			cumulative[i] = run;
+		}
+
+		const size_t capacity = static_cast<size_t>(std::max(1, static_cast<int>(this->vscroll->GetCapacity())));
+		const size_t visible = capacity > PORTFOLIO_FIXED_ROWS ? capacity - PORTFOLIO_FIXED_ROWS : 1;
+		const size_t first = this->vscroll->GetPosition();
+		const size_t last = std::min(months.size(), first + visible);
+		for (size_t i = first; i < last; i++, y += row_h) {
+			const StockMonthProfit &m = months[i];
+			DrawString(c_month, c_trades, y, StockMonthToString(m.ym), TC_WHITE, SA_LEFT);
+			DrawString(c_month, c_trades, y, GetString(STR_JUST_INT, m.trades), TC_WHITE, SA_RIGHT);
+			DrawString(c_trades, c_rate, y, StockTenths(m.trades > 0 ? static_cast<int64_t>(m.wins) * 1000 / m.trades : 0) + "%", TC_WHITE, SA_RIGHT);
+			DrawString(c_rate, c_profit, y, GetString(STR_JUST_CURRENCY_LONG, m.profit), m.profit >= 0 ? TC_GREEN : TC_RED, SA_RIGHT);
+			DrawString(c_profit, c_total, y, GetString(STR_JUST_CURRENCY_LONG, cumulative[i]), cumulative[i] >= 0 ? TC_GREEN : TC_RED, SA_RIGHT);
+		}
+	}
+
+	/** The toolbox in ranking mode: all companies by market capitalisation, price or change; click a header to sort. */
+	void DrawRanking(const Rect &r) const
+	{
+		const int row_h = this->RowHeight();
+		const int header_h = this->HeaderHeight();
+		const RankColumns col(r);
+
+		const char *mark = " v";
+		int y = r.top + ScaleGUITrad(2);
+		DrawString(col.rank, col.symbol, y, std::string("#"), TC_BLACK, SA_LEFT);
+		DrawString(col.symbol, col.price - ScaleGUITrad(90), y, STR_STOCK_COL_SYMBOL, TC_BLACK, SA_LEFT);
+		DrawString(col.symbol, col.price, y, std::string("Price") + (this->rank_sort == StockRankSort::Price ? mark : ""), TC_BLACK, SA_RIGHT);
+		DrawString(col.price, col.change, y, std::string("Change") + (this->rank_sort == StockRankSort::Change ? mark : ""), TC_BLACK, SA_RIGHT);
+		DrawString(col.change, col.cap, y, std::string("Market cap") + (this->rank_sort == StockRankSort::MarketCap ? mark : ""), TC_BLACK, SA_RIGHT);
+		GfxDrawLine(r.left + 1, r.top + header_h - 2, r.right - 1, r.top + header_h - 2, GREY_SCALE(4));
+
+		const std::vector<StockRankEntry> list = GetStockRanking(this->rank_sort);
+		int64_t top_cap = 1;
+		for (const StockRankEntry &e : list) top_cap = std::max(top_cap, e.market_cap);
+
+		const size_t first = this->vscroll->GetPosition();
+		const size_t last = std::min<size_t>(list.size(), first + this->vscroll->GetCapacity());
+		const int bar_max = std::max(ScaleGUITrad(10), r.right - ScaleGUITrad(8) - col.bar);
+		y = r.top + header_h;
+		for (size_t i = first; i < last; i++, y += row_h) {
+			const StockRankEntry &e = list[i];
+			const bool mine = e.company == _local_company;
+			if (e.company == this->selected) GfxFillRect(r.left + 1, y - 1, r.right - 1, y + row_h - 2, GREY_SCALE(4));
+
+			DrawString(col.rank, col.symbol, y, GetString(STR_JUST_INT, i + 1), TC_WHITE, SA_LEFT);
+			DrawString(col.symbol, col.price - ScaleGUITrad(90), y, GetString(STR_STOCK_SYMBOL, e.company), mine ? TC_GOLD : TC_WHITE, SA_LEFT);
+			DrawString(col.symbol, col.price, y, GetString(STR_JUST_CURRENCY_LONG, e.price), TC_LIGHT_BLUE, SA_RIGHT);
+			DrawString(col.price, col.change, y, StockTenths(e.change_tenths) + "%", e.change_tenths >= 0 ? TC_GREEN : TC_RED, SA_RIGHT);
+			DrawString(col.change, col.cap, y, GetString(STR_JUST_CURRENCY_LONG, e.market_cap), TC_WHITE, SA_RIGHT);
+
+			/* A bar shows the market cap compared to the biggest company. */
+			const int w = std::max<int>(1, static_cast<int>(e.market_cap * bar_max / top_cap));
+			GfxFillRect(col.bar, y + 1, col.bar + w, y + row_h - 4, mine ? PC_ORANGE : PC_LIGHT_BLUE);
 		}
 	}
 
 	/** The toolbox: open positions with floating profit, then pending orders. */
 	void DrawToolbox(const Rect &r) const
 	{
-		if (this->show_history) {
-			this->DrawHistory(r);
-			return;
+		switch (this->view) {
+			case ToolView::History:   this->DrawHistory(r); return;
+			case ToolView::Portfolio: this->DrawPortfolio(r); return;
+			case ToolView::Ranking:   this->DrawRanking(r); return;
+			case ToolView::Bank:      this->DrawBank(r); return;
+			default: break;
 		}
 
 		const int row_h = this->RowHeight();
@@ -899,6 +1345,7 @@ struct StockWindow : Window {
 		const int c_open = col.open;
 		const int c_sl = col.sl;
 		const int c_tp = col.tp;
+		const int c_trail = col.trail;
 		const int c_price = col.price;
 		const int c_profit = col.profit;
 		const int close_left = col.close;
@@ -911,7 +1358,8 @@ struct StockWindow : Window {
 		DrawString(c_volume, c_open, y, STR_STOCK_COL_OPEN, TC_BLACK, SA_RIGHT);
 		DrawString(c_open, c_sl, y, STR_STOCK_COL_SL, TC_BLACK, SA_RIGHT);
 		DrawString(c_sl, c_tp, y, STR_STOCK_COL_TP, TC_BLACK, SA_RIGHT);
-		DrawString(c_tp, c_price, y, STR_STOCK_COL_PRICE, TC_BLACK, SA_RIGHT);
+		DrawString(c_tp, c_trail, y, std::string("Trail"), TC_BLACK, SA_RIGHT);
+		DrawString(c_trail, c_price, y, STR_STOCK_COL_PRICE, TC_BLACK, SA_RIGHT);
 		DrawString(c_price, c_profit, y, STR_STOCK_COL_PROFIT, TC_BLACK, SA_RIGHT);
 		GfxDrawLine(r.left + 1, r.top + header_h - 2, r.right - 1, r.top + header_h - 2, GREY_SCALE(4));
 
@@ -940,7 +1388,8 @@ struct StockWindow : Window {
 			DrawString(c_sl, c_tp, y, o.tp != 0 ? GetString(STR_JUST_CURRENCY_LONG, o.tp) : std::string("-"), level_colour, SA_RIGHT);
 
 			const int64_t now = IsStockBuy(o.type) ? GetStockBid(target) : GetStockAsk(target);
-			DrawString(c_tp, c_price, y, GetString(STR_JUST_CURRENCY_LONG, now), TC_WHITE, SA_RIGHT);
+			if (is_position) DrawString(c_tp, c_trail, y, o.trail != 0 ? GetString(STR_JUST_CURRENCY_LONG, o.trail) : std::string("-"), level_colour, SA_RIGHT);
+			DrawString(c_trail, c_price, y, GetString(STR_JUST_CURRENCY_LONG, now), TC_WHITE, SA_RIGHT);
 
 			if (is_position) {
 				const int64_t profit = GetStockProfit(o);
@@ -965,37 +1414,52 @@ static constexpr std::initializer_list<NWidgetPart> _nested_stock_widgets = {
 		NWidget(WWT_STICKYBOX, COLOUR_GREY),
 	EndContainer(),
 	NWidget(NWID_HORIZONTAL),
-		NWidget(WWT_PUSHTXTBTN, COLOUR_LIGHT_BLUE, WID_ST_NEW_ORDER), SetMinimalSize(110, 14), SetStringTip(STR_STOCK_NEW_ORDER, STR_STOCK_TIP_NEW_ORDER),
-		NWidget(WWT_TEXTBTN, COLOUR_LIGHT_BLUE, WID_ST_HISTORY), SetMinimalSize(110, 14), SetStringTip(STR_STOCK_HISTORY, STR_STOCK_TIP_HISTORY),
+		NWidget(WWT_PUSHTXTBTN, COLOUR_LIGHT_BLUE, WID_ST_NEW_ORDER), SetMinimalSize(100, 14), SetStringTip(STR_STOCK_NEW_ORDER, STR_STOCK_TIP_NEW_ORDER),
+		NWidget(WWT_TEXTBTN, COLOUR_LIGHT_BLUE, WID_ST_HISTORY), SetMinimalSize(80, 14), SetStringTip(STR_STOCK_HISTORY, STR_STOCK_TIP_HISTORY),
+		/* Panels instead of buttons: a panel keeps its pressed look while its view is active, and its text is drawn in DrawWidget. */
+		NWidget(WWT_PANEL, COLOUR_LIGHT_BLUE, WID_ST_PORTFOLIO), SetMinimalSize(80, 14),
+		EndContainer(),
+		NWidget(WWT_PANEL, COLOUR_LIGHT_BLUE, WID_ST_RANKING), SetMinimalSize(80, 14),
+		EndContainer(),
 		NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_ST_DEPOSIT), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_DEPOSIT, STR_STOCK_TIP_DEPOSIT),
 		NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_ST_WITHDRAW), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_WITHDRAW, STR_STOCK_TIP_WITHDRAW),
 		NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_ACCOUNT), SetMinimalSize(380, 14), SetResize(1, 0), SetFill(1, 0),
 		EndContainer(),
 	EndContainer(),
 	NWidget(NWID_HORIZONTAL),
-		NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_WATCH), SetMinimalSize(230, 200), SetFill(0, 1), SetToolTip(STR_STOCK_TIP_WATCH),
+		NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_WALLET), SetMinimalSize(230, 14), SetFill(0, 0), SetToolTip(STR_STOCK_TIP_WALLET),
 		EndContainer(),
+		NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_ST_WALLET_NEW), SetMinimalSize(90, 14), SetStringTip(STR_STOCK_WALLET_NEW, STR_STOCK_TIP_WALLET_NEW),
+		NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_ST_WALLET_DELETE), SetMinimalSize(90, 14), SetStringTip(STR_STOCK_WALLET_DELETE, STR_STOCK_TIP_WALLET_DELETE),
+		NWidget(WWT_PUSHBTN, COLOUR_GREY, WID_STOCK_CLOSE_ALL), SetMinimalSize(90, 14),
+		NWidget(WWT_PANEL, COLOUR_LIGHT_BLUE, WID_ST_BANK), SetMinimalSize(80, 14),
+		EndContainer(),
+		NWidget(WWT_PANEL, COLOUR_GREY), SetFill(1, 1), SetResize(1, 0),
+		EndContainer(),
+	EndContainer(),
+	NWidget(NWID_HORIZONTAL),
+		NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_WATCH), SetMinimalSize(230, 200), SetFill(0, 1), SetScrollbar(WID_ST_WATCH_SCROLLBAR), SetToolTip(STR_STOCK_TIP_WATCH),
+		EndContainer(),
+		NWidget(NWID_VSCROLLBAR, COLOUR_GREY, WID_ST_WATCH_SCROLLBAR),
 		NWidget(NWID_VERTICAL),
 			NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_TITLE), SetMinimalSize(400, 16), SetResize(1, 0), SetFill(1, 0),
 			EndContainer(),
 			NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_SUMMARY), SetMinimalSize(400, 16), SetResize(1, 0), SetFill(1, 0), SetToolTip(STR_STOCK_TIP_SUMMARY),
 			EndContainer(),
 			NWidget(NWID_HORIZONTAL),
-				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_DAY), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_TF_DAY, STR_STOCK_TIP_TF_DAY),
-				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_MONTH), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_TF_MONTH, STR_STOCK_TIP_TF_MONTH),
-				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_YEAR), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_TF_YEAR, STR_STOCK_TIP_TF_YEAR),
-				NWidget(NWID_SPACER), SetFill(1, 0), SetResize(1, 0),
+				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_DAY), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_TF_1H, STR_STOCK_TIP_TF_1H),
+				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_MONTH), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_TF_4H, STR_STOCK_TIP_TF_4H),
+				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_YEAR), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_TF_12H, STR_STOCK_TIP_TF_12H),
+				/* A grey panel instead of a spacer: a spacer draws nothing, which leaves a hole in the window. */
+				NWidget(WWT_PANEL, COLOUR_GREY), SetFill(1, 1), SetResize(1, 0),
+				EndContainer(),
 			EndContainer(),
 			NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_CHART), SetMinimalSize(400, 184), SetResize(1, 1), SetFill(1, 1),
 			EndContainer(),
 		EndContainer(),
 	EndContainer(),
 	NWidget(NWID_HORIZONTAL),
-		NWidget(WWT_PUSHBTN, COLOUR_GREY, WID_ST_CLOSE_ALL), SetMinimalSize(90, 14),
-		NWidget(NWID_SPACER), SetFill(1, 0), SetResize(1, 0),
-	EndContainer(),
-	NWidget(NWID_HORIZONTAL),
-		NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_TOOLBOX), SetMinimalSize(630, 100), SetResize(1, 0), SetFill(1, 1), SetScrollbar(WID_ST_TOOL_SCROLLBAR), SetToolTip(STR_STOCK_TIP_TOOLBOX),
+		NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_TOOLBOX), SetMinimalSize(700, 100), SetResize(1, 0), SetFill(1, 1), SetScrollbar(WID_ST_TOOL_SCROLLBAR), SetToolTip(STR_STOCK_TIP_TOOLBOX),
 		EndContainer(),
 		NWidget(NWID_VERTICAL),
 			NWidget(NWID_VSCROLLBAR, COLOUR_GREY, WID_ST_TOOL_SCROLLBAR),
@@ -1017,3 +1481,4 @@ void ShowStockWindow()
 	if (BringWindowToFrontById(WC_STOCK_MARKET, 0) != nullptr) return;
 	new StockWindow(_stock_desc);
 }
+

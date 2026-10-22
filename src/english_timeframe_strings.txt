@@ -1,0 +1,8 @@
+# Strings of the timeframe buttons and of the chart (1h, 4h and 12h of game time)
+STR_STOCK_TF_1H                                                 :1h
+STR_STOCK_TF_4H                                                 :4h
+STR_STOCK_TF_12H                                                :12h
+STR_STOCK_TIP_TF_1H                                             :{BLACK}Show one candle per game hour (1 real minute). Drag the chart with the mouse to scroll through the history
+STR_STOCK_TIP_TF_4H                                             :{BLACK}Show one candle per 4 game hours (4 real minutes). Drag the chart with the mouse to scroll through the history
+STR_STOCK_TIP_TF_12H                                            :{BLACK}Show one candle per 12 game hours (12 real minutes). Drag the chart with the mouse to scroll through the history
+STR_STOCK_FRAME_WAIT                                            :{WHITE}Collecting candles. They appear as game time passes

@@ -16,9 +16,9 @@ enum StockWidgets : WidgetID {
 	WID_ST_HISTORY,          ///< Toggle button: show the history of closed trades instead of the open trades.
 	WID_ST_DEPOSIT,          ///< Button: move money from the company cash to the trading balance.
 	WID_ST_WITHDRAW,         ///< Button: move money from the trading balance back to the company cash.
-	WID_ST_TF_DAY,           ///< Toggle button: chart with daily candles; recording starts when it is first used.
-	WID_ST_TF_MONTH,         ///< Toggle button: chart with monthly candles.
-	WID_ST_TF_YEAR,          ///< Toggle button: chart with yearly candles.
+	WID_ST_TF_DAY,           ///< Toggle button: chart with 1h candles (1 game hour = 1 real minute).
+	WID_ST_TF_MONTH,         ///< Toggle button: chart with 4h candles (4 real minutes).
+	WID_ST_TF_YEAR,          ///< Toggle button: chart with 12h candles (12 real minutes).
 	WID_ST_ACCOUNT,          ///< Balance, equity, margin and free margin.
 	WID_ST_WATCH,            ///< Market Watch: symbols with Bid and Ask.
 	WID_ST_TITLE,            ///< Selected symbol with its Bid, Ask and change.
@@ -26,7 +26,14 @@ enum StockWidgets : WidgetID {
 	WID_ST_CHART,            ///< The candlestick chart.
 	WID_ST_TOOLBOX,          ///< Toolbox: open positions and pending orders.
 	WID_ST_TOOL_SCROLLBAR,   ///< Scrollbar of the toolbox.
-	WID_ST_CLOSE_ALL,        ///< Button: close all open positions of the local company at once.
+	WID_ST_CLOSE_ALL,        ///< Button: close all open positions of the selected wallet at once.
+	WID_ST_WALLET,           ///< Panel: the selected wallet with its balance; click to switch to the next wallet.
+	WID_ST_WALLET_NEW,       ///< Button: create a new trading wallet.
+	WID_ST_WALLET_DELETE,    ///< Button: delete the selected trading wallet.
+	WID_ST_PORTFOLIO,        ///< Toggle: the toolbox shows the portfolio summary (profit and loss, win rate, profit per month).
+	WID_ST_RANKING,          ///< Toggle: the toolbox shows the ranking of the companies.
+	WID_ST_BANK,             ///< Toggle: the toolbox shows the loan at the central bank.
+	WID_ST_WATCH_SCROLLBAR,  ///< Scrollbar of the Market Watch.
 };
 
 /** Widgets of the #StockOrderWindow class. */
@@ -52,3 +59,4 @@ enum StockOrderWidgets : WidgetID {
 };
 
 #endif /* WIDGETS_STOCK_WIDGET_H */
+

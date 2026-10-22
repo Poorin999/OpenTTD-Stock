@@ -47,9 +47,10 @@ static bool AreStopsValid(bool buy, int64_t reference, int64_t sl, int64_t tp)
  * @param sl Stop Loss, 0 for none.
  * @param tp Take Profit, 0 for none.
  * @param expiry_days Pending orders only: number of economy days after which the order expires; 0 for an order that never expires.
- * @return The commission as cost, or an error.
+ * @param wallet Trading wallet that holds the margin, pays the commission and the swap and gets the results of the trade.
+ * @return Zero cost (the commission is taken from the wallet), or an error.
  */
-CommandCost CmdStockOpen(DoCommandFlags flags, CompanyID target, StockOrderType type, uint32_t volume, Money price_in, Money sl_in, Money tp_in, uint32_t expiry_days)
+CommandCost CmdStockOpen(DoCommandFlags flags, CompanyID target, StockOrderType type, uint32_t volume, Money price_in, Money sl_in, Money tp_in, uint32_t expiry_days, uint8_t wallet)
 {
 	const int64_t price = price_in, sl = sl_in, tp = tp_in;
 	const Company *owner = Company::GetIfValid(_current_company);
@@ -59,6 +60,7 @@ CommandCost CmdStockOpen(DoCommandFlags flags, CompanyID target, StockOrderType 
 	if (type >= StockOrderType::End) return CMD_ERROR;
 	if (volume == 0 || volume > STOCK_MAX_VOLUME) return CommandCost(STR_STOCK_ERROR_BAD_VOLUME);
 	if (_stock_market.CountOrders(_current_company) >= STOCK_MAX_ORDERS_PER_COMPANY) return CommandCost(STR_STOCK_ERROR_TOO_MANY);
+	if (!IsTradingWallet(_current_company, wallet)) return CommandCost(STR_WALLET_ERROR_BAD_WALLET);
 
 	const int64_t bid = GetStockBid(target);
 	const int64_t ask = GetStockAsk(target);
@@ -92,10 +94,11 @@ CommandCost CmdStockOpen(DoCommandFlags flags, CompanyID target, StockOrderType 
 		StockOrder probe;
 		probe.price = entry;
 		probe.volume = volume;
-		if (GetStockUsedMargin(_current_company) + GetStockMargin(probe) > GetStockEquity(_current_company)) {
+		commission = GetStockCommission(entry * static_cast<int64_t>(volume));
+		/* The wallet must be able to hold the margin of the position and to pay the commission. */
+		if (GetStockUsedMargin(_current_company, wallet) + GetStockMargin(probe) + commission > GetStockEquity(_current_company, wallet)) {
 			return CommandCost(STR_STOCK_ERROR_NO_MARGIN);
 		}
-		commission = GetStockCommission(entry * static_cast<int64_t>(volume));
 	}
 
 	if (flags.Test(DoCommandFlag::Execute)) {
@@ -109,9 +112,12 @@ CommandCost CmdStockOpen(DoCommandFlags flags, CompanyID target, StockOrderType 
 		order.sl = sl;
 		order.tp = tp;
 		order.expiry = expiry_days;
+		order.wallet = wallet;
+		order.open_ym = market ? GetStockCurrentMonth() : 0;
 		(market ? _stock_market.positions : _stock_market.pending).push_back(order);
 
 		if (market) {
+			PayStockProfit(_current_company, wallet, -commission);
 			_stock_market.ApplyImpact(target, buy, volume);
 			/* The new price may already reach the levels of other trades. */
 			_stock_market.CheckExecutions();
@@ -119,8 +125,8 @@ CommandCost CmdStockOpen(DoCommandFlags flags, CompanyID target, StockOrderType 
 		InvalidateWindowData(WC_STOCK_MARKET, 0);
 	}
 
-	/* The commission is the cost of the command, so it is taken from the money of the company right away. */
-	return CommandCost(EXPENSES_OTHER, Money(commission));
+	/* The commission is taken from the wallet above, not from the money of the company, so the command itself costs nothing. */
+	return CommandCost();
 }
 
 /**
@@ -176,11 +182,14 @@ CommandCost CmdStockClose(DoCommandFlags flags, uint32_t id, uint32_t close_volu
  * @param sl New Stop Loss, 0 for none.
  * @param tp New Take Profit, 0 for none.
  * @param price New trigger price of a pending order; ignored for an open position.
+ * @param trail New trailing stop distance of an open position, in price units; 0 switches the trailing stop off.
+ *              Must be 0 for a pending order. While it is set, the Stop Loss follows the price (see StockMarket::ApplyTrailingStops).
  * @return Zero cost, or an error.
  */
-CommandCost CmdStockModify(DoCommandFlags flags, uint32_t id, Money sl_in, Money tp_in, Money price_in)
+CommandCost CmdStockModify(DoCommandFlags flags, uint32_t id, Money sl_in, Money tp_in, Money price_in, Money trail_in)
 {
-	const int64_t sl = sl_in, tp = tp_in, price = price_in;
+	const int64_t sl = sl_in, tp = tp_in, price = price_in, trail = trail_in;
+	if (trail < 0) return CMD_ERROR;
 	if (!Company::IsValidID(_current_company)) return CMD_ERROR;
 
 	StockOrder *position = _stock_market.FindPosition(id, _current_company);
@@ -195,6 +204,7 @@ CommandCost CmdStockModify(DoCommandFlags flags, uint32_t id, Money sl_in, Money
 		if (flags.Test(DoCommandFlag::Execute)) {
 			position->sl = sl;
 			position->tp = tp;
+			position->trail = trail;
 			InvalidateWindowData(WC_STOCK_MARKET, 0);
 		}
 		return CommandCost(EXPENSES_OTHER);
@@ -206,6 +216,7 @@ CommandCost CmdStockModify(DoCommandFlags flags, uint32_t id, Money sl_in, Money
 	const CompanyID target{order->target};
 	if (!Company::IsValidID(target)) return CMD_ERROR;
 	if (price <= 0) return CommandCost(STR_STOCK_ERROR_BAD_PRICE);
+	if (trail != 0) return CommandCost(STR_STOCK_ERROR_BAD_STOPS); // Only an open position can trail.
 
 	/* The same rules as when the order was placed. */
 	const int64_t bid = GetStockBid(target);
@@ -230,39 +241,18 @@ CommandCost CmdStockModify(DoCommandFlags flags, uint32_t id, Money sl_in, Money
 }
 
 /**
- * Move money between the company cash and the trading balance. Both count as equity, so this does not change the
- * value of the company; it is not an expense either, so the cost of the command is zero.
- * A withdrawal is only allowed when the free margin (equity minus the margin of the open positions) covers it.
+ * Move money between the company cash and the first trading wallet. This is the command of the old terminal, kept so
+ * that scripts and savegames that use it keep working; the terminal itself uses CmdWalletTransfer.
  * @param flags Type of operation.
- * @param deposit True to deposit (cash to trading balance), false to withdraw.
+ * @param deposit True to deposit (cash to wallet), false to withdraw.
  * @param amount Amount of money, more than zero.
  * @return Zero cost, or an error.
  */
-CommandCost CmdStockTransfer(DoCommandFlags flags, bool deposit, Money amount_in)
+CommandCost CmdStockTransfer(DoCommandFlags flags, bool deposit, Money amount)
 {
-	const int64_t amount = amount_in;
-	Company *c = Company::GetIfValid(_current_company);
-	if (c == nullptr) return CMD_ERROR;
-	if (amount <= 0) return CommandCost(STR_STOCK_ERROR_BAD_AMOUNT);
-
-	int64_t &balance = _stock_market.trading_balance[_current_company.base()];
-	if (deposit) {
-		if (static_cast<int64_t>(c->money) < amount) return CommandCost(STR_STOCK_ERROR_NO_FUNDS);
-	} else {
-		if (balance < amount) return CommandCost(STR_STOCK_ERROR_NO_FUNDS);
-		const int64_t free_margin = GetStockEquity(_current_company) - GetStockUsedMargin(_current_company);
-		if (free_margin < amount) return CommandCost(STR_STOCK_ERROR_NO_MARGIN);
-	}
-
-	if (flags.Test(DoCommandFlag::Execute)) {
-		const int64_t signed_amount = deposit ? amount : -amount;
-		c->money -= Money(signed_amount);
-		balance += signed_amount;
-		InvalidateWindowData(WC_FINANCES, c->index.base());
-		InvalidateWindowData(WC_STOCK_MARKET, 0);
-	}
-
-	return CommandCost();
+	const Wallet *wallet = _wallets.FindFirst(_current_company, WalletKind::Trading);
+	if (wallet == nullptr) return CommandCost(STR_WALLET_ERROR_BAD_WALLET);
+	return deposit ? CmdWalletTransfer(flags, WALLET_CASH, wallet->id, amount) : CmdWalletTransfer(flags, wallet->id, WALLET_CASH, amount);
 }
 
 /**
@@ -283,3 +273,4 @@ CommandCost CmdStockEnableDaily(DoCommandFlags flags, bool enable)
 	}
 	return CommandCost();
 }
+

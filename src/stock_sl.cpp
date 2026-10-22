@@ -33,7 +33,9 @@ enum StockRecordKind : uint8_t {
 	SRK_DAILY_ON = 13, ///< The Daily view was turned on: daily candles are recorded.
 	SRK_BALANCE = 10, ///< Trading account of older savegames: a = company, v1 = deposited money. Only read.
 	SRK_WALLET = 14,  ///< Wallet: a = owner, b = number, v1 = balance, v2 = kind.
-	SRK_TIME = 19,    ///< The game clock: v1 = milliseconds since the start of the game.
+	SRK_TIME = 19,    ///< The game clock: v1 = milliseconds since the start of the game, v2 = game year at the start (0 in older savegames).
+	SRK_TIMEFRAME = 20, ///< Candle of game time: a = company, b = timeframe | 0x80 when still running, ym = samples, v1 = candle number, v2..v5 = open/high/low/close times STOCK_PRICE_SCALE.
+	SRK_TIMEFRAME_VOL = 21, ///< Traded volume of the SRK_TIMEFRAME row just before it: a = company, v1 = volume. Only written when it is not 0.
 	SRK_BANK = 18,    ///< Loan at the central bank: a = company, v1 = debt, v2 = interest that has been added.
 	SRK_POSITION_EXT = 15, ///< More data of an open position: a = owner, ym = id, v1 = trailing stop distance, v2 = month of opening.
 	SRK_STATS = 16,   ///< Trading results of a company: a = company, v1 = closed trades, v2 = winning trades, v3 = total profit.
@@ -119,8 +121,34 @@ struct STCKChunkHandler : ChunkHandler {
 		{
 			StockRecord t;
 			t.kind = SRK_TIME;
-			t.v1 = static_cast<int64_t>(GameTimeManager::Get().GetTotalMilliseconds());
+			const GameTimeSaveState clock = GameTimeManager::Get().GetSaveState();
+			t.v1 = static_cast<int64_t>(clock.total_ms);
+			t.v2 = clock.start_year;
 			write(t);
+		}
+
+		/* The candles of game time (1h, 4h, 12h). Every candle is one row, with a second row for its volume when there is one. */
+		for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
+			for (const TimeframeRecord &tr : _stock_market.frames[i].Export()) {
+				StockRecord r;
+				r.kind = SRK_TIMEFRAME;
+				r.a = i;
+				r.b = static_cast<uint8_t>(tr.timeframe | (tr.running ? 0x80 : 0));
+				r.ym = static_cast<int32_t>(std::min<uint32_t>(tr.bucket.samples, INT32_MAX));
+				r.v1 = static_cast<int64_t>(tr.bucket.index);
+				r.v2 = tr.bucket.open;
+				r.v3 = tr.bucket.high;
+				r.v4 = tr.bucket.low;
+				r.v5 = tr.bucket.close;
+				write(r);
+				if (tr.bucket.volume != 0) {
+					StockRecord v;
+					v.kind = SRK_TIMEFRAME_VOL;
+					v.a = i;
+					v.v1 = tr.bucket.volume;
+					write(v);
+				}
+			}
 		}
 
 		for (const Wallet &w : _wallets.wallets) {
@@ -236,6 +264,7 @@ struct STCKChunkHandler : ChunkHandler {
 		_stock_market.Reset();
 
 		bool have_stats = false;
+		std::array<std::vector<TimeframeRecord>, MAX_COMPANIES> frame_rows{}; ///< Candles of game time, imported after the last row.
 		int index;
 		while ((index = SlIterateArray()) != -1) {
 			StockRecord r;
@@ -387,8 +416,32 @@ struct STCKChunkHandler : ChunkHandler {
 					}
 					break;
 
-				case SRK_TIME:
-					GameTimeManager::Get().Restore(static_cast<uint64_t>(std::max<int64_t>(r.v1, 0)));
+				case SRK_TIME: {
+					GameTimeSaveState clock;
+					clock.total_ms = static_cast<uint64_t>(std::max<int64_t>(r.v1, 0));
+					clock.start_year = r.v2 > 0 ? static_cast<int>(std::min<int64_t>(r.v2, GameTimeManager::MAX_START_YEAR)) : GameTimeManager::DEFAULT_START_YEAR;
+					GameTimeManager::Get().LoadSaveState(clock);
+					break;
+				}
+
+				case SRK_TIMEFRAME: {
+					if (r.a >= MAX_COMPANIES) break;
+					TimeframeRecord tr;
+					tr.timeframe = r.b & 0x7F;
+					tr.running = (r.b & 0x80) != 0;
+					tr.bucket.samples = static_cast<uint32_t>(std::max<int32_t>(r.ym, 0));
+					tr.bucket.index = static_cast<uint64_t>(std::max<int64_t>(r.v1, 0));
+					tr.bucket.open = r.v2;
+					tr.bucket.high = r.v3;
+					tr.bucket.low = r.v4;
+					tr.bucket.close = r.v5;
+					frame_rows[r.a].push_back(tr);
+					break;
+				}
+
+				case SRK_TIMEFRAME_VOL:
+					if (r.a >= MAX_COMPANIES || frame_rows[r.a].empty()) break;
+					frame_rows[r.a].back().bucket.volume = std::max<int64_t>(r.v1, 0);
 					break;
 
 				case SRK_BANK:
@@ -418,6 +471,11 @@ struct STCKChunkHandler : ChunkHandler {
 
 				default: break;
 			}
+		}
+
+		/* The candles of game time. A list that is not valid is dropped; the candles start again from the next price. */
+		for (size_t i = 0; i < MAX_COMPANIES; i++) {
+			if (!frame_rows[i].empty()) _stock_market.frames[i].Import(frame_rows[i]);
 		}
 
 		/* Savegames from before the results were saved: count the trades of the history. */

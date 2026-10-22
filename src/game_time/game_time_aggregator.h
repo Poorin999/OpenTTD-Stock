@@ -16,11 +16,10 @@
  * Buckets of a timeframe are numbered from game minute 0 (bucket 0 starts at 00:00 of the first day), so the number of
  * the 4h bucket at game hour H is H / 4. That makes the numbers the same on every client and after every load.
  *
- * Saving, with the StockRecord rows of stock_sl.cpp (a = timeframe, b = running, ym = samples, v1..v5 = index, open,
- * high, low, close). Save: for (const TimeframeRecord &r : _prices.Export()) write(row); Load: collect all rows of the
- * kind in a std::vector<TimeframeRecord> and call _prices.Import(rows) once after the last row (it checks the whole
- * list); call _prices.Reset() where the game state is reset. The clock itself is saved with
- * GameTimeManager::GetSaveState() / LoadSaveState(), see SRK_TIME.
+ * Saving: Export() gives a flat list of records and Import() takes it back; see SRK_TIMEFRAME in stock_sl.cpp for a
+ * mapping to savegame rows. Collect all rows of one aggregator in a std::vector<TimeframeRecord> and call Import()
+ * once after the last row (it checks the whole list); call Reset() where the game state is reset. The clock itself is
+ * saved with GameTimeManager::GetSaveState() / LoadSaveState(), see SRK_TIME.
  *
  * Example:
  * @code
@@ -53,10 +52,11 @@ struct TimeframeBucket {
 	int64_t low = 0;      ///< Lowest sample.
 	int64_t close = 0;    ///< Last sample.
 	uint32_t samples = 0; ///< Number of samples. 0 for a bucket in which nothing arrived: its prices are flat at the previous close.
+	int64_t volume = 0;   ///< Sum of the volumes that were added with AddVolume() while the bucket was running.
 
 	bool operator==(const TimeframeBucket &o) const
 	{
-		return index == o.index && open == o.open && high == o.high && low == o.low && close == o.close && samples == o.samples;
+		return index == o.index && open == o.open && high == o.high && low == o.low && close == o.close && samples == o.samples && volume == o.volume;
 	}
 };
 
@@ -73,8 +73,14 @@ public:
 	/** Called for every bucket that is closed, including empty (flat) ones. It runs inside the clock event. */
 	using CloseCallback = std::function<void(GameTimeframe, const TimeframeBucket &)>;
 
+	/** Number of closed buckets that are kept per timeframe by default. */
+	static constexpr size_t DEFAULT_MAX_CLOSED = 500;
+
+	/** Not explicit, so that an array of aggregators can be default constructed. */
+	TimeframeAggregator() : TimeframeAggregator(DEFAULT_MAX_CLOSED) {}
+
 	/** @param max_closed Number of closed buckets that are kept per timeframe; the oldest are dropped. */
-	explicit TimeframeAggregator(size_t max_closed = 2000) : max_closed_(max_closed == 0 ? 1 : max_closed)
+	explicit TimeframeAggregator(size_t max_closed) : max_closed_(max_closed == 0 ? 1 : max_closed)
 	{
 		for (size_t i = 0; i < GAME_TIMEFRAME_COUNT; i++) {
 			const GameTimeframe tf = static_cast<GameTimeframe>(i);
@@ -124,6 +130,22 @@ public:
 				b.close = value;
 			}
 			b.samples++;
+		}
+	}
+
+	/**
+	 * Add traded volume to the running buckets of all timeframes, e.g. the shares of an executed order. A timeframe that
+	 * has no running bucket yet (no sample so far) ignores it.
+	 */
+	void AddVolume(int64_t volume)
+	{
+		if (volume <= 0) return;
+		const uint64_t hours = GameTimeManager::Get().GetSnapshot().total_hours;
+		for (size_t i = 0; i < GAME_TIMEFRAME_COUNT; i++) {
+			const GameTimeframe tf = static_cast<GameTimeframe>(i);
+			if (!this->series_[i].has_running) continue;
+			this->CloseUntil(tf, hours / static_cast<uint64_t>(GameTimeframeHours(tf)));
+			this->series_[i].running.volume += volume;
 		}
 	}
 
@@ -184,7 +206,7 @@ private:
 
 	static bool IsValid(const TimeframeBucket &b)
 	{
-		if (b.low > b.high) return false;
+		if (b.low > b.high || b.volume < 0) return false;
 		if (b.samples == 0) return b.open == b.high && b.high == b.low && b.low == b.close; // Flat.
 		return b.open >= b.low && b.open <= b.high && b.close >= b.low && b.close <= b.high;
 	}

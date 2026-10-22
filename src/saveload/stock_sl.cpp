@@ -13,6 +13,7 @@
 #include "compat/stock_sl_compat.h"
 
 #include "../stock_base.h"
+#include "../wallet_base.h"
 
 #include "../safeguards.h"
 
@@ -29,7 +30,8 @@ enum StockRecordKind : uint8_t {
 	SRK_DAILY = 11,   ///< Closed daily candle: a = company, ym = economy date, v1..v4 = open/high/low/close.
 	SRK_DAILY_RUNNING = 12, ///< Running daily candle, same fields.
 	SRK_DAILY_ON = 13, ///< The Daily view was turned on: daily candles are recorded.
-	SRK_BALANCE = 10, ///< Trading account: a = company, v1 = deposited money.
+	SRK_BALANCE = 10, ///< Trading account of older savegames: a = company, v1 = deposited money. Only read.
+	SRK_WALLET = 14,  ///< Wallet: a = owner, b = number, v1 = balance, v2 = kind.
 	SRK_HISTORY = 8,  ///< Closed trade: a = owner, b = target, ym = id, v1 = volume, v2 = open price, v3 = close price, v4 = profit, v5 = type | reason << 8 | closed month << 16.
 };
 
@@ -82,7 +84,7 @@ static StockRecord OrderRecord(uint8_t kind, const StockOrder &o)
 	r.v2 = o.price;
 	r.v3 = o.sl;
 	r.v4 = o.tp;
-	r.v5 = static_cast<int64_t>(o.type) | (static_cast<int64_t>(o.expiry) << 8);
+	r.v5 = static_cast<int64_t>(o.type) | (static_cast<int64_t>(o.expiry) << 8) | (static_cast<int64_t>(o.wallet) << 40);
 	return r;
 }
 
@@ -107,6 +109,16 @@ struct STCKChunkHandler : ChunkHandler {
 		meta.v3 = _stock_market.dividend_quarter;
 		write(meta);
 
+		for (const Wallet &w : _wallets.wallets) {
+			StockRecord r;
+			r.kind = SRK_WALLET;
+			r.a = w.owner;
+			r.b = w.id;
+			r.v1 = w.balance;
+			r.v2 = static_cast<int64_t>(w.kind);
+			write(r);
+		}
+
 		if (_stock_market.record_daily) {
 			StockRecord on;
 			on.kind = SRK_DAILY_ON;
@@ -127,13 +139,6 @@ struct STCKChunkHandler : ChunkHandler {
 			}
 			for (const StockCandle &candle : _stock_market.daily[i]) write(CandleRecord(SRK_DAILY, i, candle));
 			if (_stock_market.has_daily_current[i]) write(CandleRecord(SRK_DAILY_RUNNING, i, _stock_market.daily_current[i]));
-			if (_stock_market.trading_balance[i] != 0) {
-				StockRecord r;
-				r.kind = SRK_BALANCE;
-				r.a = i;
-				r.v1 = _stock_market.trading_balance[i];
-				write(r);
-			}
 			const StockValuation &valuation = _stock_market.valuation[i];
 			if (valuation.quarters > 0) {
 				StockRecord r;
@@ -159,7 +164,7 @@ struct STCKChunkHandler : ChunkHandler {
 			r.v2 = t.open_price;
 			r.v3 = t.close_price;
 			r.v4 = t.profit;
-			r.v5 = static_cast<int64_t>(t.type) | (static_cast<int64_t>(t.reason) << 8) | (static_cast<int64_t>(t.closed_ym) << 16);
+			r.v5 = static_cast<int64_t>(t.type) | (static_cast<int64_t>(t.reason) << 8) | (static_cast<int64_t>(t.closed_ym) << 16) | (static_cast<int64_t>(t.wallet) << 40);
 			write(r);
 		}
 	}
@@ -230,8 +235,32 @@ struct STCKChunkHandler : ChunkHandler {
 				}
 
 				case SRK_BALANCE:
-					if (r.a < MAX_COMPANIES) _stock_market.trading_balance[r.a] = std::max<int64_t>(r.v1, 0);
+					/* Older savegames had one trading balance per company: it goes to the first trading wallet. */
+					if (r.a < MAX_COMPANIES) {
+						_wallets.EnsureDefaults(CompanyID{r.a});
+						Wallet *w = _wallets.FindFirst(CompanyID{r.a}, WalletKind::Trading);
+						if (w != nullptr) w->balance += std::max<int64_t>(r.v1, 0);
+					}
 					break;
+
+				case SRK_WALLET: {
+					if (r.a >= MAX_COMPANIES || r.b == WALLET_CASH) break;
+					const WalletKind kind = static_cast<WalletKind>(std::clamp<int64_t>(r.v2, 0, static_cast<int64_t>(WalletKind::End)));
+					if (kind != WalletKind::Trading && kind != WalletKind::Fuel) break;
+					Wallet *existing = _wallets.Find(CompanyID{r.a}, r.b);
+					if (existing == nullptr) {
+						Wallet w;
+						w.id = r.b;
+						w.owner = r.a;
+						w.kind = kind;
+						w.balance = std::max<int64_t>(r.v1, 0);
+						_wallets.wallets.push_back(w);
+					} else {
+						existing->kind = kind;
+						existing->balance = std::max<int64_t>(r.v1, 0);
+					}
+					break;
+				}
 
 				case SRK_VALUATION:
 					if (r.a < MAX_COMPANIES) {
@@ -256,7 +285,8 @@ struct STCKChunkHandler : ChunkHandler {
 					o.price = r.v2;
 					o.sl = r.v3;
 					o.tp = r.v4;
-					if (r.kind == SRK_PENDING) o.expiry = static_cast<uint32_t>(std::clamp<int64_t>(r.v5 >> 8, 0, STOCK_MAX_EXPIRY_DAYS));
+					o.wallet = static_cast<uint8_t>((r.v5 >> 40) & 0xFF);
+					if (r.kind == SRK_PENDING) o.expiry = static_cast<uint32_t>(std::clamp<int64_t>((r.v5 >> 8) & 0xFFFFFFFF, 0, STOCK_MAX_EXPIRY_DAYS));
 					(r.kind == SRK_POSITION ? _stock_market.positions : _stock_market.pending).push_back(o);
 					break;
 				}
@@ -277,7 +307,8 @@ struct STCKChunkHandler : ChunkHandler {
 					t.open_price = r.v2;
 					t.close_price = r.v3;
 					t.profit = r.v4;
-					t.closed_ym = static_cast<int32_t>(r.v5 >> 16);
+					t.closed_ym = static_cast<int32_t>((r.v5 >> 16) & 0xFFFFFF);
+					t.wallet = static_cast<uint8_t>((r.v5 >> 40) & 0xFF);
 					_stock_market.history.push_back(t);
 					break;
 				}
@@ -285,6 +316,21 @@ struct STCKChunkHandler : ChunkHandler {
 				default: break;
 			}
 		}
+
+		/* Savegames from before the wallets: the trades have no wallet. They belong to the first trading wallet. */
+		auto migrate = [](uint8_t owner, uint8_t &wallet) {
+			if (wallet != WALLET_CASH || owner >= MAX_COMPANIES) return;
+			_wallets.EnsureDefaults(CompanyID{owner});
+			const Wallet *w = _wallets.FindFirst(CompanyID{owner}, WalletKind::Trading);
+			if (w != nullptr) wallet = w->id;
+		};
+		for (StockOrder &o : _stock_market.positions) migrate(o.owner, o.wallet);
+		for (StockOrder &o : _stock_market.pending) migrate(o.owner, o.wallet);
+		for (StockClosedTrade &t : _stock_market.history) migrate(t.owner, t.wallet);
+
+		std::sort(_wallets.wallets.begin(), _wallets.wallets.end(), [](const Wallet &a, const Wallet &b) {
+			return a.owner != b.owner ? a.owner < b.owner : a.id < b.id;
+		});
 	}
 };
 

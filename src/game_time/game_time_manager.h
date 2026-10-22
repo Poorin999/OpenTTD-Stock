@@ -52,8 +52,8 @@
  * Temporary switches. They decouple parts of the old game from the new clock while the clock is being built.
  * Change the value here (and build again) to turn the part back on.
  */
-/** True: the candlestick chart of the trading terminal (the MT5 part: candles, SMA, volume, RSI) is not drawn. The data is still recorded. */
-static constexpr bool GAME_TIME_DECOUPLE_CHART = true;
+/** True: the candlestick chart of the trading terminal (the MT5 part: candles, SMA, volume, RSI) is not drawn. The data is still recorded. False now: the chart shows the 1h, 4h and 12h candles of game time. */
+static constexpr bool GAME_TIME_DECOUPLE_CHART = false;
 /** True: the original monthly interest on the OpenTTD loan of a company is not charged. Needs the change of economy.cpp that apply_overlay.py makes. */
 static constexpr bool GAME_TIME_BYPASS_LEGACY_LOANS = true;
 
