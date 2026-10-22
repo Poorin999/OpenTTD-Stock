@@ -20,11 +20,13 @@ diff --git a/src/command.cpp b/src/command.cpp
 index ce4a948..5cf2af9 100644
 --- a/src/command.cpp
 +++ b/src/command.cpp
-@@ -35,6 +35,7 @@
+@@ -35,6 +35,9 @@
  #include "league_cmd.h"
  #include "landscape_cmd.h"
  #include "misc_cmd.h"
 +#include "stock_cmd.h"
++#include "wallet_cmd.h"
++#include "central_bank.h"
  #include "news_cmd.h"
  #include "object_cmd.h"
  #include "order_cmd.h"
@@ -200,11 +202,13 @@ diff --git a/src/network/network_command.cpp b/src/network/network_command.cpp
 index 76003f0..e0bdf9b 100644
 --- a/src/network/network_command.cpp
 +++ b/src/network/network_command.cpp
-@@ -38,6 +38,7 @@
+@@ -38,6 +38,9 @@
  #include "../settings_cmd.h"
  #include "../signs_cmd.h"
  #include "../station_cmd.h"
 +#include "../stock_cmd.h"
++#include "../wallet_cmd.h"
++#include "../central_bank.h"
  #include "../story_cmd.h"
  #include "../subsidy_cmd.h"
  #include "../terraform_cmd.h"
