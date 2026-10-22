@@ -64,10 +64,15 @@ void StockMarket::Reset()
 	for (auto &row : _stock_margin_call_shown) row.fill(false);
 }
 
-/** The current economy month as year * 12 + month (month 0 = January). */
+/**
+ * The current game month of the HH:MM clock as year * 12 + month (month 0 first). A game month is 30 game days (12 real hours),
+ * the same days that the date of the game counts, so trades and monthly results are dated by the clock of the game.
+ */
 int32_t GetStockCurrentMonth()
 {
-	return TimerGameEconomy::year.base() * 12 + TimerGameEconomy::month;
+	const GameTimeManager &clock = GameTimeManager::Get();
+	const uint64_t month = clock.GetCurrentDayIndex() / GameTimeManager::DAYS_PER_MONTH;
+	return clock.GetSaveState().start_year * 12 + static_cast<int32_t>(std::min<uint64_t>(month, 1'000'000));
 }
 
 /** Convert a price with #STOCK_PRICE_SCALE steps to whole money units, rounded, at least 1. */
@@ -955,13 +960,13 @@ void StockMarket::HandleDividends()
 }
 
 /**
- * Once per day: refresh the valuation, let the market impact fade, start a new candle at the start of a month,
- * charge the swap, expire pending orders and pay dividends.
+ * Once per economy day: refresh the valuation, let the market impact fade, start a new candle at the start of a month
+ * and pay dividends. (The swap and the expiry of orders are per game day, see #UpdateGameDay.)
  * Stop levels and pending orders are not checked here, but in #UpdateTick.
  */
 void StockMarket::UpdateDaily()
 {
-	const int32_t ym = TimerGameEconomy::year.base() * 12 + TimerGameEconomy::month;
+	const int32_t ym = GetStockCurrentMonth();
 
 	for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
 		const CompanyID cid{i};
@@ -997,7 +1002,7 @@ void StockMarket::UpdateDaily()
 
 		/* Daily candles: only recorded once the Daily view has been turned on. */
 		if (this->record_daily) {
-			const int32_t day = TimerGameEconomy::date.base();
+			const int32_t day = static_cast<int32_t>(std::min<uint64_t>(GameTimeManager::Get().GetCurrentDayIndex(), INT32_MAX));
 			StockCandle &d = this->daily_current[i];
 			if (!this->has_daily_current[i]) {
 				d = {day, price, price, price, price};
@@ -1017,9 +1022,21 @@ void StockMarket::UpdateDaily()
 	}
 
 	this->HandleRemovedCompanies();
+	this->HandleDividends();
+
+	InvalidateWindowData(WC_STOCK_MARKET, 0);
+	InvalidateWindowData(WC_STOCK_ORDER, 0);
+}
+
+/**
+ * Once per game day of the HH:MM clock (24 real minutes, at 00:00; the same moment at which the calendar date changes):
+ * charge the swap of the open positions and count down the lifetime of the pending orders.
+ */
+void StockMarket::UpdateGameDay()
+{
+	this->HandleRemovedCompanies();
 	this->ChargeSwap();
 	this->ExpireOrders();
-	this->HandleDividends();
 
 	InvalidateWindowData(WC_STOCK_MARKET, 0);
 	InvalidateWindowData(WC_STOCK_ORDER, 0);
@@ -1072,6 +1089,12 @@ void StockMarket::UpdateTick()
 static const IntervalTimer<TimerGameEconomy> _stock_daily({TimerGameEconomy::DAY, TimerGameEconomy::Priority::COMPANY}, [](auto)
 {
 	_stock_market.UpdateDaily();
+});
+
+/** The swap and the expiry of orders are per game day of the clock, like the date of the game. */
+static const GameTimeSubscription _stock_game_day(GameTimeEvent::Day, [](const GameTimeSnapshot &)
+{
+	_stock_market.UpdateGameDay();
 });
 
 /** Check the market every few game ticks. */

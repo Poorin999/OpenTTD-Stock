@@ -131,7 +131,7 @@ struct CentralBankWindow : Window {
 		row("Central bank debt", money(a.debt), a.debt > limit ? TC_RED : TC_WHITE);
 		row("Credit limit", money(limit));
 		row("Available to borrow", money(GetCentralBankAvailable(_local_company)));
-		row("Interest per day (added to the debt)", money(per_day), TC_GREY);
+		row("Interest per game day (added to the debt)", money(per_day), TC_GREY);
 		row("Unborrowed liquid cash (may be traded)", money(liquid), TC_LIGHT_BLUE);
 		row("Money in trading wallets", money(GetWalletsTotal(_local_company)));
 		if (c->current_loan > 0) {

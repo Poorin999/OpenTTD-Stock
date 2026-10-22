@@ -56,6 +56,14 @@
 static constexpr bool GAME_TIME_DECOUPLE_CHART = false;
 /** True: the original monthly interest on the OpenTTD loan of a company is not charged. Needs the change of economy.cpp that apply_overlay.py makes. */
 static constexpr bool GAME_TIME_BYPASS_LEGACY_LOANS = true;
+/**
+ * True: the date of the original game (TimerGameCalendar) is driven by this clock. The calendar moves to the next day exactly when the clock
+ * passes 23:59 -> 00:00, so one calendar day is one game day (24 real minutes) and the HH:MM of the status bar and the date always belong
+ * together. Needs the change of timer_game_calendar.cpp that apply_overlay.py makes, and wallclock timekeeping units (the economy keeps
+ * running in its own 74-tick days, so incomes, costs and the economy timers of OpenTTD are not changed). In calendar timekeeping units the
+ * economy date is tied to the calendar date, so there the calendar keeps its original speed.
+ */
+static constexpr bool GAME_TIME_SYNC_CALENDAR = true;
 /** The cash that a new company starts with while the original loan is bypassed. It is the company's own money: the company starts without any loan. In the base currency (pounds). */
 static constexpr int64_t GAME_TIME_STARTING_CAPITAL = 1'500'000;
 
@@ -158,6 +166,7 @@ public:
 	static constexpr int DAYS_PER_WEEK = 7;               ///< Game days in a game week.
 	static constexpr int DAYS_PER_MONTH = 30;             ///< Game days in a game month (the game year has no calendar months).
 	static constexpr int MINUTES_PER_DAY = MINUTES_PER_HOUR * HOURS_PER_DAY; ///< Game minutes in a game day.
+	static constexpr uint64_t MS_PER_DAY = MS_PER_MINUTE * MINUTES_PER_DAY;  ///< Game day in milliseconds.
 	static constexpr int DEFAULT_START_YEAR = 1950;       ///< Game year at game minute 0.
 	static constexpr int MIN_START_YEAR = 1;              ///< Lowest start year that is accepted when loading.
 	static constexpr int MAX_START_YEAR = 9999;           ///< Highest start year that is accepted when loading.
@@ -222,7 +231,18 @@ public:
 	void OnMonthlyUpdate();
 	void OnYearlyUpdate();
 
+	/* The original calendar. TimerGameCalendar asks the clock when to start a new day and how far the day has come. */
+	/** Game day number (since game minute 0) that the calendar has started. A day of the clock that is not consumed yet is a day that the calendar still has to start. */
+	uint64_t GetCalendarDaysConsumed() const;
+	/** Game day number that the clock is in now. */
+	uint64_t GetCurrentDayIndex() const;
+	/** Start one more calendar day if the clock has passed a midnight that the calendar has not seen. @return True if a day was consumed. */
+	bool TryConsumeCalendarDay();
+	/** How far the clock is in the current day, in steps of 1 / ticks_per_day of a day: 0 .. ticks_per_day - 1 (the value for TimerGameCalendar::date_fract). */
+	uint32_t GetDayFraction(uint32_t ticks_per_day) const;
+
 	/* The temporary switches, see above. */
+	static constexpr bool IsCalendarSynced() { return GAME_TIME_SYNC_CALENDAR; }
 	static constexpr bool IsChartDecoupled() { return GAME_TIME_DECOUPLE_CHART; }
 	static constexpr bool IsLegacyLoanBypassed() { return GAME_TIME_BYPASS_LEGACY_LOANS; }
 	static constexpr int64_t GetStartingCapital() { return GAME_TIME_STARTING_CAPITAL; }
@@ -245,6 +265,7 @@ private:
 
 	std::atomic<uint64_t> total_ms_{0};      ///< Milliseconds since the start of the game.
 	std::atomic<int> start_year_{DEFAULT_START_YEAR}; ///< Game year at game minute 0.
+	std::atomic<uint64_t> calendar_days_{0}; ///< Number of game days that the original calendar has started; follows #total_ms_ at every jump (load, reset).
 
 	mutable std::mutex subscribers_mutex_;   ///< Protects #subscribers_ and #next_id_.
 	std::vector<Subscriber> subscribers_;    ///< All subscriptions.

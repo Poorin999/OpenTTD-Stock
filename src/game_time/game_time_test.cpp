@@ -14,6 +14,7 @@
 #include "game_time_aggregator.h"
 #include "sim_time.h"
 
+#include <algorithm>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -476,6 +477,59 @@ void TestLongTimeframes()
 	Check("no month candle yet", agg.Closed(GameTimeframe::MN).empty() && agg.HasRunning(GameTimeframe::MN));
 }
 
+/** The original calendar follows the clock: a new calendar day starts exactly at 00:00, and the fraction of the day follows HH:MM. */
+void TestCalendarSync()
+{
+	Fresh();
+	CheckEq("no calendar day at the start", 0, Clock().TryConsumeCalendarDay());
+	CheckEq("day fraction at 00:00", 0, Clock().GetDayFraction(74));
+
+	Clock().AdvanceMilliseconds(DAY_MS - 1);
+	CheckEq("no new calendar day at 23:59:59.999", 0, Clock().TryConsumeCalendarDay());
+	CheckEq("day fraction just before midnight", 73, Clock().GetDayFraction(74));
+	Clock().AdvanceMilliseconds(1);
+	CheckEq("new calendar day at 00:00", 1, Clock().TryConsumeCalendarDay());
+	CheckEq("only one new day per midnight", 0, Clock().TryConsumeCalendarDay());
+	CheckEq("day fraction after midnight", 0, Clock().GetDayFraction(74));
+
+	Clock().AdvanceMilliseconds(DAY_MS / 2); // 12:00
+	CheckEq("day fraction at 12:00", 37, Clock().GetDayFraction(74));
+	CheckEq("no calendar day at noon", 0, Clock().TryConsumeCalendarDay());
+
+	/* Fast-forward over 3 midnights: one day per call, none lost. */
+	Clock().AdvanceMilliseconds(DAY_MS * 3);
+	int days = 0;
+	while (Clock().TryConsumeCalendarDay()) days++;
+	CheckEq("3 midnights give 3 calendar days", 3, days);
+	CheckEq("consumed days equal the day of the clock", Clock().GetCurrentDayIndex(), Clock().GetCalendarDaysConsumed());
+
+	/* Loading a clock never makes the calendar jump. */
+	GameTimeSaveState st;
+	st.total_ms = DAY_MS * 400 + HOUR_MS * 5;
+	Clock().LoadSaveState(st);
+	CheckEq("no calendar day after loading", 0, Clock().TryConsumeCalendarDay());
+	Clock().Restore(DAY_MS * 7);
+	CheckEq("no calendar day after Restore", 0, Clock().TryConsumeCalendarDay());
+	Clock().Reset();
+	CheckEq("no calendar day after Reset", 0, Clock().TryConsumeCalendarDay());
+	CheckEq("zero ticks per day is safe", 0, Clock().GetDayFraction(0));
+
+	/* One calendar day is exactly 24 real minutes of ticks: the 74 steps of the day are all visited, in order. */
+	Fresh();
+	uint32_t last = 0;
+	bool in_order = true;
+	std::vector<bool> seen(74, false);
+	for (uint64_t ms = 0; ms < DAY_MS; ms += 27) { // one tick of OpenTTD 15.3 is 27 ms
+		Clock().AdvanceMilliseconds(ms == 0 ? 0 : 27);
+		const uint32_t f = Clock().GetDayFraction(74);
+		if (f < last) in_order = false;
+		last = f;
+		seen[f] = true;
+	}
+	Check("day fraction never goes back inside a day", in_order);
+	Check("all 74 steps of the day are visited", std::all_of(seen.begin(), seen.end(), [](bool b) { return b; }));
+}
+
 int main()
 {
 	TestScale();
@@ -489,6 +543,7 @@ int main()
 	TestAggregatorAgainstSimTime();
 	TestAggregatorSaveLoad();
 	TestLongTimeframes();
+	TestCalendarSync();
 
 	std::cout << _passed << " checks passed, " << _failed << " failed\n";
 	return _failed == 0 ? 0 : 1;

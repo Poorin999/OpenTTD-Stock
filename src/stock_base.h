@@ -72,7 +72,7 @@ static constexpr int32_t STOCK_DIVIDEND_DELAY_DAYS = 2;
 /** Commission, charged when a trade is opened: this many parts per million of the value of the position (0.1%). */
 static constexpr int64_t STOCK_COMMISSION_PPM = 1'000;
 
-/** Swap (overnight financing), charged every economy day for every open position: parts per million of the value of the position (0.01%). */
+/** Swap (overnight financing), charged every game day (24 real minutes) for every open position: parts per million of the value of the position (0.01%). */
 static constexpr int64_t STOCK_SWAP_PPM_PER_DAY = 100;
 
 /** Market impact: an order of the full size of the company moves the price by this many times its share of the company. 2 means that an order for 10% of the shares moves the price by 20%. */
@@ -90,7 +90,7 @@ static constexpr uint32_t STOCK_TICK_INTERVAL = 8;
 /** Every check the price moves this-many-th of the way to the price of the valuation, so the price glides instead of jumping once per day. */
 static constexpr int64_t STOCK_GLIDE_DIV = 4;
 
-/** Longest lifetime of a pending order, in economy days. */
+/** Longest lifetime of a pending order, in game days (24 real minutes each). */
 static constexpr uint32_t STOCK_MAX_EXPIRY_DAYS = 3650;
 
 /** Maximum number of closed trades that are remembered per company; the oldest ones are forgotten first. */
@@ -135,10 +135,10 @@ struct StockOrder {
 	int64_t price = 0;                       ///< Entry price of a position, or trigger price of a pending order.
 	int64_t sl = 0;                          ///< Stop Loss, 0 when not set.
 	int64_t tp = 0;                          ///< Take Profit, 0 when not set.
-	uint32_t expiry = 0;                     ///< Pending orders only: economy days left before the order expires; 0 means it never expires.
+	uint32_t expiry = 0;                     ///< Pending orders only: game days left before the order expires; 0 means it never expires.
 	uint8_t wallet = 0;                      ///< Trading wallet of the owner that pays the fees of the order and gets its results.
 	int64_t trail = 0;                       ///< Positions only: trailing stop distance in price units; 0 when the trailing stop is off.
-	int32_t open_ym = 0;                     ///< Positions only: economy year * 12 + month in which the position was opened; 0 when not known.
+	int32_t open_ym = 0;                     ///< Positions only: game year * 12 + month (30-day game months) in which the position was opened; 0 when not known.
 };
 
 /** One candle of the chart; covers one economy month. */
@@ -236,7 +236,7 @@ struct StockMarket {
 	std::array<int64_t, MAX_COMPANIES> base_fp{};                  ///< Mid price per share according to the valuation, times #STOCK_PRICE_SCALE, refreshed once per day.
 	std::array<int64_t, MAX_COMPANIES> impact{};                   ///< Accumulated market impact of the orders, in parts per million; positive when more was bought than sold.
 	std::array<StockValuation, MAX_COMPANIES> valuation{};         ///< Valuation per company, refreshed once per day.
-	std::array<std::vector<StockCandle>, MAX_COMPANIES> daily{};   ///< Closed daily candles per company; ym holds the economy date. Only filled when #record_daily is set.
+	std::array<std::vector<StockCandle>, MAX_COMPANIES> daily{};   ///< Closed daily candles per company; ym holds the game day number. Only filled when #record_daily is set.
 	std::array<StockCandle, MAX_COMPANIES> daily_current{};        ///< The running daily candle per company.
 	std::array<bool, MAX_COMPANIES> has_daily_current{};           ///< Whether #daily_current is valid.
 	bool record_daily = false;                                     ///< Whether daily candles are recorded; set once when the player opens the Daily view.
@@ -254,6 +254,7 @@ struct StockMarket {
 
 	void Reset();
 	void UpdateDaily();
+	void UpdateGameDay();
 	void UpdateTick();
 	void CheckExecutions();
 

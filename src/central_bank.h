@@ -16,7 +16,7 @@
 #include <array>
 #include <map>
 
-/** Interest of the central bank per economy day, in parts per million of the debt (about 10% a year). The interest is added to the debt. */
+/** Interest of the central bank per game day (24 real minutes), in parts per million of the debt (about 10% a year). The interest is added to the debt. */
 static constexpr int64_t CENTRAL_BANK_RATE_PPM_PER_DAY = 274;
 
 /** A company can borrow as long as its debt stays below this percentage of its net equity (company value plus wallets minus the debt). */
@@ -54,13 +54,13 @@ enum class LedgerItem : uint8_t {
 };
 static constexpr size_t LEDGER_ITEMS = static_cast<size_t>(LedgerItem::End);
 
-/** What one line of the ledger booked in one economy year. */
+/** What one line of the ledger booked in one game year. */
 struct LedgerEntry {
 	int64_t income = 0;  ///< Money that came in.
 	int64_t expense = 0; ///< Money that went out.
 };
 
-/** The ledgers of the companies: per company and economy year the entry of every line. Only this year and the two before it are kept. Saved in the 'STCK' chunk. */
+/** The ledgers of the companies: per company and game year the entry of every line. Only this year and the two before it are kept. Saved in the 'STCK' chunk. */
 struct Ledger {
 	std::array<std::map<int32_t, std::array<LedgerEntry, LEDGER_ITEMS>>, MAX_COMPANIES> years;
 

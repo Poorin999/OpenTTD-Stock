@@ -11,6 +11,7 @@ It looks for the mod files by name anywhere next to this script, so it does not 
   - economy.cpp: no interest, no overdraft charge and no CmdIncreaseLoan for the original loan
   - window_type.h / widgets: the Central Bank window class (WC_CENTRAL_BANK)
   - ShowCompanyFinances() (company_gui.cpp), statusbar_gui.cpp: the finances menu and the statusbar button open ShowCentralBankWindow()
+  - timer_game_calendar.cpp, economy_settings.ini: the date of the original game follows the HH:MM clock (a new day starts at 00:00)
 """
 import re
 import sys
@@ -250,6 +251,85 @@ def main(tree):
         s2 = ensure_include(s2, '#include "central_bank_gui.h"', ['#include "company_func.h"', '#include "stdafx.h"'])
         p.write_text(s2, encoding="utf-8")
         print("statusbar_gui.cpp: the finance button opens the Central Bank window")
+
+    # statusbar_gui.cpp: the clock of the mod is shown as HH:MM in front of the date, and the date panel is wider.
+    p = tree / "src" / "statusbar_gui.cpp"
+    s = p.read_text(encoding="utf-8")
+    if "GameTimeManager" in s:
+        print("statusbar_gui.cpp: the time is already shown")
+    else:
+        edits = [
+            ("d = GetStringBoundingBox(GetString(STR_JUST_DATE_LONG, GetParamMaxValue(TimerGameCalendar::DateAtStartOfYear(CalendarTime::MAX_YEAR).base())));",
+             "d = GetStringBoundingBox(GetString(STR_JUST_DATE_LONG, GetParamMaxValue(TimerGameCalendar::DateAtStartOfYear(CalendarTime::MAX_YEAR).base())));\n\t\t\t\td.width += GetStringBoundingBox(std::string(\"00:00 \")).width; // HH:MM and a space in front of the date"),
+            ("DrawString(tr, GetString(STR_JUST_DATE_LONG, TimerGameCalendar::date), TC_WHITE, SA_HOR_CENTER);",
+             "DrawString(tr, fmt::format(\"{:02}:{:02} {}\", GameTimeManager::Get().GetCurrentGameHour(), GameTimeManager::Get().GetCurrentGameMinute(), GetString(STR_JUST_DATE_LONG, TimerGameCalendar::date)), TC_WHITE, SA_HOR_CENTER);"),
+            ("NWidget(WWT_PANEL, COLOUR_GREY, WID_S_LEFT), SetMinimalSize(140, 12), EndContainer(),",
+             "NWidget(WWT_PANEL, COLOUR_GREY, WID_S_LEFT), SetMinimalSize(190, 12), EndContainer(),"),
+            ("\tconst IntervalTimer<TimerGameCalendar> daily_interval = {",
+             "\tint last_clock_minute = -1; ///< The game minute that is drawn in the date panel.\n\n\t/** The date panel shows HH:MM, so it is drawn again every time the game minute changes. */\n\tconst IntervalTimer<TimerGameTick> clock_interval = {{TimerGameTick::Priority::NONE, 1}, [this](auto) {\n\t\tconst int minute = GameTimeManager::Get().GetCurrentGameMinute();\n\t\tif (minute == this->last_clock_minute) return;\n\t\tthis->last_clock_minute = minute;\n\t\tthis->SetWidgetDirty(WID_S_LEFT);\n\t}};\n\n\tconst IntervalTimer<TimerGameCalendar> daily_interval = {"),
+        ]
+        for old, repl in edits:
+            if s.count(old) != 1:
+                sys.exit("ERROR: statusbar_gui.cpp: the text to change was not found: " + old[:50])
+            s = s.replace(old, repl)
+        s = ensure_include(s, '#include "3rdparty/fmt/format.h"', ['#include "stdafx.h"'])
+        s = ensure_include(s, '#include "timer/timer_game_tick.h"', ['#include "timer/timer_game_calendar.h"'])
+        s = ensure_include(s, '#include "game_time/game_time_manager.h"', ['#include "timer/timer_window.h"'])
+        p.write_text(s, encoding="utf-8")
+        print("statusbar_gui.cpp: HH:MM is shown in front of the date")
+
+    # timer_game_calendar.cpp: the calendar date follows the HH:MM clock of the mod. A new calendar day starts exactly when the clock passes 23:59 -> 00:00
+    # and date_fract (the part of the day) follows the time of the day, so the status bar "HH:MM date" is one clock. Needs wallclock timekeeping units.
+    p = tree / "src" / "timer" / "timer_game_calendar.cpp"
+    s = p.read_text(encoding="utf-8")
+    if "TryConsumeCalendarDay" in s:
+        print("timer_game_calendar.cpp: already follows the game clock")
+    else:
+        old = re.search(r"([ \t]*)/\* If we are using a non-default calendar progression speed.*?\n"
+                        r"[ \t]*TimerGameCalendar::date_fract\+\+;\n\n"
+                        r"[ \t]*/\* Check if we entered a new day\. \*/\n"
+                        r"[ \t]*if \(TimerGameCalendar::date_fract < Ticks::DAY_TICKS\) return true;\n"
+                        r"[ \t]*TimerGameCalendar::date_fract = 0;\n"
+                        r"[ \t]*TimerGameCalendar::sub_date_fract = 0;\n", s, re.S)
+        if not old:
+            sys.exit("ERROR: timer_game_calendar.cpp has a different layout, the calendar was not connected to the game clock")
+        new = (
+            "\t/* The clock of the mod decides when a day starts: at 00:00 exactly, so the date and HH:MM always belong together.\n"
+            "\t * This needs wallclock timekeeping units: there the economy has its own days, in calendar units it follows the calendar date. */\n"
+            "\tif (GameTimeManager::IsCalendarSynced() && TimerGameEconomy::UsingWallclockUnits()) {\n"
+            "\t\tif (!GameTimeManager::Get().TryConsumeCalendarDay()) {\n"
+            "\t\t\t/* Same day: date_fract follows the time of the day (for the vehicle calendar updates, one of 74 steps per day). */\n"
+            "\t\t\tconst auto fract = static_cast<TimerGameCalendar::DateFract>(GameTimeManager::Get().GetDayFraction(Ticks::DAY_TICKS));\n"
+            "\t\t\tif (fract == TimerGameCalendar::date_fract) return false;\n"
+            "\t\t\tTimerGameCalendar::date_fract = fract;\n"
+            "\t\t\treturn true;\n"
+            "\t\t}\n"
+            "\t} else {\n"
+            + "".join("\t" + l if l.strip() else l for l in old.group(0).splitlines(True)[:-2])
+            + "\t}\n"
+            "\tTimerGameCalendar::date_fract = 0;\n"
+            "\tTimerGameCalendar::sub_date_fract = 0;\n")
+        s = s[:old.start()] + new + s[old.end():]
+        for inc, anchors in (('#include "timer_game_economy.h"', ['#include "timer_game_calendar.h"']),
+                             ('#include "../game_time/game_time_manager.h"', ['#include "timer_game_economy.h"'])):
+            s = ensure_include(s, inc, anchors + ['#include "../stdafx.h"', '#include "stdafx.h"'])
+        p.write_text(s, encoding="utf-8")
+        print("timer_game_calendar.cpp: the calendar day follows the game clock")
+
+    # economy_settings.ini: new games use wallclock units, with 8760 minutes (365 days of 24 minutes) per calendar year; the setting is then true
+    # for the display, and it is what the original calendar would use if GAME_TIME_SYNC_CALENDAR is turned off.
+    p = tree / "src" / "table" / "settings" / "economy_settings.ini"
+    s = p.read_text(encoding="utf-8")
+    if re.search(r"var\s*=\s*economy\.minutes_per_calendar_year\n(?:.*\n)*?def\s*=\s*8760\n", s):
+        print("economy_settings.ini: already changed")
+    else:
+        s2, n1 = re.subn(r"(var\s*=\s*economy\.timekeeping_units\n(?:.*\n)*?def\s*=\s*)TKU_CALENDAR", r"\1TKU_WALLCLOCK", s, count=1)
+        s2, n2 = re.subn(r"(var\s*=\s*economy\.minutes_per_calendar_year\n(?:.*\n)*?def\s*=\s*)CalendarTime::DEF_MINUTES_PER_YEAR", r"\g<1>8760", s2, count=1)
+        if n1 != 1 or n2 != 1:
+            print("WARNING: economy_settings.ini has a different layout, the new-game defaults were not changed (choose wallclock units in the new game settings)")
+        else:
+            p.write_text(s2, encoding="utf-8")
+            print("economy_settings.ini: new games default to wallclock units and 8760 minutes per calendar year")
 
     # english.txt
     wanted = {}

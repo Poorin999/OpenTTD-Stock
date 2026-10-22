@@ -8,6 +8,7 @@
 /** @file central_bank.cpp Implementation of the central bank loans. */
 
 #include "stdafx.h"
+#include "game_time/game_time_manager.h"
 #include "central_bank.h"
 #include "wallet_base.h"
 #include "stock_base.h"
@@ -88,10 +89,10 @@ CommandCost CheckTradingCapital(CompanyID company, int64_t amount)
 	return CommandCost();
 }
 
-/** The economy year in which new ledger lines are booked. */
+/** The game year (365 game days of the HH:MM clock) in which new ledger lines are booked. */
 int32_t GetLedgerCurrentYear()
 {
-	return TimerGameEconomy::year.base();
+	return GameTimeManager::Get().GetCurrentGameYear();
 }
 
 /**
@@ -252,8 +253,8 @@ void CentralBank::UpdateDaily()
 	InvalidateWindowData(WC_STOCK_MARKET, 0);
 }
 
-/** Add the interest of the central bank once per economy day. */
-static const IntervalTimer<TimerGameEconomy> _bank_daily({TimerGameEconomy::DAY, TimerGameEconomy::Priority::COMPANY}, [](auto)
+/** Add the interest of the central bank once per game day of the HH:MM clock (at 00:00, when the date of the game changes). */
+static const GameTimeSubscription _bank_daily(GameTimeEvent::Day, [](const GameTimeSnapshot &)
 {
 	_central_bank.UpdateDaily();
 });

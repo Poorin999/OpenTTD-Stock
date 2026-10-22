@@ -93,6 +93,7 @@ void GameTimeManager::LoadSaveState(const GameTimeSaveState &state)
 {
 	std::lock_guard<std::recursive_mutex> lock(this->advance_mutex_);
 	this->total_ms_.store(state.total_ms);
+	this->calendar_days_.store(state.total_ms / MS_PER_DAY);
 	this->queued_ms_ = 0;
 	if (state.start_year >= MIN_START_YEAR && state.start_year <= MAX_START_YEAR) this->start_year_.store(state.start_year);
 }
@@ -108,6 +109,7 @@ void GameTimeManager::Reset()
 {
 	std::lock_guard<std::recursive_mutex> lock(this->advance_mutex_);
 	this->total_ms_.store(0);
+	this->calendar_days_.store(0);
 	this->queued_ms_ = 0;
 }
 
@@ -119,7 +121,35 @@ void GameTimeManager::Restore(uint64_t total_ms)
 {
 	std::lock_guard<std::recursive_mutex> lock(this->advance_mutex_);
 	this->total_ms_.store(total_ms);
+	this->calendar_days_.store(total_ms / MS_PER_DAY);
 	this->queued_ms_ = 0;
+}
+
+/** Game day number that the clock is in now (day 0 starts at game minute 0). */
+uint64_t GameTimeManager::GetCurrentDayIndex() const { return this->total_ms_.load() / MS_PER_DAY; }
+
+/** Number of game days that the original calendar has started. */
+uint64_t GameTimeManager::GetCalendarDaysConsumed() const { return this->calendar_days_.load(); }
+
+/**
+ * The original calendar calls this once per game tick. It returns true once for every midnight of the clock, so the calendar starts a
+ * new day exactly when the clock shows 00:00, also after a fast-forward (one day per call, the rest follows on the next ticks).
+ * A load or a reset of the clock sets the counter to the loaded day, so it never causes a jump of the calendar.
+ */
+bool GameTimeManager::TryConsumeCalendarDay()
+{
+	std::lock_guard<std::recursive_mutex> lock(this->advance_mutex_);
+	if (this->calendar_days_.load() >= this->GetCurrentDayIndex()) return false;
+	this->calendar_days_.fetch_add(1);
+	return true;
+}
+
+/** Position in the day as a number of steps: 00:00 is 0, 23:59:59.999 is ticks_per_day - 1. Integer maths, the same on every client. */
+uint32_t GameTimeManager::GetDayFraction(uint32_t ticks_per_day) const
+{
+	if (ticks_per_day == 0) return 0;
+	const uint64_t in_day = this->total_ms_.load() % MS_PER_DAY;
+	return static_cast<uint32_t>(std::min<uint64_t>(in_day * ticks_per_day / MS_PER_DAY, ticks_per_day - 1));
 }
 
 /**

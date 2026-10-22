@@ -47,7 +47,7 @@ static bool AreStopsValid(bool buy, int64_t reference, int64_t sl, int64_t tp)
  * @param price Trigger price; only used for pending orders.
  * @param sl Stop Loss, 0 for none.
  * @param tp Take Profit, 0 for none.
- * @param expiry_days Pending orders only: number of economy days after which the order expires; 0 for an order that never expires.
+ * @param expiry_days Pending orders only: number of game days (24 real minutes) after which the order expires; 0 for an order that never expires.
  * @param wallet Trading wallet that holds the margin, pays the commission and the swap and gets the results of the trade.
  * @return Zero cost (the commission is taken from the wallet), or an error.
  */
