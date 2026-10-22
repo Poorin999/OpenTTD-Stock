@@ -25,7 +25,5 @@ bool ParseStockNumber(std::string_view text, double &value);
 int64_t StockDisplayToMoney(double value);
 std::string StockMoneyToEditString(int64_t money);
 StringID GetStockOrderTypeString(StockOrderType type);
-uint8_t GetStockActiveWallet();
-void SetStockActiveWallet(uint8_t wallet);
 
 #endif /* STOCK_GUI_H */

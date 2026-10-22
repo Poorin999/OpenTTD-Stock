@@ -26,14 +26,7 @@ enum StockWidgets : WidgetID {
 	WID_ST_CHART,            ///< The candlestick chart.
 	WID_ST_TOOLBOX,          ///< Toolbox: open positions and pending orders.
 	WID_ST_TOOL_SCROLLBAR,   ///< Scrollbar of the toolbox.
-	WID_ST_CLOSE_ALL,        ///< Button: close all open positions of the selected wallet at once.
-	WID_ST_WALLET,           ///< Panel: the selected wallet with its balance; click to switch to the next wallet.
-	WID_ST_WALLET_NEW,       ///< Button: create a new trading wallet.
-	WID_ST_WALLET_DELETE,    ///< Button: delete the selected trading wallet.
-	WID_ST_PORTFOLIO,        ///< Toggle: the toolbox shows the portfolio summary (profit and loss, win rate, profit per month).
-	WID_ST_RANKING,          ///< Toggle: the toolbox shows the ranking of the companies.
-	WID_ST_BANK,             ///< Toggle: the toolbox shows the loan at the central bank.
-	WID_ST_WATCH_SCROLLBAR,  ///< Scrollbar of the Market Watch.
+	WID_ST_CLOSE_ALL,        ///< Button: close all open positions of the local company at once.
 };
 
 /** Widgets of the #StockOrderWindow class. */
@@ -59,4 +52,3 @@ enum StockOrderWidgets : WidgetID {
 };
 
 #endif /* WIDGETS_STOCK_WIDGET_H */
-

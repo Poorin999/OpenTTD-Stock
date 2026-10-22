@@ -153,7 +153,7 @@ struct StockOrderWindow : Window {
 		if (!market) price = GetOptionalPrice(this->price_editbox);
 
 		Command<CMD_STOCK_OPEN>::Post(STR_STOCK_ERROR_CANT_OPEN, this->symbol, type, this->GetVolume(), Money(price),
-				Money(GetOptionalPrice(this->sl_editbox)), Money(GetOptionalPrice(this->tp_editbox)), market ? 0 : this->GetExpiry(), GetStockActiveWallet());
+				Money(GetOptionalPrice(this->sl_editbox)), Money(GetOptionalPrice(this->tp_editbox)), market ? 0 : this->GetExpiry());
 	}
 
 	void OnPaint() override
