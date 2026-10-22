@@ -10,7 +10,7 @@ It looks for the mod files by name anywhere next to this script, so it does not 
   - adds the strings to src/lang/english.txt
   - economy.cpp: no interest, no overdraft charge and no CmdIncreaseLoan for the original loan
   - window_type.h / widgets: the Central Bank window class (WC_CENTRAL_BANK)
-  - finances_gui.cpp, statusbar_gui.cpp: the finances menu and the statusbar button open ShowCentralBankWindow()
+  - ShowCompanyFinances() (company_gui.cpp), statusbar_gui.cpp: the finances menu and the statusbar button open ShowCentralBankWindow()
 """
 import re
 import sys
@@ -84,6 +84,15 @@ def ensure_include(text, line, anchors):
     sys.exit(f"ERROR: no place found for {line}")
 
 
+def find_definition(tree, pattern):
+    """The .cpp file in src/ that holds a definition (matched by the regex), or None. The place of a function differs between OpenTTD versions."""
+    rx = re.compile(pattern, re.M)
+    for f in sorted((tree / "src").glob("*.cpp")):
+        if rx.search(f.read_text(encoding="utf-8", errors="replace")):
+            return f
+    return None
+
+
 def main(tree):
     for name, folder in FILES.items():
         src = find(name, folder)
@@ -139,22 +148,27 @@ def main(tree):
             print("economy.cpp: interest and overdraft charge of the original loan switched off")
         else:
             print("WARNING: economy.cpp has a different layout, the original loan interest was not changed")
-    if "STR_BANK_ERROR_LEGACY_LOAN" in s:
-        print("economy.cpp: original loan commands already guarded")
-    else:
-        # CmdIncreaseLoan is the only way that the original system puts loan money into the cash (GUI, AI, script, console, network).
-        # CmdDecreaseLoan stays, so that an old savegame can still repay its loan.
-        inc_loan = re.search(r"^CommandCost CmdIncreaseLoan\([^)]*\)\s*\{\n", s, re.M)
-        if inc_loan:
-            s = s[:inc_loan.end()] + "\t/* The Central Bank replaces the original loan: no loan money enters the company cash through this command. */\n\tif (GameTimeManager::IsLegacyLoanBypassed()) return CommandCost(STR_BANK_ERROR_LEGACY_LOAN);\n\n" + s[inc_loan.end():]
-            changed = True
-            print("economy.cpp: CmdIncreaseLoan disabled")
-        else:
-            print("WARNING: CmdIncreaseLoan not found in economy.cpp, the original loan can still be increased")
     if changed and '#include "game_time/game_time_manager.h"' not in s:
         s = ensure_include(s, '#include "game_time/game_time_manager.h"', ['#include "company_func.h"', '#include "stdafx.h"'])
     if changed:
         p.write_text(s, encoding="utf-8")
+
+    # CmdIncreaseLoan is the only way that the original system puts loan money into the cash (GUI, AI, script, console, network).
+    # CmdDecreaseLoan stays, so that an old savegame can still repay its loan. The file differs between OpenTTD versions.
+    loan_rx = r"^CommandCost CmdIncreaseLoan\([^)]*\)\s*\{\n"
+    p = find_definition(tree, loan_rx)
+    if p is None:
+        print("WARNING: CmdIncreaseLoan not found in any src/*.cpp, the original loan can still be increased")
+    else:
+        s = p.read_text(encoding="utf-8")
+        if "STR_BANK_ERROR_LEGACY_LOAN" in s:
+            print(f"{p.name}: CmdIncreaseLoan already disabled")
+        else:
+            m = re.search(loan_rx, s, re.M)
+            s = s[:m.end()] + "\t/* The Central Bank replaces the original loan: no loan money enters the company cash through this command. */\n\tif (GameTimeManager::IsLegacyLoanBypassed()) return CommandCost(STR_BANK_ERROR_LEGACY_LOAN);\n\n" + s[m.end():]
+            s = ensure_include(s, '#include "game_time/game_time_manager.h"', ['#include "company_func.h"', '#include "stdafx.h"'])
+            p.write_text(s, encoding="utf-8")
+            print(f"{p.name}: CmdIncreaseLoan disabled")
 
     # window_type.h: the window class of the Central Bank.
     p = tree / "src" / "window_type.h"
@@ -184,23 +198,23 @@ def main(tree):
         p.write_text(s, encoding="utf-8")
         print("widgets/CMakeLists.txt: central_bank_widget.h added")
 
-    # finances_gui.cpp: the company finances window opens the Central Bank window instead.
-    p = tree / "src" / "finances_gui.cpp"
+    # The company finances window (company_gui.cpp in current OpenTTD, finances_gui.cpp in some trees) opens the Central Bank window instead.
+    fin_rx = r"^void ShowCompanyFinances\(CompanyID company\)\s*\{\n"
+    p = find_definition(tree, fin_rx)
+    if p is None:
+        sys.exit("ERROR: ShowCompanyFinances not found in any src/*.cpp")
     s = p.read_text(encoding="utf-8")
     if "ShowCentralBankWindow" in s:
-        print("finances_gui.cpp: already changed")
+        print(f"{p.name}: already changed")
     else:
-        m = re.search(r"^void ShowCompanyFinances\(CompanyID company\)\s*\{\n", s, re.M)
-        if m:
-            add = ("\t/* The Central Bank window replaces the original finances window. Every way to the finances (toolbar menu, company window, statusbar) comes here. */\n"
-                   "\tif (GameTimeManager::IsLegacyLoanBypassed()) {\n\t\tShowCentralBankWindow();\n\t\treturn;\n\t}\n\n")
-            s = s[:m.end()] + add + s[m.end():]
-            s = ensure_include(s, '#include "central_bank_gui.h"', ['#include "company_func.h"', '#include "stdafx.h"'])
-            s = ensure_include(s, '#include "game_time/game_time_manager.h"', ['#include "central_bank_gui.h"'])
-            p.write_text(s, encoding="utf-8")
-            print("finances_gui.cpp: ShowCompanyFinances() opens the Central Bank window")
-        else:
-            sys.exit("ERROR: ShowCompanyFinances not found in finances_gui.cpp")
+        m = re.search(fin_rx, s, re.M)
+        add = ("\t/* The Central Bank window replaces the original finances window. Every way to the finances (toolbar menu, company window, statusbar) comes here. */\n"
+               "\tif (GameTimeManager::IsLegacyLoanBypassed()) {\n\t\tShowCentralBankWindow();\n\t\treturn;\n\t}\n\n")
+        s = s[:m.end()] + add + s[m.end():]
+        s = ensure_include(s, '#include "central_bank_gui.h"', ['#include "company_func.h"', '#include "stdafx.h"'])
+        s = ensure_include(s, '#include "game_time/game_time_manager.h"', ['#include "central_bank_gui.h"'])
+        p.write_text(s, encoding="utf-8")
+        print(f"{p.name}: ShowCompanyFinances() opens the Central Bank window")
 
     # statusbar_gui.cpp: the finance button of the statusbar opens the Central Bank window directly.
     p = tree / "src" / "statusbar_gui.cpp"
