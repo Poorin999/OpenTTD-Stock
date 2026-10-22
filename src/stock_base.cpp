@@ -941,7 +941,10 @@ void StockMarket::PayDividends(size_t quarters)
  */
 void StockMarket::HandleDividends()
 {
-	const int32_t quarter_id = TimerGameEconomy::year.base() * 4 + TimerGameEconomy::month / 3;
+	/* The quarter of the company statistics closes by the game clock (every 90 game days), see economy.cpp. */
+	const int32_t quarter_id = GameTimeManager::AreQuartersSynced()
+			? GetStockCurrentMonth() / 3 // 12 game months of 30 days per year: the number of the game quarter, in step with the statistics
+			: TimerGameEconomy::year.base() * 4 + TimerGameEconomy::month / 3;
 	if (this->dividend_quarter_id == 0) {
 		this->dividend_quarter_id = quarter_id; // First update of this game, or of a savegame without this information.
 	} else if (quarter_id != this->dividend_quarter_id) {

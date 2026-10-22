@@ -225,6 +225,13 @@ struct StockToolboxColumns {
 	{}
 };
 
+/** Widths of one candle (in unscaled pixels) that the mouse wheel steps through on the chart. */
+static constexpr int CHART_SLOT_WIDTHS[] = {3, 4, 6, 8, 10, 14, 20, 28, 40};
+static constexpr int CHART_ZOOM_DEFAULT = 4; ///< Index of the default width (10).
+static constexpr int CHART_ZOOM_MAX = static_cast<int>(std::size(CHART_SLOT_WIDTHS)) - 1;
+static constexpr double CHART_VZOOM_MIN = 0.05; ///< Most zoomed in price range.
+static constexpr double CHART_VZOOM_MAX = 8.0;  ///< Most zoomed out price range.
+
 struct StockWindow : Window {
 	static constexpr size_t PORTFOLIO_FIXED_ROWS = 3; ///< Lines of the portfolio that do not scroll: two summary lines and the table header.
 
@@ -258,6 +265,10 @@ struct StockWindow : Window {
 	bool is_dragging_chart = false;     ///< Whether the mouse button is held down on the chart.
 	int drag_start_x = 0;               ///< X position (in the window) where the drag started, or where the last candle step was made.
 	int chart_scroll_offset = 0;        ///< Number of candles the chart is scrolled back into the past; 0 shows the newest candles at the right edge.
+	int drag_start_y = 0;               ///< Y position (in the window) where the last vertical drag step was made.
+	int chart_zoom = CHART_ZOOM_DEFAULT; ///< Index in #CHART_SLOT_WIDTHS: the width of one candle. Mouse wheel on the chart.
+	double chart_vzoom = 1.0;           ///< Height of the visible price range, 1.0 = fit all visible candles; smaller is zoomed in. Ctrl + mouse wheel.
+	double chart_vshift = 0.0;          ///< Vertical scroll of the price range as a part of the fitted range; positive shows higher prices. Drag up/down.
 	GameTimeframe frame = GameTimeframe::H1; ///< Timeframe of the chart: one candle per 1h, 4h, 12h, game day, game week, game month (30 days) or game year (365 days).
 
 	StockWindow(WindowDesc &desc) : Window(desc)
@@ -345,6 +356,41 @@ struct StockWindow : Window {
 	{
 		const int count = static_cast<int>(this->GetChartCandles().size());
 		this->chart_scroll_offset = std::clamp(this->chart_scroll_offset, 0, std::max(0, count - 1));
+	}
+
+	/** Width of one candle in pixels, from the zoom of the chart. */
+	int ChartSlot() const
+	{
+		return std::max(1, ScaleGUITrad(CHART_SLOT_WIDTHS[std::clamp(this->chart_zoom, 0, CHART_ZOOM_MAX)]));
+	}
+
+	/** Back to the price range that fits the candles (the symbol or the timeframe changed, or double click). */
+	void ResetChartVertical()
+	{
+		this->chart_vzoom = 1.0;
+		this->chart_vshift = 0.0;
+	}
+
+	/** Height in pixels of the price pane of the chart; must follow the layout of DrawChart. */
+	int ChartPriceHeight() const
+	{
+		const NWidgetBase *nw = this->GetWidget<NWidgetBase>(WID_ST_CHART);
+		const int full = static_cast<int>(nw->current_y) - GetCharacterHeight(FS_SMALL) - ScaleGUITrad(4) - ScaleGUITrad(6);
+		if (full < ScaleGUITrad(150)) return std::max(1, full);
+		return std::max(1, full - full / 4 - full / 6 - 2 * ScaleGUITrad(4));
+	}
+
+	/** The mouse wheel on the chart: zoom the candles in and out; with Ctrl: zoom the price range. */
+	void OnMouseWheel(int wheel, WidgetID widget) override
+	{
+		if (widget != WID_ST_CHART || wheel == 0) return;
+		const bool zoom_in = wheel < 0;
+		if (_ctrl_pressed) {
+			this->chart_vzoom = std::clamp(this->chart_vzoom * (zoom_in ? 0.8 : 1.25), CHART_VZOOM_MIN, CHART_VZOOM_MAX);
+		} else {
+			this->chart_zoom = std::clamp(this->chart_zoom + (zoom_in ? 1 : -1), 0, CHART_ZOOM_MAX);
+		}
+		this->SetDirty();
 	}
 
 	/** The rows of the toolbox: first the open positions, then the pending orders of the selected wallet of the local company. */
@@ -566,27 +612,48 @@ struct StockWindow : Window {
 			return;
 		}
 
-		const int slot = std::max(1, ScaleGUITrad(10)); // Must be the same as the candle width in DrawChart.
+		bool changed = false;
+
+		/* Vertical: dragging up or down moves the price range, one pixel of the chart for every pixel of the mouse. */
+		const int dy = (_cursor.pos.y - this->top) - this->drag_start_y;
+		if (dy != 0) {
+			this->drag_start_y += dy;
+			this->chart_vshift = std::clamp(this->chart_vshift + static_cast<double>(dy) / this->ChartPriceHeight() * this->chart_vzoom, -4.0, 4.0);
+			changed = true;
+		}
+
+		const int slot = this->ChartSlot(); // Must be the same as the candle width in DrawChart.
 		const int delta = (_cursor.pos.x - this->left) - this->drag_start_x;
 		const int steps = delta / slot; // Whole candles only; rounds towards zero.
-		if (steps == 0) return;
+		if (steps != 0) {
+			/* Keep the rest of the movement, so a slow drag does not lose pixels. */
+			this->drag_start_x += steps * slot;
 
-		/* Keep the rest of the movement, so a slow drag does not lose pixels. */
-		this->drag_start_x += steps * slot;
-
-		/* Dragging to the right goes back in time, dragging to the left comes back to the newest candles. */
-		const size_t count = this->GetChartCandles().size();
-		const int max_offset = count > 0 ? static_cast<int>(count) - 1 : 0; // At least one candle stays visible.
-		this->chart_scroll_offset = std::clamp(this->chart_scroll_offset + steps, 0, max_offset);
-		this->SetDirty();
+			/* Dragging to the right goes back in time, dragging to the left comes back to the newest candles. */
+			const size_t count = this->GetChartCandles().size();
+			const int max_offset = count > 0 ? static_cast<int>(count) - 1 : 0; // At least one candle stays visible.
+			this->chart_scroll_offset = std::clamp(this->chart_scroll_offset + steps, 0, max_offset);
+			changed = true;
+		}
+		if (changed) this->SetDirty();
 	}
 
-	void OnClick(Point pt, WidgetID widget, [[maybe_unused]] int click_count) override
+	void OnClick(Point pt, WidgetID widget, int click_count) override
 	{
 		switch (widget) {
 			case WID_ST_CHART:
+				/* Double click: back to the default view (newest candles, default zoom, price range that fits). */
+				if (click_count >= 2) {
+					this->chart_zoom = CHART_ZOOM_DEFAULT;
+					this->chart_scroll_offset = 0;
+					this->ResetChartVertical();
+					this->is_dragging_chart = false;
+					this->SetDirty();
+					break;
+				}
 				this->is_dragging_chart = true;
 				this->drag_start_x = pt.x;
+				this->drag_start_y = pt.y;
 				break;
 
 			case WID_ST_NEW_ORDER:
@@ -645,6 +712,7 @@ struct StockWindow : Window {
 				if (this->frame != wanted) {
 					this->frame = wanted;
 					this->chart_scroll_offset = 0; // The units of the offset change with the timeframe.
+					this->ResetChartVertical();
 				}
 				this->UpdateTimeframeButtons();
 				this->SetDirty();
@@ -675,6 +743,7 @@ struct StockWindow : Window {
 					if (n++ == wanted) {
 						this->selected = c->index;
 						this->chart_scroll_offset = 0;
+						this->ResetChartVertical();
 						SetStockOrderSymbol(c->index);
 						this->SetDirty();
 						break;
@@ -753,6 +822,7 @@ struct StockWindow : Window {
 		if (row >= list.size()) return;
 		this->selected = list[row].company;
 		this->chart_scroll_offset = 0;
+		this->ResetChartVertical();
 		SetStockOrderSymbol(this->selected);
 		this->SetDirty();
 	}
@@ -968,8 +1038,8 @@ struct StockWindow : Window {
 			return;
 		}
 
-		const int slot = std::max(1, ScaleGUITrad(10));
-		const int body_half = ScaleGUITrad(3);
+		const int slot = this->ChartSlot();
+		const int body_half = std::max(0, slot * 3 / 10);
 		const size_t max_visible = static_cast<size_t>(std::max(1, (right - left) / slot));
 
 		/* The visible candles are [first, last). Scrolled back by chart_scroll_offset candles, but never past the oldest candle. */
@@ -991,6 +1061,16 @@ struct StockWindow : Window {
 		const int64_t margin = std::max<int64_t>((hi - lo) / 10, 1);
 		lo = std::max<int64_t>(lo - margin, 0);
 		hi += margin;
+
+		/* Zoom and scroll of the price range: the fitted range is shrunk or stretched around its middle, then moved up or down. */
+		if (this->chart_vzoom != 1.0 || this->chart_vshift != 0.0) {
+			const double fitted = static_cast<double>(hi - lo);
+			const double centre = static_cast<double>(lo + hi) / 2.0 + this->chart_vshift * fitted;
+			const double half = std::max(1.0, fitted * this->chart_vzoom / 2.0);
+			lo = static_cast<int64_t>(std::floor(centre - half));
+			hi = static_cast<int64_t>(std::ceil(centre + half));
+			if (hi <= lo) hi = lo + 1;
+		}
 		const double range = static_cast<double>(hi - lo);
 
 		auto to_y = [&](int64_t value) {
@@ -1008,6 +1088,7 @@ struct StockWindow : Window {
 		/* Candles, the newest at the right edge. */
 		const int count = static_cast<int>(last - first);
 		const int x0 = right - count * slot;
+		int last_label_x = INT32_MIN / 2; // X of the last label that was drawn.
 		for (int i = 0; i < count; i++) {
 			const StockCandle &c = candles[first + i];
 			const int cx = x0 + i * slot + slot / 2;
@@ -1054,7 +1135,9 @@ struct StockWindow : Window {
 				default:
 					break;
 			}
-			if (!label.empty()) {
+			/* A label is about 40 pixels wide: when the candles are narrow (zoomed out), only labels that have room are drawn. */
+			if (!label.empty() && cx - last_label_x >= ScaleGUITrad(44)) {
+				last_label_x = cx;
 				GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(3), PC_WHITE);
 				DrawString(cx - ScaleGUITrad(20), cx + ScaleGUITrad(20), full_bottom + ScaleGUITrad(3), label, TC_WHITE, SA_HOR_CENTER, false, FS_SMALL);
 			}
@@ -1476,7 +1559,7 @@ static constexpr std::initializer_list<NWidgetPart> _nested_stock_widgets = {
 				NWidget(WWT_PANEL, COLOUR_GREY), SetFill(1, 1), SetResize(1, 0),
 				EndContainer(),
 			EndContainer(),
-			NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_CHART), SetMinimalSize(400, 184), SetResize(1, 1), SetFill(1, 1),
+			NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_CHART), SetMinimalSize(400, 184), SetResize(1, 1), SetFill(1, 1), SetToolTip(STR_STOCK_TIP_CHART),
 			EndContainer(),
 		EndContainer(),
 	EndContainer(),

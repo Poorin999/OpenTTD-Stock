@@ -18,6 +18,10 @@
 #include "window_func.h"
 #include "timer/timer.h"
 #include "timer/timer_game_economy.h"
+#include "timer/timer_game_tick.h"
+#include "news_func.h"
+#include "strings_func.h"
+#include "core/format.hpp"
 
 #include "table/strings.h"
 
@@ -62,9 +66,8 @@ int64_t GetCentralBankAvailable(CompanyID company)
 
 /**
  * The money of a company that may go to the trading wallets: its cash minus everything that is borrowed. That is the cash
- * minus the original OpenTTD loan (#Company::current_loan, 0 while the legacy loans are bypassed, but an old savegame can
- * still have one) and minus the debt at the central bank, because a central bank loan is paid into the cash. As long as
- * the cash is not more than the borrowed money, none of it is the company's own money.
+ * minus the debt at the central bank, because a central bank loan is paid into the cash. As long as the cash is not more
+ * than the borrowed money, none of it is the company's own money.
  * @param company The company.
  * @return The unborrowed liquid cash, 0 or more.
  */
@@ -72,13 +75,13 @@ int64_t GetUnborrowedLiquidCash(CompanyID company)
 {
 	const Company *c = Company::GetIfValid(company);
 	if (c == nullptr) return 0;
-	const int64_t liquid = static_cast<int64_t>(c->money) - static_cast<int64_t>(c->current_loan) - GetCentralBankDebt(company);
+	const int64_t liquid = static_cast<int64_t>(c->money) - GetCentralBankDebt(company);
 	return std::max<int64_t>(0, liquid);
 }
 
 /**
  * Guard for every command that puts company money into a trading wallet: the amount must come out of the unborrowed
- * liquid cash, so money of the central bank (or of the legacy loan) can never be traded.
+ * liquid cash, so money of the central bank can never be traded.
  * @param company The company that pays.
  * @param amount The money that is to enter a trading wallet.
  * @return An error when the amount is more than #GetUnborrowedLiquidCash, otherwise a zero cost.
@@ -205,34 +208,34 @@ CommandCost CmdBankRepay(DoCommandFlags flags, uint8_t wallet, Money amount_in)
 }
 
 /**
- * Repay the original OpenTTD loan (#Company::current_loan) from the company cash. The original loan can not be increased
- * any more and costs no interest, but it still counts against the company (its value, the credit limit and the money
- * that may be traded), and the original finances window, which could repay it, is replaced by the Central Bank window.
- * Like every central bank operation this is not booked as an expense.
- * @param flags Type of operation.
- * @param amount Money to repay, more than zero, at most the original loan and at most the company cash.
- * @return Zero cost, or an error.
+ * The original OpenTTD loan does not exist any more: the central bank is the only lender. A loan that a company still has (an
+ * old savegame, a script, a cheat) is moved to the central bank at once: the debt grows by the loan, the loan becomes 0, and
+ * the cash stays as it is (it already holds that money). From then on it is repaid with the central bank commands, and it
+ * costs the interest of the central bank. Only game state is used, so every client of a network game does the same.
  */
-CommandCost CmdBankRepayLegacy(DoCommandFlags flags, Money amount_in)
+static void MoveOriginalLoansToCentralBank()
 {
-	const int64_t amount = amount_in;
-	if (!Company::IsValidID(_current_company)) return CMD_ERROR;
-	Company *c = Company::Get(_current_company);
-	if (c->current_loan <= 0) return CommandCost(STR_BANK_ERROR_NO_LEGACY_LOAN);
-	if (amount <= 0 || amount > static_cast<int64_t>(c->current_loan)) return CommandCost(STR_STOCK_ERROR_BAD_AMOUNT);
-	if (static_cast<int64_t>(c->money) < amount) return CommandCost(STR_STOCK_ERROR_NO_FUNDS);
-
-	if (flags.Test(DoCommandFlag::Execute)) {
-		c->money -= Money(amount);
-		c->current_loan -= Money(amount);
-		RecordLedger(_current_company, LedgerItem::BankLoan, -amount);
+	for (Company *c : Company::Iterate()) {
+		if (c->current_loan <= 0) continue;
+		const int64_t loan = static_cast<int64_t>(c->current_loan);
+		_central_bank.accounts[c->index.base()].debt += loan;
+		c->current_loan = 0;
+		if (c->index == _local_company) {
+			AddNewsItem(GetEncodedString(STR_JUST_RAW_STRING, fmt::format("Your original loan of {} was moved to the central bank. It is repaid there, and it costs the interest of the central bank.",
+					GetString(STR_JUST_CURRENCY_LONG, loan))), NewsType::General, NewsStyle::Small, {});
+		}
 		InvalidateBankWindows();
 	}
-	return CommandCost();
 }
 
+/** Check every game tick, so there is never a moment in which the original loan is in use. */
+static const IntervalTimer<TimerGameTick> _bank_move_original_loans({TimerGameTick::Priority::NONE, 1}, [](auto)
+{
+	MoveOriginalLoansToCentralBank();
+});
+
 /**
- * Once per economy day the interest is added to every debt. At least one money unit is added to a debt that exists,
+ * Once per game day the interest is added to every debt. At least one money unit is added to a debt that exists,
  * so a small loan does not stay free of interest because of rounding. A company that is gone has no debt any more.
  */
 void CentralBank::UpdateDaily()

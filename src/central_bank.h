@@ -49,7 +49,7 @@ enum class LedgerItem : uint8_t {
 	Dividends,       ///< Dividends of the shares of other companies (income) and the dividend that the company pays itself (expense).
 	RealizedProfit,  ///< Profit (income) and loss (expense) of closed trades.
 	WalletTransfer,  ///< Money moved between the company cash and another wallet: into the cash (income) and out of the cash (expense).
-	BankLoan,        ///< Money that the central bank or the original loan paid out (income) and what was repaid (expense).
+	BankLoan,        ///< Money that the central bank paid out (income) and what was repaid (expense).
 	End,
 };
 static constexpr size_t LEDGER_ITEMS = static_cast<size_t>(LedgerItem::End);
@@ -81,10 +81,8 @@ CommandCost CheckTradingCapital(CompanyID company, int64_t amount);
 
 CommandCost CmdBankBorrow(DoCommandFlags flags, uint8_t wallet, Money amount);
 CommandCost CmdBankRepay(DoCommandFlags flags, uint8_t wallet, Money amount);
-CommandCost CmdBankRepayLegacy(DoCommandFlags flags, Money amount);
 
 DEF_CMD_TRAIT(CMD_BANK_BORROW, CmdBankBorrow, {}, CommandType::MoneyManagement)
 DEF_CMD_TRAIT(CMD_BANK_REPAY,  CmdBankRepay,  {}, CommandType::MoneyManagement)
-DEF_CMD_TRAIT(CMD_BANK_REPAY_LEGACY, CmdBankRepayLegacy, {}, CommandType::MoneyManagement)
 
 #endif /* CENTRAL_BANK_H */

@@ -54,8 +54,6 @@
  */
 /** True: the candlestick chart of the trading terminal (the MT5 part: candles, SMA, volume, RSI) is not drawn. The data is still recorded. False now: the chart shows the 1h, 4h and 12h candles of game time. */
 static constexpr bool GAME_TIME_DECOUPLE_CHART = false;
-/** True: the original monthly interest on the OpenTTD loan of a company is not charged. Needs the change of economy.cpp that apply_overlay.py makes. */
-static constexpr bool GAME_TIME_BYPASS_LEGACY_LOANS = true;
 /**
  * True: the date of the original game (TimerGameCalendar) is driven by this clock. The calendar moves to the next day exactly when the clock
  * passes 23:59 -> 00:00, so one calendar day is one game day (24 real minutes) and the HH:MM of the status bar and the date always belong
@@ -63,7 +61,13 @@ static constexpr bool GAME_TIME_BYPASS_LEGACY_LOANS = true;
  * economy keeps running in its own 74-tick days, so incomes, costs and the economy timers of OpenTTD are not changed.
  */
 static constexpr bool GAME_TIME_SYNC_CALENDAR = true;
-/** The cash that a new company starts with while the original loan is bypassed. It is the company's own money: the company starts without any loan. In the base currency (pounds). */
+/**
+ * True: the quarter of the company statistics (the figures behind the earnings, the P/E and the dividends of the trading terminal, and the graphs
+ * and ratings of the original game) closes by this clock, every 90 game days (36 real hours), and not every 3 economy months. Needs the change
+ * of economy.cpp that apply_overlay.py makes. The monthly parts (bankruptcy check, infrastructure costs, interest) stay in economy time.
+ */
+static constexpr bool GAME_TIME_SYNC_QUARTERS = true;
+/** The cash that a new company starts with: there is no original loan. It is the company's own money: the company starts without any loan. In the base currency (pounds). */
 static constexpr int64_t GAME_TIME_STARTING_CAPITAL = 1'500'000;
 
 /** The kinds of events that a system can subscribe to. */
@@ -163,6 +167,7 @@ public:
 	static constexpr int HOURS_PER_DAY = 24;              ///< Game hours in a game day.
 	static constexpr int DAYS_PER_YEAR = 365;             ///< Game days in a game year.
 	static constexpr int DAYS_PER_WEEK = 7;               ///< Game days in a game week.
+	static constexpr int DAYS_PER_QUARTER = 90;           ///< Game days in a game quarter (3 game months); the company statistics close every quarter.
 	static constexpr int DAYS_PER_MONTH = 30;             ///< Game days in a game month (the game year has no calendar months).
 	static constexpr int MINUTES_PER_DAY = MINUTES_PER_HOUR * HOURS_PER_DAY; ///< Game minutes in a game day.
 	static constexpr uint64_t MS_PER_DAY = MS_PER_MINUTE * MINUTES_PER_DAY;  ///< Game day in milliseconds.
@@ -241,9 +246,9 @@ public:
 	uint32_t GetDayFraction(uint32_t ticks_per_day) const;
 
 	/* The temporary switches, see above. */
+	static constexpr bool AreQuartersSynced() { return GAME_TIME_SYNC_QUARTERS; }
 	static constexpr bool IsCalendarSynced() { return GAME_TIME_SYNC_CALENDAR; }
 	static constexpr bool IsChartDecoupled() { return GAME_TIME_DECOUPLE_CHART; }
-	static constexpr bool IsLegacyLoanBypassed() { return GAME_TIME_BYPASS_LEGACY_LOANS; }
 	static constexpr int64_t GetStartingCapital() { return GAME_TIME_STARTING_CAPITAL; }
 
 private:

@@ -8,7 +8,8 @@ It looks for the mod files by name anywhere next to this script, so it does not 
   - adds the commands to the Commands enum in src/command_type.h
   - adds the new source files to src/CMakeLists.txt
   - adds the strings to src/lang/english.txt
-  - economy.cpp: no interest, no overdraft charge and no CmdIncreaseLoan for the original loan
+  - the original loan is removed: no interest or overdraft charge (economy.cpp), CmdIncreaseLoan and CmdDecreaseLoan refused, a new company starts without a loan;
+    old loans are moved to the central bank by central_bank.cpp; bankruptcy and the loan score count the central bank debt
   - window_type.h / widgets: the Central Bank window class (WC_CENTRAL_BANK)
   - ShowCompanyFinances() (company_gui.cpp), statusbar_gui.cpp: the finances menu and the statusbar button open ShowCentralBankWindow()
   - timer_game_calendar.cpp, economy_settings.ini: the date of the original game follows the HH:MM clock (a new day starts at 00:00)
@@ -42,7 +43,6 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_WALLET_TRANSFER", "move money between two wallets"),
     ("CMD_BANK_BORROW", "borrow from the central bank"),
     ("CMD_BANK_REPAY", "repay the central bank"),
-    ("CMD_BANK_REPAY_LEGACY", "repay the original loan from the company cash"),
 ]
 NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
@@ -132,45 +132,47 @@ def main(tree):
         p.write_text(s, encoding="utf-8")
     print(f"CMakeLists.txt: {len(missing)} files added")
 
-    # economy.cpp: switch off the interest and the overdraft charge of the original loan, and the original loan commands.
+    # economy.cpp: the original loan system is gone. No interest on the original loan and no overdraft charge (the central bank is the only lender),
+    # the bankruptcy check and the loan score count the debt at the central bank instead of the original loan.
     p = tree / "src" / "economy.cpp"
     s = p.read_text(encoding="utf-8")
     changed = False
-    if "IsLegacyLoanBypassed() ? Money(0)" in s:
-        print("economy.cpp: interest of the original loan already switched off")
+    if "GetCentralBankDebt(c->index)" in s:
+        print("economy.cpp: original loan already removed from the economy")
     else:
-        old = re.search(r"([ \t]*)Money yearly_fee = c->current_loan \* _economy\.interest_rate / 100;\n([ \t]*)Money available_money = GetAvailableMoney\(c->index\);\n([ \t]*)if \(available_money < 0\) \{", s)
-        if old:
-            i1, i2, i3 = old.group(1), old.group(2), old.group(3)
-            new = (f"{i1}Money yearly_fee = GameTimeManager::IsLegacyLoanBypassed() ? Money(0) : Money(c->current_loan * _economy.interest_rate / 100);\n"
-                   f"{i2}Money available_money = GetAvailableMoney(c->index);\n"
-                   f"{i3}if (available_money < 0 && !GameTimeManager::IsLegacyLoanBypassed()) {{")
-            s = s[:old.start()] + new + s[old.end():]
-            changed = True
-            print("economy.cpp: interest and overdraft charge of the original loan switched off")
-        else:
-            print("WARNING: economy.cpp has a different layout, the original loan interest was not changed")
+        old = re.search(r"[ \t]*Money yearly_fee = c->current_loan \* _economy\.interest_rate / 100;\n.*?"
+                        r"[ \t]*SubtractMoneyFromCompany\(CommandCost\(EXPENSES_LOAN_INTEREST, up_to_this_month - up_to_previous_month\)\);\n\n", s, re.S)
+        bankrupt = "if (c->money - c->current_loan >= -c->GetMaxLoan()) {"
+        score = "_score_part[owner][SCORE_LOAN] = _score_info[SCORE_LOAN].needed - c->current_loan;"
+        if not old or bankrupt not in s or score not in s:
+            sys.exit("ERROR: economy.cpp has a different layout, the original loan was not removed from the economy")
+        s = s[:old.start()] + "\t\t/* No interest on an original loan and no overdraft charge: the central bank is the only lender and charges its own interest. */\n" + s[old.end():]
+        s = s.replace(bankrupt, "if (c->money - Money(GetCentralBankDebt(c->index)) >= -c->GetMaxLoan()) {", 1)
+        s = s.replace(score, "_score_part[owner][SCORE_LOAN] = _score_info[SCORE_LOAN].needed - c->current_loan - Money(GetCentralBankDebt(c->index));", 1)
+        s = ensure_include(s, '#include "central_bank.h"', ['#include "company_func.h"', '#include "stdafx.h"'])
+        changed = True
+        print("economy.cpp: no interest on the original loan; bankruptcy and the loan score count the central bank debt")
     if changed and '#include "game_time/game_time_manager.h"' not in s:
         s = ensure_include(s, '#include "game_time/game_time_manager.h"', ['#include "company_func.h"', '#include "stdafx.h"'])
     if changed:
         p.write_text(s, encoding="utf-8")
 
-    # CmdIncreaseLoan is the only way that the original system puts loan money into the cash (GUI, AI, script, console, network).
-    # CmdDecreaseLoan stays, so that an old savegame can still repay its loan. The file differs between OpenTTD versions.
-    loan_rx = r"^CommandCost CmdIncreaseLoan\([^)]*\)\s*\{\n"
-    p = find_definition(tree, loan_rx)
-    if p is None:
-        print("WARNING: CmdIncreaseLoan not found in any src/*.cpp, the original loan can still be increased")
-    else:
+    # CmdIncreaseLoan and CmdDecreaseLoan are the only ways into the original loan (GUI, AI, script, console, network): both are refused.
+    # A loan that an old savegame still has is moved to the central bank by central_bank.cpp. The file differs between OpenTTD versions.
+    for name in ("CmdIncreaseLoan", "CmdDecreaseLoan"):
+        loan_rx = r"^CommandCost " + name + r"\([^)]*\)\s*\{\n"
+        p = find_definition(tree, loan_rx)
+        if p is None:
+            print(f"WARNING: {name} not found in any src/*.cpp, the original loan can still be used")
+            continue
         s = p.read_text(encoding="utf-8")
-        if "STR_BANK_ERROR_LEGACY_LOAN" in s:
-            print(f"{p.name}: CmdIncreaseLoan already disabled")
-        else:
-            m = re.search(loan_rx, s, re.M)
-            s = s[:m.end()] + "\t/* The Central Bank replaces the original loan: no loan money enters the company cash through this command. */\n\tif (GameTimeManager::IsLegacyLoanBypassed()) return CommandCost(STR_BANK_ERROR_LEGACY_LOAN);\n\n" + s[m.end():]
-            s = ensure_include(s, '#include "game_time/game_time_manager.h"', ['#include "company_func.h"', '#include "stdafx.h"'])
-            p.write_text(s, encoding="utf-8")
-            print(f"{p.name}: CmdIncreaseLoan disabled")
+        m = re.search(loan_rx, s, re.M)
+        if "STR_BANK_ERROR_LEGACY_LOAN" in s[m.end():m.end() + 400]:
+            print(f"{p.name}: {name} already disabled")
+            continue
+        s = s[:m.end()] + "\t/* The original loan does not exist any more: the central bank is the only lender. */\n\treturn CommandCost(STR_BANK_ERROR_LEGACY_LOAN);\n\n" + s[m.end():]
+        p.write_text(s, encoding="utf-8")
+        print(f"{p.name}: {name} disabled")
 
     # A new company starts with its own money and without the original loan (company_cmd.cpp: "c->money = c->current_loan = ...").
     start_rx = r"^[ \t]*(\w+)->money\s*=\s*\1->current_loan\s*=\s*[^;]*;[ \t]*\n"
@@ -184,10 +186,9 @@ def main(tree):
         else:
             m = re.search(start_rx, s, re.M)
             v = m.group(1)
-            add = (f"\t/* The Central Bank replaces the original loan: a company starts with its own money and no loan. */\n"
-                   f"\tif (GameTimeManager::IsLegacyLoanBypassed()) {{\n"
-                   f"\t\t{v}->money = Money(GameTimeManager::GetStartingCapital());\n"
-                   f"\t\t{v}->current_loan = 0;\n\t}}\n")
+            add = (f"\t/* There is no original loan: a company starts with its own money and no loan. */\n"
+                   f"\t{v}->money = Money(GameTimeManager::GetStartingCapital());\n"
+                   f"\t{v}->current_loan = 0;\n")
             s = s[:m.end()] + add + s[m.end():]
             s = ensure_include(s, '#include "game_time/game_time_manager.h"', ['#include "company_func.h"', '#include "stdafx.h"'])
             p.write_text(s, encoding="utf-8")
@@ -232,7 +233,7 @@ def main(tree):
     else:
         m = re.search(fin_rx, s, re.M)
         add = ("\t/* The Central Bank window replaces the original finances window. Every way to the finances (toolbar menu, company window, statusbar) comes here. */\n"
-               "\tif (GameTimeManager::IsLegacyLoanBypassed()) {\n\t\tShowCentralBankWindow();\n\t\treturn;\n\t}\n\n")
+               "\tShowCentralBankWindow();\n\treturn;\n\n")
         s = s[:m.end()] + add + s[m.end():]
         s = ensure_include(s, '#include "central_bank_gui.h"', ['#include "company_func.h"', '#include "stdafx.h"'])
         s = ensure_include(s, '#include "game_time/game_time_manager.h"', ['#include "central_bank_gui.h"'])
@@ -277,6 +278,34 @@ def main(tree):
         s = ensure_include(s, '#include "game_time/game_time_manager.h"', ['#include "timer/timer_window.h"'])
         p.write_text(s, encoding="utf-8")
         print("statusbar_gui.cpp: HH:MM is shown in front of the date")
+
+    # economy.cpp: the quarter of the company statistics (old_economy) closes by the clock of the mod, every 90 game days, not every 3 economy months.
+    p = tree / "src" / "economy.cpp"
+    s = p.read_text(encoding="utf-8")
+    if "CompaniesRollQuarter" in s:
+        print("economy.cpp: the quarter already closes by the game clock")
+    else:
+        check = "\t/* Only run the economic statistics and update company stats every 3rd economy month (1st of quarter). */\n\tif (!HasBit(1 << 0 | 1 << 3 | 1 << 6 | 1 << 9, TimerGameEconomy::month)) return;\n"
+        m = re.search(r"\n\tfor \(Company \*c : Company::Iterate\(\)\) \{\n\t\t/\* Drop the oldest history off the end \*/.*?\n\tSetWindowDirty\(WC_COMPANY_LEAGUE, 0\);\n\}\n", s, re.S)
+        head = re.search(r"/\*\*\n \* Update the finances of all companies\.", s)
+        if check not in s or not m or not head:
+            sys.exit("ERROR: economy.cpp has a different layout, the quarter was not connected to the game clock")
+        body = m.group(0)
+        roll = ("/** Close the quarter of the company statistics: the history moves one place, the ratings and values are updated. */\nstatic void CompaniesRollQuarter()\n{"
+                + body)
+        s = s[:m.start()] + "\n\tCompaniesRollQuarter();\n}\n" + s[m.end():]
+        s = s.replace(check, "\t/* With GAME_TIME_SYNC_QUARTERS the quarter is closed by the clock of the mod instead, see _game_quarter below. */\n\tif (GameTimeManager::AreQuartersSynced()) return;\n\n" + check, 1)
+        s = s.replace(head.group(0), roll + "\n" + head.group(0), 1)
+        s = s.replace("static void DoAcquireCompany(Company *c, bool hostile_takeover)",
+            "/** Every 90 game days (at 00:00 of the day that starts a new game quarter) the quarter of the company statistics closes. */\n"
+            "static const GameTimeSubscription _game_quarter(GameTimeEvent::Day, [](const GameTimeSnapshot &now)\n{\n"
+            "\tif (!GameTimeManager::AreQuartersSynced()) return;\n"
+            "\tconst uint64_t day = now.total_minutes / GameTimeManager::MINUTES_PER_DAY;\n"
+            "\tif (day == 0 || day % GameTimeManager::DAYS_PER_QUARTER != 0) return;\n"
+            "\tCompaniesRollQuarter();\n});\n\nstatic void DoAcquireCompany(Company *c, bool hostile_takeover)", 1)
+        s = ensure_include(s, '#include "game_time/game_time_manager.h"', ['#include "company_func.h"', '#include "stdafx.h"'])
+        p.write_text(s, encoding="utf-8")
+        print("economy.cpp: the quarter of the company statistics closes by the game clock")
 
     # timer_game_calendar.cpp: the calendar date follows the HH:MM clock of the mod. A new calendar day starts exactly when the clock passes 23:59 -> 00:00
     # and date_fract (the part of the day) follows the time of the day, so the status bar "HH:MM date" is one clock. Needs wallclock timekeeping units.
