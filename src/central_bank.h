@@ -14,6 +14,7 @@
 #include "company_type.h"
 #include "economy_type.h"
 #include <array>
+#include <map>
 
 /** Interest of the central bank per economy day, in parts per million of the debt (about 10% a year). The interest is added to the debt. */
 static constexpr int64_t CENTRAL_BANK_RATE_PPM_PER_DAY = 274;
@@ -36,6 +37,41 @@ struct CentralBank {
 };
 
 extern CentralBank _central_bank;
+
+/**
+ * The lines of the account statement that the game books itself. The costs of vehicles, tracks and stations are read from
+ * the yearly expenses of the company (see the Central Bank window), they are not in the ledger.
+ */
+enum class LedgerItem : uint8_t {
+	BankInterest,    ///< Interest that is added to the debt at the central bank (expense).
+	TradeCommission, ///< Commission of a trade, taken from the trading wallet (expense).
+	MarginSwap,      ///< Daily swap of the open positions, taken from the trading wallet (expense).
+	Dividends,       ///< Dividends of the shares of other companies (income) and the dividend that the company pays itself (expense).
+	RealizedProfit,  ///< Profit (income) and loss (expense) of closed trades.
+	WalletTransfer,  ///< Money moved between the company cash and another wallet: into the cash (income) and out of the cash (expense).
+	BankLoan,        ///< Money that the central bank or the original loan paid out (income) and what was repaid (expense).
+	End,
+};
+static constexpr size_t LEDGER_ITEMS = static_cast<size_t>(LedgerItem::End);
+
+/** What one line of the ledger booked in one economy year. */
+struct LedgerEntry {
+	int64_t income = 0;  ///< Money that came in.
+	int64_t expense = 0; ///< Money that went out.
+};
+
+/** The ledgers of the companies: per company and economy year the entry of every line. Only this year and the two before it are kept. Saved in the 'STCK' chunk. */
+struct Ledger {
+	std::array<std::map<int32_t, std::array<LedgerEntry, LEDGER_ITEMS>>, MAX_COMPANIES> years;
+
+	void Reset() { for (auto &y : this->years) y.clear(); }
+};
+
+extern Ledger _ledger;
+
+void RecordLedger(CompanyID company, LedgerItem item, int64_t amount);
+LedgerEntry GetLedgerEntry(CompanyID company, LedgerItem item, int32_t year);
+int32_t GetLedgerCurrentYear();
 
 int64_t GetCentralBankDebt(CompanyID company);
 int64_t GetCentralBankCreditLimit(CompanyID company);

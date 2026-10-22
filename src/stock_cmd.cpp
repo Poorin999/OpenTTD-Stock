@@ -126,7 +126,7 @@ CommandCost CmdStockOpen(DoCommandFlags flags, CompanyID target, StockOrderType 
 		(market ? _stock_market.positions : _stock_market.pending).push_back(order);
 
 		if (market) {
-			PayStockProfit(_current_company, wallet, -commission);
+			PayStockProfit(_current_company, wallet, -commission, LedgerItem::TradeCommission);
 			_stock_market.ApplyImpact(target, buy, volume);
 			/* The new price may already reach the levels of other trades. */
 			_stock_market.CheckExecutions();

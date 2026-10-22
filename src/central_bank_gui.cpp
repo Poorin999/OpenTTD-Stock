@@ -18,6 +18,7 @@
 #include "command_func.h"
 #include "company_base.h"
 #include "company_func.h"
+#include "economy_type.h"
 #include "gfx_func.h"
 #include "strings_func.h"
 #include "textbuf_gui.h"
@@ -43,9 +44,11 @@ struct CentralBankWindow : Window {
 		RepayLegacy,
 	};
 
-	static constexpr int ROWS = 8; ///< Number of rows in the summary panel.
+	static constexpr int ROWS = 9;            ///< Number of rows in the summary panel.
+	static constexpr int STATEMENT_ROWS = 26; ///< Number of rows in the account statement.
 
 	QueryKind query_kind = QueryKind::None; ///< What the open query window is for.
+	bool show_statement = false;            ///< Whether the panel shows the account statement instead of the summary.
 
 	/** Redraw regularly: the cash of the company changes all the time. */
 	const IntervalTimer<TimerWindow> redraw_interval = {std::chrono::milliseconds(500), [this](auto) {
@@ -68,6 +71,7 @@ struct CentralBankWindow : Window {
 
 	void OnPaint() override
 	{
+		this->SetWidgetLoweredState(WID_CB_STATEMENT, this->show_statement);
 		/* The button for the original loan only works while that loan exists. */
 		const Company *c = Company::GetIfValid(_local_company);
 		this->SetWidgetDisabledState(WID_CB_REPAY_LEGACY, c == nullptr || c->current_loan <= 0);
@@ -82,6 +86,11 @@ struct CentralBankWindow : Window {
 	void UpdateWidgetSize(WidgetID widget, Dimension &size, [[maybe_unused]] const Dimension &padding, [[maybe_unused]] Dimension &fill, [[maybe_unused]] Dimension &resize) override
 	{
 		if (widget != WID_CB_SUMMARY) return;
+		if (this->show_statement) {
+			size.width = std::max<uint>(size.width, ScaleGUITrad(700));
+			size.height = std::max<uint>(size.height, this->RowHeight() * STATEMENT_ROWS + ScaleGUITrad(12));
+			return;
+		}
 		size.width = std::max<uint>(size.width, ScaleGUITrad(420));
 		size.height = std::max<uint>(size.height, this->RowHeight() * ROWS + ScaleGUITrad(8));
 	}
@@ -89,6 +98,10 @@ struct CentralBankWindow : Window {
 	void DrawWidget(const Rect &r, WidgetID widget) const override
 	{
 		if (widget != WID_CB_SUMMARY) return;
+		if (this->show_statement) {
+			this->DrawStatement(r);
+			return;
+		}
 
 		const int left = r.left + ScaleGUITrad(6);
 		const int right = r.right - ScaleGUITrad(6);
@@ -114,6 +127,7 @@ struct CentralBankWindow : Window {
 		};
 
 		row("Company cash", money(static_cast<int64_t>(c->money)), c->money < 0 ? TC_RED : TC_WHITE);
+		row("Transport income this year (already in the cash)", money(FromYearlyExpenses(c, 0, {EXPENSES_TRAIN_REVENUE, EXPENSES_ROADVEH_REVENUE, EXPENSES_SHIP_REVENUE, EXPENSES_AIRCRAFT_REVENUE}).income), TC_GREEN);
 		row("Central bank debt", money(a.debt), a.debt > limit ? TC_RED : TC_WHITE);
 		row("Credit limit", money(limit));
 		row("Available to borrow", money(GetCentralBankAvailable(_local_company)));
@@ -126,11 +140,113 @@ struct CentralBankWindow : Window {
 		}
 	}
 
+	/** The net cost of some kinds of expenses of the game in one year as a ledger entry: the costs are expenses, a net refund is income. */
+	static LedgerEntry FromYearlyExpenses(const Company *c, size_t age, std::initializer_list<ExpensesType> types)
+	{
+		int64_t sum = 0;
+		for (ExpensesType type : types) sum += static_cast<int64_t>(c->yearly_expenses[age][type]);
+		LedgerEntry entry;
+		if (sum >= 0) {
+			entry.expense = sum;
+		} else {
+			entry.income = -sum;
+		}
+		return entry;
+	}
+
+	/** The account statement of the local company: this year and last year, in four groups. */
+	void DrawStatement(const Rect &r) const
+	{
+		const int left = r.left + ScaleGUITrad(6);
+		const int right = r.right - ScaleGUITrad(6);
+		const int row_h = this->RowHeight();
+		int y = r.top + ScaleGUITrad(4);
+
+		if (!Company::IsValidID(_local_company)) {
+			DrawString(left, right, y, STR_STOCK_SPECTATOR, TC_FROMSTRING, SA_LEFT);
+			return;
+		}
+
+		const Company *c = Company::Get(_local_company);
+		const int32_t year = GetLedgerCurrentYear();
+		const int col_w = ScaleGUITrad(96);
+		const int pad = ScaleGUITrad(4);
+		/* Right edges of the four number columns: this year in and out, last year in and out. */
+		const int edge[4] = {right - 3 * col_w, right - 2 * col_w, right - col_w, right};
+
+		auto money = [](int64_t v) { return v == 0 ? std::string("-") : GetString(STR_JUST_CURRENCY_SHORT, v); };
+		auto cell = [&](int k, const std::string &text, TextColour colour) {
+			DrawString(edge[k] - col_w + pad, edge[k] - pad, y, text, colour, SA_RIGHT);
+		};
+
+		DrawString(edge[0] - col_w, edge[1], y, std::string("This year"), TC_WHITE, SA_HOR_CENTER);
+		DrawString(edge[2] - col_w, edge[3], y, std::string("Last year"), TC_WHITE, SA_HOR_CENTER);
+		y += row_h;
+		for (int k = 0; k < 4; k++) cell(k, k % 2 == 0 ? "In" : "Out", TC_GREY);
+		y += row_h;
+
+		auto category = [&](const char *name) {
+			y += ScaleGUITrad(2);
+			DrawString(left, right, y, std::string(name), TC_LIGHT_BLUE, SA_LEFT);
+			y += row_h;
+		};
+		auto line = [&](const char *label, const LedgerEntry &now, const LedgerEntry &before) {
+			DrawString(left + ScaleGUITrad(8), edge[0] - col_w, y, std::string(label), TC_WHITE, SA_LEFT);
+			cell(0, money(now.income), TC_GREEN);
+			cell(1, money(now.expense), TC_RED);
+			cell(2, money(before.income), TC_GREEN);
+			cell(3, money(before.expense), TC_RED);
+			y += row_h;
+		};
+		auto booked = [&](const char *label, LedgerItem item) {
+			line(label, GetLedgerEntry(_local_company, item, year), GetLedgerEntry(_local_company, item, year - 1));
+		};
+		auto yearly = [&](const char *label, std::initializer_list<ExpensesType> types) {
+			line(label, FromYearlyExpenses(c, 0, types), FromYearlyExpenses(c, 1, types));
+		};
+
+		/* The income of the transport goes straight into the company cash (the game pays it when the cargo is delivered), nothing is held back. */
+		category("Organic Operating Income (paid into Company Cash)");
+		yearly("Trains", {EXPENSES_TRAIN_REVENUE});
+		yearly("Road Vehicles", {EXPENSES_ROADVEH_REVENUE});
+		yearly("Ships", {EXPENSES_SHIP_REVENUE});
+		yearly("Aircraft", {EXPENSES_AIRCRAFT_REVENUE});
+		yearly("Total Transport Income", {EXPENSES_TRAIN_REVENUE, EXPENSES_ROADVEH_REVENUE, EXPENSES_SHIP_REVENUE, EXPENSES_AIRCRAFT_REVENUE});
+
+		category("Interest & Fees");
+		booked("Central Bank Daily Interest", LedgerItem::BankInterest);
+		booked("Stock Commission & Brokerage Fees", LedgerItem::TradeCommission);
+		booked("Margin Maintenance / Swap Fees", LedgerItem::MarginSwap);
+
+		category("Dividends & Yields");
+		booked("Stock Dividend Payouts", LedgerItem::Dividends);
+		booked("Capital Gains / Realized Profit", LedgerItem::RealizedProfit);
+
+		category("Internal Transfers");
+		booked("Inter-Wallet Transfer (cash in / out)", LedgerItem::WalletTransfer);
+		booked("Company Injection: Loans (paid out / repaid)", LedgerItem::BankLoan);
+
+		category("Assets & Operations");
+		yearly("Vehicle & Infrastructure Running Costs", {EXPENSES_TRAIN_RUN, EXPENSES_ROADVEH_RUN, EXPENSES_AIRCRAFT_RUN, EXPENSES_SHIP_RUN, EXPENSES_PROPERTY});
+		yearly("Construction & Land Purchase", {EXPENSES_CONSTRUCTION});
+		yearly("Vehicle Purchases", {EXPENSES_NEW_VEHICLES});
+
+		y += ScaleGUITrad(4);
+		DrawString(left, right, y, std::string("Dividends: Out is the dividend that your own company pays. Margin: the daily swap of open positions."), TC_GREY, SA_LEFT);
+		y += row_h;
+		DrawString(left, right, y, std::string("Operations are the yearly expenses of the game. Vehicle depreciation is not a cash expense and is not listed."), TC_GREY, SA_LEFT);
+	}
+
 	void OnClick([[maybe_unused]] Point pt, WidgetID widget, [[maybe_unused]] int click_count) override
 	{
 		if (!Company::IsValidID(_local_company)) return;
 
 		switch (widget) {
+			case WID_CB_STATEMENT:
+				this->show_statement = !this->show_statement;
+				this->ReInit(); // The statement is larger than the summary.
+				break;
+
 			case WID_CB_BORROW:
 				this->query_kind = QueryKind::Borrow;
 				ShowQueryString({}, STR_STOCK_QUERY_BORROW, 24, this, CS_ALPHANUMERAL, {});
@@ -184,6 +300,9 @@ static constexpr std::initializer_list<NWidgetPart> _nested_central_bank_widgets
 		NWidget(WWT_STICKYBOX, COLOUR_GREY),
 	EndContainer(),
 	NWidget(WWT_PANEL, COLOUR_GREY, WID_CB_SUMMARY), SetMinimalSize(420, 120), SetResize(1, 0), SetFill(1, 0),
+	EndContainer(),
+	NWidget(NWID_HORIZONTAL),
+		NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_CB_STATEMENT), SetMinimalSize(100, 14), SetResize(1, 0), SetFill(1, 0), SetStringTip(STR_CENTRAL_BANK_STATEMENT, STR_CENTRAL_BANK_TIP_STATEMENT),
 	EndContainer(),
 	NWidget(NWID_HORIZONTAL),
 		NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_CB_BORROW), SetMinimalSize(100, 14), SetResize(1, 0), SetFill(1, 0), SetStringTip(STR_CENTRAL_BANK_BORROW, STR_CENTRAL_BANK_TIP_BORROW),

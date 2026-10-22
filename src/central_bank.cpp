@@ -23,10 +23,12 @@
 #include "safeguards.h"
 
 CentralBank _central_bank;
+Ledger _ledger;
 
 /** Forget all loans, e.g. when a new game is started or a savegame is loaded. */
 void CentralBank::Reset()
 {
+	_ledger.Reset(); // The ledger is saved and loaded together with the loans.
 	this->accounts.fill({});
 }
 
@@ -86,6 +88,51 @@ CommandCost CheckTradingCapital(CompanyID company, int64_t amount)
 	return CommandCost();
 }
 
+/** The economy year in which new ledger lines are booked. */
+int32_t GetLedgerCurrentYear()
+{
+	return TimerGameEconomy::year.base();
+}
+
+/**
+ * Book a line of the account statement of a company in the current economy year.
+ * @param company The company.
+ * @param item The line of the statement.
+ * @param amount Money that came in (positive) or went out (negative). Zero is not booked.
+ */
+void RecordLedger(CompanyID company, LedgerItem item, int64_t amount)
+{
+	if (amount == 0 || company.base() >= MAX_COMPANIES || item >= LedgerItem::End) return;
+
+	const int32_t year = GetLedgerCurrentYear();
+	auto &years = _ledger.years[company.base()];
+	LedgerEntry &entry = years[year][static_cast<size_t>(item)];
+	if (amount > 0) {
+		entry.income += amount;
+	} else {
+		entry.expense += -amount;
+	}
+
+	/* Keep this year and the two before it. */
+	years.erase(years.begin(), years.lower_bound(year - 2));
+}
+
+/**
+ * What a line of the statement booked in an economy year.
+ * @param company The company.
+ * @param item The line of the statement.
+ * @param year The economy year.
+ * @return The entry; empty when nothing was booked.
+ */
+LedgerEntry GetLedgerEntry(CompanyID company, LedgerItem item, int32_t year)
+{
+	if (company.base() >= MAX_COMPANIES || item >= LedgerItem::End) return {};
+	const auto &years = _ledger.years[company.base()];
+	const auto it = years.find(year);
+	if (it == years.end()) return {};
+	return it->second[static_cast<size_t>(item)];
+}
+
 /** Tell the windows that show the loan that something changed. */
 static void InvalidateBankWindows()
 {
@@ -117,6 +164,7 @@ CommandCost CmdBankBorrow(DoCommandFlags flags, uint8_t wallet, Money amount_in)
 	if (flags.Test(DoCommandFlag::Execute)) {
 		_central_bank.accounts[_current_company.base()].debt += amount;
 		Company::Get(_current_company)->money += Money(amount);
+		RecordLedger(_current_company, LedgerItem::BankLoan, amount);
 		InvalidateBankWindows();
 	}
 	return CommandCost();
@@ -149,6 +197,7 @@ CommandCost CmdBankRepay(DoCommandFlags flags, uint8_t wallet, Money amount_in)
 			AddToWallet(_current_company, wallet, -amount);
 		}
 		_central_bank.accounts[_current_company.base()].debt -= amount;
+		RecordLedger(_current_company, LedgerItem::BankLoan, -amount);
 		InvalidateBankWindows();
 	}
 	return CommandCost();
@@ -175,6 +224,7 @@ CommandCost CmdBankRepayLegacy(DoCommandFlags flags, Money amount_in)
 	if (flags.Test(DoCommandFlag::Execute)) {
 		c->money -= Money(amount);
 		c->current_loan -= Money(amount);
+		RecordLedger(_current_company, LedgerItem::BankLoan, -amount);
 		InvalidateBankWindows();
 	}
 	return CommandCost();
@@ -190,12 +240,14 @@ void CentralBank::UpdateDaily()
 		BankAccount &a = this->accounts[i];
 		if (!Company::IsValidID(CompanyID{i})) {
 			a = {};
+			_ledger.years[i].clear();
 			continue;
 		}
 		if (a.debt <= 0) continue;
 		const int64_t interest = std::max<int64_t>(1, a.debt * CENTRAL_BANK_RATE_PPM_PER_DAY / STOCK_PPM);
 		a.debt += interest;
 		a.interest_paid += interest;
+		RecordLedger(CompanyID{i}, LedgerItem::BankInterest, -interest);
 	}
 	InvalidateWindowData(WC_STOCK_MARKET, 0);
 }

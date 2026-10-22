@@ -18,6 +18,7 @@ enum CentralBankWidgets : WidgetID {
 	WID_CB_REPAY,      ///< Button: repay a part of the debt from the company cash.
 	WID_CB_REPAY_ALL,  ///< Button: repay as much of the debt as the company cash allows.
 	WID_CB_REPAY_LEGACY, ///< Button: repay a part of the original OpenTTD loan from the company cash.
+	WID_CB_STATEMENT,  ///< Toggle: show the account statement instead of the summary.
 };
 
 #endif /* WIDGETS_CENTRAL_BANK_WIDGET_H */

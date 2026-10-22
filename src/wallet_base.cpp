@@ -9,6 +9,7 @@
 
 #include "stdafx.h"
 #include "wallet_base.h"
+#include "central_bank.h"
 #include "company_base.h"
 #include "company_func.h"
 #include "economy_func.h"
@@ -216,6 +217,10 @@ bool MoveWalletMoney(CompanyID owner, uint8_t from, uint8_t to, int64_t amount)
 	} else {
 		_wallets.Find(owner, to)->balance += amount;
 	}
+
+	/* The account statement shows what goes into and out of the company cash. A move between two other wallets does not change the cash. */
+	if (to == WALLET_CASH) RecordLedger(owner, LedgerItem::WalletTransfer, amount);
+	if (from == WALLET_CASH) RecordLedger(owner, LedgerItem::WalletTransfer, -amount);
 
 	InvalidateWindowData(WC_FINANCES, owner.base());
 	return true;

@@ -13,6 +13,7 @@
 #include "company_type.h"
 #include "economy_type.h"
 #include "wallet_base.h"
+#include "central_bank.h"
 #include "game_time/game_time_aggregator.h"
 #include <array>
 #include <vector>
@@ -299,7 +300,7 @@ int64_t GetStockFloatingProfit(CompanyID owner, uint8_t wallet);
 int64_t GetStockEquity(CompanyID owner, uint8_t wallet);
 int64_t GetStockFreeMargin(CompanyID owner, uint8_t wallet);
 int64_t GetStockMarginLevel(CompanyID owner, uint8_t wallet);
-void PayStockProfit(CompanyID owner, uint8_t wallet, int64_t profit);
+void PayStockProfit(CompanyID owner, uint8_t wallet, int64_t profit, LedgerItem item = LedgerItem::End);
 
 #endif /* STOCK_BASE_H */
 

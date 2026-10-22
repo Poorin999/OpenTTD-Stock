@@ -343,10 +343,12 @@ int64_t GetStockMarginLevel(CompanyID owner, uint8_t wallet)
  * @param owner Company that gets (or pays) the money.
  * @param wallet Wallet of the company; WALLET_CASH for the company cash.
  * @param profit Profit; negative for a loss.
+ * @param item Line of the account statement that the money is booked on; #LedgerItem::End books nothing.
  */
-void PayStockProfit(CompanyID owner, uint8_t wallet, int64_t profit)
+void PayStockProfit(CompanyID owner, uint8_t wallet, int64_t profit, LedgerItem item)
 {
 	if (!Company::IsValidID(owner)) return;
+	if (item != LedgerItem::End) RecordLedger(owner, item, profit);
 	AddToWallet(owner, wallet, profit);
 }
 
@@ -427,7 +429,7 @@ void StockMarket::HandleRemovedCompanies()
 			const int64_t last = this->price_fp[p.target] > 0 ? FixedToPrice(this->price_fp[p.target]) : p.price;
 			const int64_t units = p.volume;
 			const int64_t profit = IsStockBuy(p.type) ? (last - p.price) * units : (p.price - last) * units;
-			PayStockProfit(CompanyID{p.owner}, p.wallet, profit);
+			PayStockProfit(CompanyID{p.owner}, p.wallet, profit, LedgerItem::RealizedProfit);
 			this->AddHistory(p, last, profit, StockCloseReason::Delisted);
 		}
 		this->positions.erase(this->positions.begin() + i);
@@ -527,7 +529,7 @@ int64_t StockMarket::ClosePosition(size_t index, uint32_t volume, int64_t close_
 		this->positions[index].volume -= volume;
 	}
 
-	PayStockProfit(CompanyID{closed.owner}, closed.wallet, profit);
+	PayStockProfit(CompanyID{closed.owner}, closed.wallet, profit, LedgerItem::RealizedProfit);
 	this->AddHistory(closed, close_price, profit, reason);
 	this->ApplyImpact(CompanyID{closed.target}, !was_long, volume);
 	return profit;
@@ -785,7 +787,7 @@ void StockMarket::CheckPending()
 			continue;
 		}
 
-		PayStockProfit(owner, o.wallet, -GetStockCommission(o.price * static_cast<int64_t>(o.volume)));
+		PayStockProfit(owner, o.wallet, -GetStockCommission(o.price * static_cast<int64_t>(o.volume)), LedgerItem::TradeCommission);
 		this->positions.push_back(o);
 		this->ApplyImpact(target, buy, o.volume);
 	}
@@ -808,7 +810,7 @@ void StockMarket::ChargeSwap()
 	for (const StockOrder &p : this->positions) {
 		if (!Company::IsValidID(CompanyID{p.owner}) || !Company::IsValidID(CompanyID{p.target})) continue;
 		const int64_t value = GetStockPrice(CompanyID{p.target}) * static_cast<int64_t>(p.volume);
-		PayStockProfit(CompanyID{p.owner}, p.wallet, -(value * STOCK_SWAP_PPM_PER_DAY / STOCK_PPM));
+		PayStockProfit(CompanyID{p.owner}, p.wallet, -(value * STOCK_SWAP_PPM_PER_DAY / STOCK_PPM), LedgerItem::MarginSwap);
 	}
 }
 
@@ -895,8 +897,8 @@ void StockMarket::PayDividends(size_t quarters)
 	}
 
 	/* Pay out only after all amounts are known, so that the cash of a company does not depend on the order of the companies. */
-	for (const Credit &credit : credits) PayStockProfit(CompanyID{credit.owner}, credit.wallet, credit.amount);
-	for (uint8_t i = 0; i < MAX_COMPANIES; i++) PayStockProfit(CompanyID{i}, WALLET_CASH, -paid[i]);
+	for (const Credit &credit : credits) PayStockProfit(CompanyID{credit.owner}, credit.wallet, credit.amount, LedgerItem::Dividends);
+	for (uint8_t i = 0; i < MAX_COMPANIES; i++) PayStockProfit(CompanyID{i}, WALLET_CASH, -paid[i], LedgerItem::Dividends);
 }
 
 /**

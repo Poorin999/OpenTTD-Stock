@@ -37,6 +37,7 @@ enum StockRecordKind : uint8_t {
 	SRK_TIME = 19,    ///< The game clock: v1 = milliseconds since the start of the game, v2 = game year at the start (0 in older savegames).
 	SRK_TIMEFRAME = 20, ///< Candle of game time: a = company, b = timeframe | 0x80 when still running, ym = samples, v1 = candle number, v2..v5 = open/high/low/close times STOCK_PRICE_SCALE.
 	SRK_TIMEFRAME_VOL = 21, ///< Traded volume of the SRK_TIMEFRAME row just before it: a = company, v1 = volume. Only written when it is not 0.
+	SRK_LEDGER = 22,  ///< Line of the account statement: a = company, b = line (LedgerItem), ym = economy year, v1 = income, v2 = expense.
 	SRK_BANK = 18,    ///< Loan at the central bank: a = company, v1 = debt, v2 = interest that has been added.
 	SRK_POSITION_EXT = 15, ///< More data of an open position: a = owner, ym = id, v1 = trailing stop distance, v2 = month of opening.
 	SRK_STATS = 16,   ///< Trading results of a company: a = company, v1 = closed trades, v2 = winning trades, v3 = total profit.
@@ -217,6 +218,22 @@ struct STCKChunkHandler : ChunkHandler {
 			r.v1 = b.debt;
 			r.v2 = b.interest_paid;
 			write(r);
+		}
+
+		for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
+			for (const auto &[year, row] : _ledger.years[i]) {
+				for (size_t item = 0; item < LEDGER_ITEMS; item++) {
+					if (row[item].income == 0 && row[item].expense == 0) continue;
+					StockRecord r;
+					r.kind = SRK_LEDGER;
+					r.a = i;
+					r.b = static_cast<uint8_t>(item);
+					r.ym = year;
+					r.v1 = row[item].income;
+					r.v2 = row[item].expense;
+					write(r);
+				}
+			}
 		}
 
 		for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
@@ -449,6 +466,11 @@ struct STCKChunkHandler : ChunkHandler {
 					if (r.a >= MAX_COMPANIES) break;
 					_central_bank.accounts[r.a].debt = std::max<int64_t>(r.v1, 0);
 					_central_bank.accounts[r.a].interest_paid = std::max<int64_t>(r.v2, 0);
+					break;
+
+				case SRK_LEDGER:
+					if (r.a >= MAX_COMPANIES || r.b >= LEDGER_ITEMS) break;
+					_ledger.years[r.a][r.ym][r.b] = LedgerEntry{std::max<int64_t>(r.v1, 0), std::max<int64_t>(r.v2, 0)};
 					break;
 
 				case SRK_STATS:
