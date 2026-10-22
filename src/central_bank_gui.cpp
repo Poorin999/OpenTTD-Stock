@@ -40,6 +40,7 @@ struct CentralBankWindow : Window {
 		None,
 		Borrow,
 		Repay,
+		RepayLegacy,
 	};
 
 	static constexpr int ROWS = 8; ///< Number of rows in the summary panel.
@@ -63,6 +64,14 @@ struct CentralBankWindow : Window {
 	{
 		if (!Company::IsValidID(_local_company)) return 0;
 		return std::max<int64_t>(0, std::min<int64_t>(GetWalletBalance(_local_company, WALLET_CASH), GetCentralBankDebt(_local_company)));
+	}
+
+	void OnPaint() override
+	{
+		/* The button for the original loan only works while that loan exists. */
+		const Company *c = Company::GetIfValid(_local_company);
+		this->SetWidgetDisabledState(WID_CB_REPAY_LEGACY, c == nullptr || c->current_loan <= 0);
+		this->DrawWidgets();
 	}
 
 	void OnInvalidateData([[maybe_unused]] int data = 0, [[maybe_unused]] bool gui_scope = true) override
@@ -113,7 +122,7 @@ struct CentralBankWindow : Window {
 		row("Money in trading wallets", money(GetWalletsTotal(_local_company)));
 		if (c->current_loan > 0) {
 			/* Only an old savegame has this; the original loan can not be increased any more. */
-			row("Original OpenTTD loan (frozen)", money(static_cast<int64_t>(c->current_loan)), TC_ORANGE);
+			row("Original OpenTTD loan (no interest, repay only)", money(static_cast<int64_t>(c->current_loan)), TC_ORANGE);
 		}
 	}
 
@@ -130,6 +139,11 @@ struct CentralBankWindow : Window {
 			case WID_CB_REPAY:
 				this->query_kind = QueryKind::Repay;
 				ShowQueryString({}, STR_STOCK_QUERY_REPAY, 24, this, CS_ALPHANUMERAL, {});
+				break;
+
+			case WID_CB_REPAY_LEGACY:
+				this->query_kind = QueryKind::RepayLegacy;
+				ShowQueryString({}, STR_CENTRAL_BANK_QUERY_REPAY_LEGACY, 24, this, CS_ALPHANUMERAL, {});
 				break;
 
 			case WID_CB_REPAY_ALL: {
@@ -154,6 +168,8 @@ struct CentralBankWindow : Window {
 		/* Loan money only ever goes to, and is only repaid from, the company cash. */
 		if (kind == QueryKind::Borrow) {
 			Command<CMD_BANK_BORROW>::Post(STR_BANK_ERROR_CANT_BORROW, WALLET_CASH, Money(StockDisplayToMoney(amount)));
+		} else if (kind == QueryKind::RepayLegacy) {
+			Command<CMD_BANK_REPAY_LEGACY>::Post(STR_ERROR_CAN_T_REPAY_LOAN, Money(StockDisplayToMoney(amount)));
 		} else {
 			Command<CMD_BANK_REPAY>::Post(STR_BANK_ERROR_CANT_REPAY, WALLET_CASH, Money(StockDisplayToMoney(amount)));
 		}
@@ -173,6 +189,7 @@ static constexpr std::initializer_list<NWidgetPart> _nested_central_bank_widgets
 		NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_CB_BORROW), SetMinimalSize(100, 14), SetResize(1, 0), SetFill(1, 0), SetStringTip(STR_CENTRAL_BANK_BORROW, STR_CENTRAL_BANK_TIP_BORROW),
 		NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_CB_REPAY), SetMinimalSize(100, 14), SetResize(1, 0), SetFill(1, 0), SetStringTip(STR_CENTRAL_BANK_REPAY, STR_CENTRAL_BANK_TIP_REPAY),
 		NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_CB_REPAY_ALL), SetMinimalSize(100, 14), SetResize(1, 0), SetFill(1, 0), SetStringTip(STR_CENTRAL_BANK_REPAY_ALL, STR_CENTRAL_BANK_TIP_REPAY_ALL),
+		NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_CB_REPAY_LEGACY), SetMinimalSize(100, 14), SetResize(1, 0), SetFill(1, 0), SetStringTip(STR_CENTRAL_BANK_REPAY_LEGACY, STR_CENTRAL_BANK_TIP_REPAY_LEGACY),
 	EndContainer(),
 };
 

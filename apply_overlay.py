@@ -41,6 +41,7 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_WALLET_TRANSFER", "move money between two wallets"),
     ("CMD_BANK_BORROW", "borrow from the central bank"),
     ("CMD_BANK_REPAY", "repay the central bank"),
+    ("CMD_BANK_REPAY_LEGACY", "repay the original loan from the company cash"),
 ]
 NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
@@ -169,6 +170,27 @@ def main(tree):
             s = ensure_include(s, '#include "game_time/game_time_manager.h"', ['#include "company_func.h"', '#include "stdafx.h"'])
             p.write_text(s, encoding="utf-8")
             print(f"{p.name}: CmdIncreaseLoan disabled")
+
+    # A new company starts with its own money and without the original loan (company_cmd.cpp: "c->money = c->current_loan = ...").
+    start_rx = r"^[ \t]*(\w+)->money\s*=\s*\1->current_loan\s*=\s*[^;]*;[ \t]*\n"
+    p = find_definition(tree, start_rx)
+    if p is None:
+        print("WARNING: the start money of a new company was not found in src/*.cpp, new companies still start with the original loan")
+    else:
+        s = p.read_text(encoding="utf-8")
+        if "GetStartingCapital" in s:
+            print(f"{p.name}: start money already changed")
+        else:
+            m = re.search(start_rx, s, re.M)
+            v = m.group(1)
+            add = (f"\t/* The Central Bank replaces the original loan: a company starts with its own money and no loan. */\n"
+                   f"\tif (GameTimeManager::IsLegacyLoanBypassed()) {{\n"
+                   f"\t\t{v}->money = Money(GameTimeManager::GetStartingCapital());\n"
+                   f"\t\t{v}->current_loan = 0;\n\t}}\n")
+            s = s[:m.end()] + add + s[m.end():]
+            s = ensure_include(s, '#include "game_time/game_time_manager.h"', ['#include "company_func.h"', '#include "stdafx.h"'])
+            p.write_text(s, encoding="utf-8")
+            print(f"{p.name}: a new company starts with the starting capital and no loan")
 
     # window_type.h: the window class of the Central Bank.
     p = tree / "src" / "window_type.h"

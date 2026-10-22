@@ -45,8 +45,10 @@ CommandCost CheckTradingCapital(CompanyID company, int64_t amount);
 
 CommandCost CmdBankBorrow(DoCommandFlags flags, uint8_t wallet, Money amount);
 CommandCost CmdBankRepay(DoCommandFlags flags, uint8_t wallet, Money amount);
+CommandCost CmdBankRepayLegacy(DoCommandFlags flags, Money amount);
 
 DEF_CMD_TRAIT(CMD_BANK_BORROW, CmdBankBorrow, {}, CommandType::MoneyManagement)
 DEF_CMD_TRAIT(CMD_BANK_REPAY,  CmdBankRepay,  {}, CommandType::MoneyManagement)
+DEF_CMD_TRAIT(CMD_BANK_REPAY_LEGACY, CmdBankRepayLegacy, {}, CommandType::MoneyManagement)
 
 #endif /* CENTRAL_BANK_H */

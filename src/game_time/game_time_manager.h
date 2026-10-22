@@ -56,6 +56,8 @@
 static constexpr bool GAME_TIME_DECOUPLE_CHART = false;
 /** True: the original monthly interest on the OpenTTD loan of a company is not charged. Needs the change of economy.cpp that apply_overlay.py makes. */
 static constexpr bool GAME_TIME_BYPASS_LEGACY_LOANS = true;
+/** The cash that a new company starts with while the original loan is bypassed. It is the company's own money: the company starts without any loan. In the base currency (pounds). */
+static constexpr int64_t GAME_TIME_STARTING_CAPITAL = 1'500'000;
 
 /** The kinds of events that a system can subscribe to. */
 enum class GameTimeEvent : uint8_t {
@@ -196,6 +198,7 @@ public:
 	/* The temporary switches, see above. */
 	static constexpr bool IsChartDecoupled() { return GAME_TIME_DECOUPLE_CHART; }
 	static constexpr bool IsLegacyLoanBypassed() { return GAME_TIME_BYPASS_LEGACY_LOANS; }
+	static constexpr int64_t GetStartingCapital() { return GAME_TIME_STARTING_CAPITAL; }
 
 private:
 	GameTimeManager() = default;

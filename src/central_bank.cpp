@@ -155,6 +155,32 @@ CommandCost CmdBankRepay(DoCommandFlags flags, uint8_t wallet, Money amount_in)
 }
 
 /**
+ * Repay the original OpenTTD loan (#Company::current_loan) from the company cash. The original loan can not be increased
+ * any more and costs no interest, but it still counts against the company (its value, the credit limit and the money
+ * that may be traded), and the original finances window, which could repay it, is replaced by the Central Bank window.
+ * Like every central bank operation this is not booked as an expense.
+ * @param flags Type of operation.
+ * @param amount Money to repay, more than zero, at most the original loan and at most the company cash.
+ * @return Zero cost, or an error.
+ */
+CommandCost CmdBankRepayLegacy(DoCommandFlags flags, Money amount_in)
+{
+	const int64_t amount = amount_in;
+	if (!Company::IsValidID(_current_company)) return CMD_ERROR;
+	Company *c = Company::Get(_current_company);
+	if (c->current_loan <= 0) return CommandCost(STR_BANK_ERROR_NO_LEGACY_LOAN);
+	if (amount <= 0 || amount > static_cast<int64_t>(c->current_loan)) return CommandCost(STR_STOCK_ERROR_BAD_AMOUNT);
+	if (static_cast<int64_t>(c->money) < amount) return CommandCost(STR_STOCK_ERROR_NO_FUNDS);
+
+	if (flags.Test(DoCommandFlag::Execute)) {
+		c->money -= Money(amount);
+		c->current_loan -= Money(amount);
+		InvalidateBankWindows();
+	}
+	return CommandCost();
+}
+
+/**
  * Once per economy day the interest is added to every debt. At least one money unit is added to a debt that exists,
  * so a small loan does not stay free of interest because of rounding. A company that is gone has no debt any more.
  */

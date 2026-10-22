@@ -8,3 +8,7 @@ STR_CENTRAL_BANK_TIP_REPAY_ALL                                  :{BLACK}Repay as
 STR_BANK_ERROR_NO_TRADING_LOAN                                  :{WHITE}Central bank loans are paid into the company cash only, never into a trading wallet
 STR_BANK_ERROR_BORROWED_FUNDS                                   :{WHITE}Trading wallets can only be funded with your own unborrowed cash
 STR_BANK_ERROR_LEGACY_LOAN                                      :{WHITE}The original loan is switched off. Use the central bank
+STR_CENTRAL_BANK_REPAY_LEGACY                                   :Repay original loan
+STR_CENTRAL_BANK_TIP_REPAY_LEGACY                               :{BLACK}Repay a part of the original OpenTTD loan from the company cash. Only possible while that loan exists
+STR_CENTRAL_BANK_QUERY_REPAY_LEGACY                             :Amount to repay of the original loan
+STR_BANK_ERROR_NO_LEGACY_LOAN                                   :{WHITE}There is no original loan to repay
