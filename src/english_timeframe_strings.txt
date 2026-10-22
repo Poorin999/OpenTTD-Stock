@@ -6,3 +6,9 @@ STR_STOCK_TIP_TF_1H                                             :{BLACK}Show one
 STR_STOCK_TIP_TF_4H                                             :{BLACK}Show one candle per 4 game hours (4 real minutes). Drag the chart with the mouse to scroll through the history
 STR_STOCK_TIP_TF_12H                                            :{BLACK}Show one candle per 12 game hours (12 real minutes). Drag the chart with the mouse to scroll through the history
 STR_STOCK_FRAME_WAIT                                            :{WHITE}Collecting candles. They appear as game time passes
+STR_STOCK_TF_D1                                                 :Day
+STR_STOCK_TF_W1                                                 :Week
+STR_STOCK_TF_MN                                                 :Month
+STR_STOCK_TF_Y1                                                 :Year
+STR_STOCK_TIP_TF_W1                                             :{BLACK}Show one candle per week (7 days). Made from the daily candles, which are only recorded from the first time you open the Day or Week view
+STR_STOCK_ERROR_CANT_ENABLE_DAILY                               :{WHITE}Can't start recording daily candles...

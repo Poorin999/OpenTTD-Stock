@@ -44,9 +44,14 @@ STRING_FILES = ["english_stock_strings.txt", "english_wallet_strings.txt", "engl
 ANCHORS = ["STR_STOCK_ERROR_NO_ORDER", "STR_STOCK_NEWS_ORDER_EXPIRED"]
 
 
-def find(name):
-    """The file with this name (not case sensitive) anywhere next to this script."""
+def find(name, folder=None):
+    """The file with this name (not case sensitive) anywhere next to this script. A copy in its own folder (e.g. src/saveload/)
+    always wins, so an old copy that lies elsewhere in the repository can never be used by mistake."""
     import os
+    if folder:
+        exact = HERE / folder / name
+        if exact.is_file():
+            return exact
     hits = []
     for root, dirs, files in os.walk(HERE):
         dirs[:] = [d for d in dirs if d != ".git"]
@@ -64,7 +69,7 @@ def find(name):
 
 def main(tree):
     for name, folder in FILES.items():
-        src = find(name)
+        src = find(name, folder)
         dst = tree / folder / name
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_bytes(src.read_bytes())
@@ -122,7 +127,7 @@ def main(tree):
     # english.txt
     wanted = {}
     for name in STRING_FILES:
-        for line in find(name).read_text(encoding="utf-8").replace("\r", "").splitlines():
+        for line in find(name, "src").read_text(encoding="utf-8").replace("\r", "").splitlines():
             if line.startswith("STR_"):
                 wanted[line.split()[0].split(":")[0]] = line  # a later file wins
     p = tree / "src" / "lang" / "english.txt"

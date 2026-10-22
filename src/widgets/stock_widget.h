@@ -14,8 +14,8 @@
 enum StockWidgets : WidgetID {
 	WID_ST_NEW_ORDER,        ///< Button that opens the New Order window.
 	WID_ST_HISTORY,          ///< Toggle button: show the history of closed trades instead of the open trades.
-	WID_ST_DEPOSIT,          ///< Button: move money from the company cash to the selected wallet.
-	WID_ST_WITHDRAW,         ///< Button: move money from the selected wallet back to the company cash.
+	WID_ST_DEPOSIT,          ///< Button: move money from the company cash to the trading balance.
+	WID_ST_WITHDRAW,         ///< Button: move money from the trading balance back to the company cash.
 	WID_ST_TF_DAY,           ///< Toggle button: chart with 1h candles (1 game hour = 1 real minute).
 	WID_ST_TF_MONTH,         ///< Toggle button: chart with 4h candles (4 real minutes).
 	WID_ST_TF_YEAR,          ///< Toggle button: chart with 12h candles (12 real minutes).
@@ -30,6 +30,14 @@ enum StockWidgets : WidgetID {
 	WID_ST_WALLET,           ///< Panel: the selected wallet with its balance; click to switch to the next wallet.
 	WID_ST_WALLET_NEW,       ///< Button: create a new trading wallet.
 	WID_ST_WALLET_DELETE,    ///< Button: delete the selected trading wallet.
+	WID_ST_PORTFOLIO,        ///< Toggle: the toolbox shows the portfolio summary (profit and loss, win rate, profit per month).
+	WID_ST_RANKING,          ///< Toggle: the toolbox shows the ranking of the companies.
+	WID_ST_BANK,             ///< Toggle: the toolbox shows the loan at the central bank.
+	WID_ST_WATCH_SCROLLBAR,  ///< Scrollbar of the Market Watch.
+	WID_ST_TF_D1,            ///< Toggle button: chart with one candle per day.
+	WID_ST_TF_W1,            ///< Toggle button: chart with one candle per week.
+	WID_ST_TF_MN,            ///< Toggle button: chart with one candle per month.
+	WID_ST_TF_Y1,            ///< Toggle button: chart with one candle per year.
 };
 
 /** Widgets of the #StockOrderWindow class. */
@@ -55,3 +63,4 @@ enum StockOrderWidgets : WidgetID {
 };
 
 #endif /* WIDGETS_STOCK_WIDGET_H */
+
