@@ -1,0 +1,57 @@
+--- a/src/stock_sl.cpp	2026-10-22 01:59:02.076360877 +0000
++++ b/src/stock_sl.cpp	2026-10-22 01:59:02.078087212 +0000
+@@ -33,7 +33,7 @@
+ 	SRK_DAILY_ON = 13, ///< The Daily view was turned on: daily candles are recorded.
+ 	SRK_BALANCE = 10, ///< Trading account of older savegames: a = company, v1 = deposited money. Only read.
+ 	SRK_WALLET = 14,  ///< Wallet: a = owner, b = number, v1 = balance, v2 = kind.
+-	SRK_TIME = 19,    ///< The game clock: v1 = milliseconds since the start of the game.
++	SRK_TIME = 19,    ///< The game clock: v1 = milliseconds since the start of the game, v2 = game year at the start (0 in older savegames).
+ 	SRK_BANK = 18,    ///< Loan at the central bank: a = company, v1 = debt, v2 = interest that has been added.
+ 	SRK_POSITION_EXT = 15, ///< More data of an open position: a = owner, ym = id, v1 = trailing stop distance, v2 = month of opening.
+ 	SRK_STATS = 16,   ///< Trading results of a company: a = company, v1 = closed trades, v2 = winning trades, v3 = total profit.
+@@ -119,7 +119,9 @@
+ 		{
+ 			StockRecord t;
+ 			t.kind = SRK_TIME;
+-			t.v1 = static_cast<int64_t>(GameTimeManager::Get().GetTotalMilliseconds());
++			const GameTimeSaveState clock = GameTimeManager::Get().GetSaveState();
++			t.v1 = static_cast<int64_t>(clock.total_ms);
++			t.v2 = clock.start_year;
+ 			write(t);
+ 		}
+ 
+@@ -387,9 +389,13 @@
+ 					}
+ 					break;
+ 
+-				case SRK_TIME:
+-					GameTimeManager::Get().Restore(static_cast<uint64_t>(std::max<int64_t>(r.v1, 0)));
++				case SRK_TIME: {
++					GameTimeSaveState clock;
++					clock.total_ms = static_cast<uint64_t>(std::max<int64_t>(r.v1, 0));
++					clock.start_year = r.v2 > 0 ? static_cast<int>(std::min<int64_t>(r.v2, GameTimeManager::MAX_START_YEAR)) : GameTimeManager::DEFAULT_START_YEAR;
++					GameTimeManager::Get().LoadSaveState(clock);
+ 					break;
++				}
+ 
+ 				case SRK_BANK:
+ 					if (r.a >= MAX_COMPANIES) break;
+--- a/apply_overlay.py	2026-10-22 01:59:02.075916048 +0000
++++ b/apply_overlay.py	2026-10-22 01:59:02.077626824 +0000
+@@ -23,6 +23,7 @@
+     "wallet_cmd.h": "src", "wallet_cmd.cpp": "src",
+     "central_bank.h": "src", "central_bank.cpp": "src",
+     "game_time_manager.h": "src/game_time", "game_time_manager.cpp": "src/game_time", "game_time_driver.cpp": "src/game_time",
++    "game_time_aggregator.h": "src/game_time",
+     "stock_sl.cpp": "src/saveload",
+     "stock_widget.h": "src/widgets",
+ }
+@@ -37,7 +38,7 @@
+     ("CMD_BANK_REPAY", "repay the central bank"),
+ ]
+ NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h",
+-               "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp"]
++               "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]
+ REPLACE_KEYS = {"STR_STOCK_TIP_TOOLBOX", "STR_STOCK_TIP_SUMMARY", "STR_STOCK_ORDER_INFO", "STR_STOCK_TIP_DEPOSIT", "STR_STOCK_TIP_WITHDRAW"}
+ STRING_FILES = ["english_stock_strings.txt", "english_wallet_strings.txt", "english_round8_strings.txt"]
+ ANCHORS = ["STR_STOCK_ERROR_NO_ORDER", "STR_STOCK_NEWS_ORDER_EXPIRED"]
