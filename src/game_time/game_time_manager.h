@@ -14,9 +14,16 @@
  *   1 game day    = 24 real minutes     (24 game hours = 1,440 game minutes)
  *   1 game year   = 365 game days       (no leap years)
  *
- * The clock is driven by the game ticks, not by the wall clock: every tick adds MILLISECONDS_PER_TICK milliseconds.
- * That is the only way for all clients of a network game to get exactly the same time. As a result the clock stops when
- * the game is paused and runs faster when the game is fast-forwarded, just like the rest of the game.
+ * The clock is driven by the game ticks, not by the wall clock: every tick adds MILLISECONDS_PER_TICK milliseconds
+ * (the constant of OpenTTD). That is the only way for all clients of a network game to get exactly the same time. As a
+ * result the clock stops when the game is paused and runs faster when the game is fast-forwarded, just like the rest
+ * of the game.
+ *
+ * Timeframes: next to the minute, hour and day events there are the events of the 4h and 12h timeframes. They are
+ * aligned to game midnight: 4h fires at 00:00, 04:00, 08:00, ... and 12h fires at 00:00 and 12:00, that is every 4 and
+ * every 12 real minutes. When one clock step crosses several boundaries (fast-forward, a big catch-up), every
+ * boundary is still dispatched, one by one, in time order. At one boundary the order is
+ * Minute, Hour, Hour4, Hour12, Day.
  *
  * This file only needs the standard library. The connection to the game ticks and to the savegame is in
  * game_time_driver.cpp, so the clock can also be tested outside of the game.
@@ -35,6 +42,7 @@
 #define GAME_TIME_MANAGER_H
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <mutex>
@@ -52,18 +60,71 @@ static constexpr bool GAME_TIME_BYPASS_LEGACY_LOANS = true;
 /** The kinds of events that a system can subscribe to. */
 enum class GameTimeEvent : uint8_t {
 	Minute, ///< Once per game minute (every real second).
-	Hour,   ///< Once per game hour (every real minute).
+	Hour,   ///< Once per game hour (every real minute). This is also the end of a 1h timeframe.
+	Hour4,  ///< Once per 4 game hours (every 4 real minutes): end of a 4h timeframe.
+	Hour12, ///< Once per 12 game hours (every 12 real minutes): end of a 12h timeframe.
 	Day,    ///< Once per game day (every 24 real minutes).
 	End,    ///< End marker.
 };
 
+/** The timeframes of the chart and of the data aggregation. Each one has its own event. */
+enum class GameTimeframe : uint8_t {
+	H1,    ///< 1 game hour  = 1 real minute.
+	H4,    ///< 4 game hours = 4 real minutes.
+	H12,   ///< 12 game hours = 12 real minutes.
+	Count, ///< Number of timeframes.
+};
+
+inline constexpr size_t GAME_TIMEFRAME_COUNT = static_cast<size_t>(GameTimeframe::Count);
+
+/** Length of a timeframe in game hours. */
+constexpr int GameTimeframeHours(GameTimeframe tf)
+{
+	switch (tf) {
+		case GameTimeframe::H1:  return 1;
+		case GameTimeframe::H4:  return 4;
+		case GameTimeframe::H12: return 12;
+		default:                 return 0;
+	}
+}
+
+/** The event that is sent when a candle of the timeframe is complete. */
+constexpr GameTimeEvent GameTimeframeEvent(GameTimeframe tf)
+{
+	switch (tf) {
+		case GameTimeframe::H4:  return GameTimeEvent::Hour4;
+		case GameTimeframe::H12: return GameTimeEvent::Hour12;
+		default:                 return GameTimeEvent::Hour;
+	}
+}
+
+/** Short name for display. */
+constexpr const char *GameTimeframeName(GameTimeframe tf)
+{
+	switch (tf) {
+		case GameTimeframe::H4:  return "4h";
+		case GameTimeframe::H12: return "12h";
+		default:                 return "1h";
+	}
+}
+
 /** The time at one moment. */
 struct GameTimeSnapshot {
 	uint64_t total_minutes = 0; ///< Game minutes since the start of the game.
+	uint64_t total_hours = 0;   ///< Complete game hours since the start of the game; total_hours / 4 is the number of the 4h candle.
 	int minute = 0;             ///< Minute of the hour, 0..59.
 	int hour = 0;               ///< Hour of the day, 0..23.
 	int day = 1;                ///< Day of the year, 1..365.
 	int year = 0;               ///< Game year.
+};
+
+/**
+ * Everything of the clock that has to go in a savegame. The clock is a single number: all other values (minute, hour,
+ * day, the candle number of every timeframe) are calculated from it, so they cannot get out of step after loading.
+ */
+struct GameTimeSaveState {
+	uint64_t total_ms = 0;  ///< Milliseconds since the start of the game.
+	int start_year = 1950;  ///< Game year at game minute 0.
 };
 
 /** The clock. There is one, see GameTimeManager::Get(). All functions can be called from any thread. */
@@ -75,6 +136,21 @@ public:
 	static constexpr int DAYS_PER_YEAR = 365;             ///< Game days in a game year.
 	static constexpr int MINUTES_PER_DAY = MINUTES_PER_HOUR * HOURS_PER_DAY; ///< Game minutes in a game day.
 	static constexpr int DEFAULT_START_YEAR = 1950;       ///< Game year at game minute 0.
+	static constexpr int MIN_START_YEAR = 1;              ///< Lowest start year that is accepted when loading.
+	static constexpr int MAX_START_YEAR = 9999;           ///< Highest start year that is accepted when loading.
+
+	/** Length of the period of an event in milliseconds; 0 for End. */
+	static constexpr uint64_t EventPeriodMs(GameTimeEvent event)
+	{
+		switch (event) {
+			case GameTimeEvent::Minute: return MS_PER_MINUTE;
+			case GameTimeEvent::Hour:   return MS_PER_MINUTE * MINUTES_PER_HOUR;
+			case GameTimeEvent::Hour4:  return MS_PER_MINUTE * MINUTES_PER_HOUR * 4;
+			case GameTimeEvent::Hour12: return MS_PER_MINUTE * MINUTES_PER_HOUR * 12;
+			case GameTimeEvent::Day:    return MS_PER_MINUTE * MINUTES_PER_DAY;
+			default:                    return 0;
+		}
+	}
 
 	using SubscriptionId = uint64_t;                      ///< Number that identifies a subscription; 0 is never used.
 	using Callback = std::function<void(const GameTimeSnapshot &)>; ///< Function that is called at an event.
@@ -90,11 +166,20 @@ public:
 	uint64_t GetTotalMilliseconds() const;
 	GameTimeSnapshot GetSnapshot() const;
 
+	/** Number of the candle of a timeframe that the clock is in now (candle 0 starts at game minute 0). */
+	uint64_t GetCandleIndex(GameTimeframe tf) const;
+	/** Real milliseconds until the next event of this kind, e.g. for the countdown of a candle. Never 0: at a boundary it is a full period. */
+	uint64_t GetMillisecondsUntil(GameTimeEvent event) const;
+
 	/* Moving the clock. */
 	void AdvanceMilliseconds(uint64_t delta_ms);
 	void Reset();
 	void Restore(uint64_t total_ms);
 	void SetStartYear(int year);
+
+	/* Savegames. LoadSaveState() sends no events, and rejects a start year that is out of range by keeping the current one. */
+	GameTimeSaveState GetSaveState() const;
+	void LoadSaveState(const GameTimeSaveState &state);
 
 	/* Events. */
 	SubscriptionId Subscribe(GameTimeEvent event, Callback callback, int priority = 0);
@@ -104,6 +189,8 @@ public:
 	/** The dispatchers. They call the subscribers of the event for the current time; AdvanceMilliseconds calls them at every boundary. */
 	void OnMinuteUpdate();
 	void OnHourlyUpdate();
+	void OnHour4Update();
+	void OnHour12Update();
 	void OnDailyUpdate();
 
 	/* The temporary switches, see above. */

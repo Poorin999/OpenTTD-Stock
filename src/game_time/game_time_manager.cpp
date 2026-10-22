@@ -31,6 +31,7 @@ GameTimeSnapshot GameTimeManager::MakeSnapshot(uint64_t total_ms, int start_year
 {
 	GameTimeSnapshot s;
 	s.total_minutes = total_ms / MS_PER_MINUTE;
+	s.total_hours = s.total_minutes / MINUTES_PER_HOUR;
 	s.minute = static_cast<int>(s.total_minutes % MINUTES_PER_HOUR);
 	s.hour = static_cast<int>((s.total_minutes / MINUTES_PER_HOUR) % HOURS_PER_DAY);
 	const uint64_t total_days = s.total_minutes / MINUTES_PER_DAY;
@@ -61,6 +62,40 @@ uint64_t GameTimeManager::GetTotalGameMinutes() const { return this->total_ms_.l
 
 /** Milliseconds since the start of the game, including the part of the running minute. */
 uint64_t GameTimeManager::GetTotalMilliseconds() const { return this->total_ms_.load(); }
+
+/** Number of the candle of a timeframe that contains the current time. */
+uint64_t GameTimeManager::GetCandleIndex(GameTimeframe tf) const
+{
+	const int hours = GameTimeframeHours(tf);
+	if (hours <= 0) return 0;
+	return this->total_ms_.load() / (MS_PER_MINUTE * MINUTES_PER_HOUR * static_cast<uint64_t>(hours));
+}
+
+/** Milliseconds until the next boundary of an event. A boundary that has just fired counts as passed. */
+uint64_t GameTimeManager::GetMillisecondsUntil(GameTimeEvent event) const
+{
+	const uint64_t period = EventPeriodMs(event);
+	if (period == 0) return 0;
+	return period - (this->total_ms_.load() % period);
+}
+
+/** The state to put in a savegame. */
+GameTimeSaveState GameTimeManager::GetSaveState() const
+{
+	GameTimeSaveState state;
+	state.total_ms = this->total_ms_.load();
+	state.start_year = this->start_year_.load();
+	return state;
+}
+
+/** Put a saved state back. No events are sent for the time that has passed; a start year that is out of range is ignored. */
+void GameTimeManager::LoadSaveState(const GameTimeSaveState &state)
+{
+	std::lock_guard<std::recursive_mutex> lock(this->advance_mutex_);
+	this->total_ms_.store(state.total_ms);
+	this->queued_ms_ = 0;
+	if (state.start_year >= MIN_START_YEAR && state.start_year <= MAX_START_YEAR) this->start_year_.store(state.start_year);
+}
 
 /** Set the game year at game minute 0. */
 void GameTimeManager::SetStartYear(int year)
@@ -145,12 +180,18 @@ void GameTimeManager::OnMinuteUpdate() { this->Dispatch(GameTimeEvent::Minute); 
 /** Dispatcher: a game hour has passed (every real minute). */
 void GameTimeManager::OnHourlyUpdate() { this->Dispatch(GameTimeEvent::Hour); }
 
+/** Dispatcher: 4 game hours have passed (every 4 real minutes). */
+void GameTimeManager::OnHour4Update() { this->Dispatch(GameTimeEvent::Hour4); }
+
+/** Dispatcher: 12 game hours have passed (every 12 real minutes). */
+void GameTimeManager::OnHour12Update() { this->Dispatch(GameTimeEvent::Hour12); }
+
 /** Dispatcher: a game day has passed (every 24 real minutes). */
 void GameTimeManager::OnDailyUpdate() { this->Dispatch(GameTimeEvent::Day); }
 
 /**
- * Move the clock forward. Every minute boundary that is crossed sends its events, in the order minute, hour, day,
- * also when the time that is added is many minutes (fast-forward), so no event is lost. When a callback calls this
+ * Move the clock forward. Every minute boundary that is crossed sends its events, in the order minute, hour, 4h, 12h,
+ * day, also when the time that is added is many minutes (fast-forward), so no event is lost. When a callback calls this
  * function, the time is added after the running events have been sent.
  * @param delta_ms Milliseconds to add.
  */
@@ -180,8 +221,13 @@ void GameTimeManager::AdvanceMilliseconds(uint64_t delta_ms)
 		if ((now + step) % MS_PER_MINUTE == 0) {
 			const uint64_t minutes = (now + step) / MS_PER_MINUTE;
 			this->OnMinuteUpdate();
-			if (minutes % MINUTES_PER_HOUR == 0) this->OnHourlyUpdate();
-			if (minutes % MINUTES_PER_DAY == 0) this->OnDailyUpdate();
+			if (minutes % MINUTES_PER_HOUR == 0) {
+				const uint64_t hours = minutes / MINUTES_PER_HOUR;
+				this->OnHourlyUpdate();
+				if (hours % 4 == 0) this->OnHour4Update();
+				if (hours % 12 == 0) this->OnHour12Update();
+				if (hours % HOURS_PER_DAY == 0) this->OnDailyUpdate();
+			}
 		}
 
 		if (remaining == 0 && this->queued_ms_ > 0) {

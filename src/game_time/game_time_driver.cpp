@@ -19,7 +19,8 @@
  * Every game tick adds MILLISECONDS_PER_TICK milliseconds to the clock. The game ticks are the same on all clients of a
  * network game, they stop while the game is paused and they run faster while the game is fast-forwarded. The wall clock
  * does none of this, and it would make the clients disagree about the time, so it is not used.
- * One game minute is 1000 ms, so at normal speed it takes about 37 ticks.
+ * One game minute is 1000 ms, so at normal speed it takes 1000 / MILLISECONDS_PER_TICK ticks; the clock adds up the
+ * milliseconds, so a tick length that does not divide 1000 does not make it drift.
  */
 static const IntervalTimer<TimerGameTick> _game_time_tick({TimerGameTick::Priority::NONE, 1}, [](auto count)
 {
