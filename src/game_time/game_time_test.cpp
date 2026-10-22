@@ -445,6 +445,37 @@ void TestAggregatorVolumeAndArray()
 
 } // namespace
 
+/** The day, week, month and year timeframes: one event per period, aligned to game day 0, and candles of the right length. */
+void TestLongTimeframes()
+{
+	Fresh();
+	Counter c;
+	GameTimeSubscription week{GameTimeEvent::Week, [&c](const GameTimeSnapshot &) { c.Hit(GameTimeEvent::Week); }};
+	GameTimeSubscription month{GameTimeEvent::Month, [&c](const GameTimeSnapshot &) { c.Hit(GameTimeEvent::Month); }};
+	GameTimeSubscription year{GameTimeEvent::Year, [&c](const GameTimeSnapshot &) { c.Hit(GameTimeEvent::Year); }};
+	Clock().AdvanceMilliseconds(DAY_MS * 365 * 2);
+	CheckEq("week events in 2 years", 730 / 7, c.Get(GameTimeEvent::Week));
+	CheckEq("month events in 2 years", 730 / 30, c.Get(GameTimeEvent::Month));
+	CheckEq("year events in 2 years", 2, c.Get(GameTimeEvent::Year));
+	CheckEq("hours of the day timeframe", 24, GameTimeframeHours(GameTimeframe::D1));
+	CheckEq("hours of the week timeframe", 24 * 7, GameTimeframeHours(GameTimeframe::W1));
+	CheckEq("hours of the month timeframe", 24 * 30, GameTimeframeHours(GameTimeframe::MN));
+	CheckEq("hours of the year timeframe", 24 * 365, GameTimeframeHours(GameTimeframe::Y1));
+
+	Fresh();
+	TimeframeAggregator agg;
+	agg.AddSample(100);
+	Clock().AdvanceMilliseconds(DAY_MS * 3);
+	agg.AddSample(120);
+	Clock().AdvanceMilliseconds(DAY_MS * 5); // Day 8: the first week (days 0..6) is closed.
+	agg.AddSample(90);
+	Check("a closed week candle exists", agg.Closed(GameTimeframe::W1).size() == 1);
+	Check("the week candle has the highest and the lowest price of its days", agg.Closed(GameTimeframe::W1).size() == 1 &&
+			agg.Closed(GameTimeframe::W1)[0].high == 120 && agg.Closed(GameTimeframe::W1)[0].low == 100);
+	CheckEq("closed day candles after 8 days", 8, static_cast<int>(agg.Closed(GameTimeframe::D1).size()));
+	Check("no month candle yet", agg.Closed(GameTimeframe::MN).empty() && agg.HasRunning(GameTimeframe::MN));
+}
+
 int main()
 {
 	TestScale();
@@ -457,6 +488,7 @@ int main()
 	TestAggregatorVolumeAndArray();
 	TestAggregatorAgainstSimTime();
 	TestAggregatorSaveLoad();
+	TestLongTimeframes();
 
 	std::cout << _passed << " checks passed, " << _failed << " failed\n";
 	return _failed == 0 ? 0 : 1;

@@ -189,9 +189,18 @@ void GameTimeManager::OnHour12Update() { this->Dispatch(GameTimeEvent::Hour12); 
 /** Dispatcher: a game day has passed (every 24 real minutes). */
 void GameTimeManager::OnDailyUpdate() { this->Dispatch(GameTimeEvent::Day); }
 
+/** Dispatcher: a game week (7 game days) has passed (every 168 real minutes). */
+void GameTimeManager::OnWeeklyUpdate() { this->Dispatch(GameTimeEvent::Week); }
+
+/** Dispatcher: a game month (30 game days) has passed (every 720 real minutes). */
+void GameTimeManager::OnMonthlyUpdate() { this->Dispatch(GameTimeEvent::Month); }
+
+/** Dispatcher: a game year (365 game days) has passed (every 8,760 real minutes). */
+void GameTimeManager::OnYearlyUpdate() { this->Dispatch(GameTimeEvent::Year); }
+
 /**
  * Move the clock forward. Every minute boundary that is crossed sends its events, in the order minute, hour, 4h, 12h,
- * day, also when the time that is added is many minutes (fast-forward), so no event is lost. When a callback calls this
+ * day, week, month, year, also when the time that is added is many minutes (fast-forward), so no event is lost. When a callback calls this
  * function, the time is added after the running events have been sent.
  * @param delta_ms Milliseconds to add.
  */
@@ -226,7 +235,13 @@ void GameTimeManager::AdvanceMilliseconds(uint64_t delta_ms)
 				this->OnHourlyUpdate();
 				if (hours % 4 == 0) this->OnHour4Update();
 				if (hours % 12 == 0) this->OnHour12Update();
-				if (hours % HOURS_PER_DAY == 0) this->OnDailyUpdate();
+				if (hours % HOURS_PER_DAY == 0) {
+					const uint64_t days = hours / HOURS_PER_DAY;
+					this->OnDailyUpdate();
+					if (days % DAYS_PER_WEEK == 0) this->OnWeeklyUpdate();
+					if (days % DAYS_PER_MONTH == 0) this->OnMonthlyUpdate();
+					if (days % DAYS_PER_YEAR == 0) this->OnYearlyUpdate();
+				}
 			}
 		}
 

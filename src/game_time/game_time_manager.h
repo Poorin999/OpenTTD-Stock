@@ -19,11 +19,11 @@
  * result the clock stops when the game is paused and runs faster when the game is fast-forwarded, just like the rest
  * of the game.
  *
- * Timeframes: next to the minute, hour and day events there are the events of the 4h and 12h timeframes. They are
- * aligned to game midnight: 4h fires at 00:00, 04:00, 08:00, ... and 12h fires at 00:00 and 12:00, that is every 4 and
- * every 12 real minutes. When one clock step crosses several boundaries (fast-forward, a big catch-up), every
+ * Timeframes: next to the minute, hour and day events there are the events of the 4h, 12h, week, month and year timeframes.
+ * They are aligned to game midnight: 4h fires at 00:00, 04:00, 08:00, ... and 12h fires at 00:00 and 12:00, that is every 4 and
+ * every 12 real minutes. A week is 7 game days, a month 30 game days and a year 365 game days; they all start at game day 0. When one clock step crosses several boundaries (fast-forward, a big catch-up), every
  * boundary is still dispatched, one by one, in time order. At one boundary the order is
- * Minute, Hour, Hour4, Hour12, Day.
+ * Minute, Hour, Hour4, Hour12, Day, Week, Month, Year.
  *
  * This file only needs the standard library. The connection to the game ticks and to the savegame is in
  * game_time_driver.cpp, so the clock can also be tested outside of the game.
@@ -65,7 +65,10 @@ enum class GameTimeEvent : uint8_t {
 	Hour,   ///< Once per game hour (every real minute). This is also the end of a 1h timeframe.
 	Hour4,  ///< Once per 4 game hours (every 4 real minutes): end of a 4h timeframe.
 	Hour12, ///< Once per 12 game hours (every 12 real minutes): end of a 12h timeframe.
-	Day,    ///< Once per game day (every 24 real minutes).
+	Day,    ///< Once per game day (every 24 real minutes). This is also the end of a day timeframe.
+	Week,   ///< Once per 7 game days (every 168 real minutes): end of a week timeframe.
+	Month,  ///< Once per 30 game days (every 720 real minutes): end of a month timeframe.
+	Year,   ///< Once per 365 game days (every 8,760 real minutes): end of a year timeframe.
 	End,    ///< End marker.
 };
 
@@ -74,6 +77,10 @@ enum class GameTimeframe : uint8_t {
 	H1,    ///< 1 game hour  = 1 real minute.
 	H4,    ///< 4 game hours = 4 real minutes.
 	H12,   ///< 12 game hours = 12 real minutes.
+	D1,    ///< 1 game day = 24 game hours = 24 real minutes.
+	W1,    ///< 1 game week = 7 game days = 168 real minutes.
+	MN,    ///< 1 game month = 30 game days = 720 real minutes. The game year has no calendar months; a month is always 30 days.
+	Y1,    ///< 1 game year = 365 game days = 8,760 real minutes.
 	Count, ///< Number of timeframes.
 };
 
@@ -86,6 +93,10 @@ constexpr int GameTimeframeHours(GameTimeframe tf)
 		case GameTimeframe::H1:  return 1;
 		case GameTimeframe::H4:  return 4;
 		case GameTimeframe::H12: return 12;
+		case GameTimeframe::D1:  return 24;
+		case GameTimeframe::W1:  return 24 * 7;
+		case GameTimeframe::MN:  return 24 * 30;
+		case GameTimeframe::Y1:  return 24 * 365;
 		default:                 return 0;
 	}
 }
@@ -96,6 +107,10 @@ constexpr GameTimeEvent GameTimeframeEvent(GameTimeframe tf)
 	switch (tf) {
 		case GameTimeframe::H4:  return GameTimeEvent::Hour4;
 		case GameTimeframe::H12: return GameTimeEvent::Hour12;
+		case GameTimeframe::D1:  return GameTimeEvent::Day;
+		case GameTimeframe::W1:  return GameTimeEvent::Week;
+		case GameTimeframe::MN:  return GameTimeEvent::Month;
+		case GameTimeframe::Y1:  return GameTimeEvent::Year;
 		default:                 return GameTimeEvent::Hour;
 	}
 }
@@ -106,6 +121,10 @@ constexpr const char *GameTimeframeName(GameTimeframe tf)
 	switch (tf) {
 		case GameTimeframe::H4:  return "4h";
 		case GameTimeframe::H12: return "12h";
+		case GameTimeframe::D1:  return "1d";
+		case GameTimeframe::W1:  return "1w";
+		case GameTimeframe::MN:  return "1mo";
+		case GameTimeframe::Y1:  return "1y";
 		default:                 return "1h";
 	}
 }
@@ -136,6 +155,8 @@ public:
 	static constexpr int MINUTES_PER_HOUR = 60;           ///< Game minutes in a game hour.
 	static constexpr int HOURS_PER_DAY = 24;              ///< Game hours in a game day.
 	static constexpr int DAYS_PER_YEAR = 365;             ///< Game days in a game year.
+	static constexpr int DAYS_PER_WEEK = 7;               ///< Game days in a game week.
+	static constexpr int DAYS_PER_MONTH = 30;             ///< Game days in a game month (the game year has no calendar months).
 	static constexpr int MINUTES_PER_DAY = MINUTES_PER_HOUR * HOURS_PER_DAY; ///< Game minutes in a game day.
 	static constexpr int DEFAULT_START_YEAR = 1950;       ///< Game year at game minute 0.
 	static constexpr int MIN_START_YEAR = 1;              ///< Lowest start year that is accepted when loading.
@@ -150,6 +171,9 @@ public:
 			case GameTimeEvent::Hour4:  return MS_PER_MINUTE * MINUTES_PER_HOUR * 4;
 			case GameTimeEvent::Hour12: return MS_PER_MINUTE * MINUTES_PER_HOUR * 12;
 			case GameTimeEvent::Day:    return MS_PER_MINUTE * MINUTES_PER_DAY;
+			case GameTimeEvent::Week:   return MS_PER_MINUTE * MINUTES_PER_DAY * DAYS_PER_WEEK;
+			case GameTimeEvent::Month:  return MS_PER_MINUTE * MINUTES_PER_DAY * DAYS_PER_MONTH;
+			case GameTimeEvent::Year:   return MS_PER_MINUTE * MINUTES_PER_DAY * DAYS_PER_YEAR;
 			default:                    return 0;
 		}
 	}
@@ -194,6 +218,9 @@ public:
 	void OnHour4Update();
 	void OnHour12Update();
 	void OnDailyUpdate();
+	void OnWeeklyUpdate();
+	void OnMonthlyUpdate();
+	void OnYearlyUpdate();
 
 	/* The temporary switches, see above. */
 	static constexpr bool IsChartDecoupled() { return GAME_TIME_DECOUPLE_CHART; }

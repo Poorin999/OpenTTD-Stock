@@ -240,7 +240,7 @@ struct StockMarket {
 	std::array<StockCandle, MAX_COMPANIES> daily_current{};        ///< The running daily candle per company.
 	std::array<bool, MAX_COMPANIES> has_daily_current{};           ///< Whether #daily_current is valid.
 	bool record_daily = false;                                     ///< Whether daily candles are recorded; set once when the player opens the Daily view.
-	std::array<TimeframeAggregator, MAX_COMPANIES> frames;         ///< Candles of the 1h, 4h and 12h timeframes of game time per company; prices are times #STOCK_PRICE_SCALE, the volume is in shares. Closed by the clock events.
+	std::array<TimeframeAggregator, MAX_COMPANIES> frames;         ///< Candles of the 1h, 4h, 12h, day, week, month and year timeframes of game time per company; prices are times #STOCK_PRICE_SCALE, the volume is in shares. Closed by the clock events.
 	std::vector<StockClosedTrade> history{};                       ///< Closed trades of all companies, the oldest first.
 	std::array<StockStats, MAX_COMPANIES> stats{};                 ///< Trading results per company (the portfolio summary).
 	std::vector<StockOrder> positions{};                           ///< Open positions.

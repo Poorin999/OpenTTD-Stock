@@ -126,70 +126,18 @@ static std::string StockMonthToString(int32_t ym)
 	return fmt::format("{}-{:02}", ym / 12, month);
 }
 
-/** Economy date (days) as "12/3": day and month. */
-static std::string StockDateToString(int32_t date)
-{
-	const auto ymd = TimerGameEconomy::ConvertDateToYMD(TimerGameEconomy::Date{date});
-	return fmt::format("{}/{}", ymd.day, ymd.month + 1);
-}
-
-/** The timeframes of the chart: three of game time (hours) and four of the economy calendar. */
-enum class ChartFrame : uint8_t {
-	H1,   ///< One candle per game hour.
-	H4,   ///< One candle per 4 game hours.
-	H12,  ///< One candle per 12 game hours.
-	D1,   ///< One candle per economy day (only recorded after the Day or Week view was opened for the first time).
-	W1,   ///< One candle per 7 economy days, made from the daily candles.
-	MN,   ///< One candle per economy month.
-	Y1,   ///< One candle per economy year, made from the monthly candles.
-};
-
-static bool IsHourFrame(ChartFrame frame) { return frame == ChartFrame::H1 || frame == ChartFrame::H4 || frame == ChartFrame::H12; }
-static bool IsDailyFrame(ChartFrame frame) { return frame == ChartFrame::D1 || frame == ChartFrame::W1; }
-
-/** The timeframe of game time that belongs to an hour frame. */
-static GameTimeframe ToGameTimeframe(ChartFrame frame)
-{
-	switch (frame) {
-		case ChartFrame::H4:  return GameTimeframe::H4;
-		case ChartFrame::H12: return GameTimeframe::H12;
-		default:              return GameTimeframe::H1;
-	}
-}
-
-/** The chart frame that a timeframe button selects. */
-static ChartFrame FrameOfWidget(WidgetID widget)
+/** The timeframe that a timeframe button selects. All timeframes are periods of the game clock of the mod (see game_time_manager.h). */
+static GameTimeframe FrameOfWidget(WidgetID widget)
 {
 	switch (widget) {
-		case WID_ST_TF_MONTH: return ChartFrame::H4;
-		case WID_ST_TF_YEAR:  return ChartFrame::H12;
-		case WID_ST_TF_D1:    return ChartFrame::D1;
-		case WID_ST_TF_W1:    return ChartFrame::W1;
-		case WID_ST_TF_MN:    return ChartFrame::MN;
-		case WID_ST_TF_Y1:    return ChartFrame::Y1;
-		default:              return ChartFrame::H1; // WID_ST_TF_DAY. The first three widgets keep their old names: they are the 1h, 4h and 12h buttons.
+		case WID_ST_TF_MONTH: return GameTimeframe::H4;
+		case WID_ST_TF_YEAR:  return GameTimeframe::H12;
+		case WID_ST_TF_D1:    return GameTimeframe::D1;
+		case WID_ST_TF_W1:    return GameTimeframe::W1;
+		case WID_ST_TF_MN:    return GameTimeframe::MN;
+		case WID_ST_TF_Y1:    return GameTimeframe::Y1;
+		default:              return GameTimeframe::H1; // WID_ST_TF_DAY. The first three widgets keep their old names: they are the 1h, 4h and 12h buttons.
 	}
-}
-
-/** Merge candles into longer ones: all candles whose ym / divisor is the same become one candle (the input is oldest first). */
-static std::vector<StockCandle> MergeCandles(const std::vector<StockCandle> &source, int32_t divisor)
-{
-	std::vector<StockCandle> merged;
-	for (const StockCandle &c : source) {
-		const int32_t key = c.ym / divisor;
-		if (!merged.empty() && merged.back().ym == key) {
-			StockCandle &m = merged.back();
-			m.high = std::max(m.high, c.high);
-			m.low = std::min(m.low, c.low);
-			m.close = c.close;
-			m.volume += c.volume;
-		} else {
-			StockCandle m = c;
-			m.ym = key;
-			merged.push_back(m);
-		}
-	}
-	return merged;
 }
 
 static uint8_t _stock_active_wallet = WALLET_CASH; ///< The wallet that the terminal shows and trades with; only for the local company.
@@ -308,7 +256,7 @@ struct StockWindow : Window {
 	bool is_dragging_chart = false;     ///< Whether the mouse button is held down on the chart.
 	int drag_start_x = 0;               ///< X position (in the window) where the drag started, or where the last candle step was made.
 	int chart_scroll_offset = 0;        ///< Number of candles the chart is scrolled back into the past; 0 shows the newest candles at the right edge.
-	ChartFrame frame = ChartFrame::H1;  ///< Timeframe of the chart: 1h, 4h, 12h, day, week, month or year per candle.
+	GameTimeframe frame = GameTimeframe::H1; ///< Timeframe of the chart: one candle per 1h, 4h, 12h, game day, game week, game month (30 days) or game year (365 days).
 
 	StockWindow(WindowDesc &desc) : Window(desc)
 	{
@@ -324,13 +272,13 @@ struct StockWindow : Window {
 	/** Show which timeframe button is active. */
 	void UpdateTimeframeButtons()
 	{
-		this->SetWidgetLoweredState(WID_ST_TF_DAY, this->frame == ChartFrame::H1);   // The first three widgets keep their old names: they are the 1h, 4h and 12h buttons now.
-		this->SetWidgetLoweredState(WID_ST_TF_MONTH, this->frame == ChartFrame::H4);
-		this->SetWidgetLoweredState(WID_ST_TF_YEAR, this->frame == ChartFrame::H12);
-		this->SetWidgetLoweredState(WID_ST_TF_D1, this->frame == ChartFrame::D1);
-		this->SetWidgetLoweredState(WID_ST_TF_W1, this->frame == ChartFrame::W1);
-		this->SetWidgetLoweredState(WID_ST_TF_MN, this->frame == ChartFrame::MN);
-		this->SetWidgetLoweredState(WID_ST_TF_Y1, this->frame == ChartFrame::Y1);
+		this->SetWidgetLoweredState(WID_ST_TF_DAY, this->frame == GameTimeframe::H1);   // The first three widgets keep their old names: they are the 1h, 4h and 12h buttons now.
+		this->SetWidgetLoweredState(WID_ST_TF_MONTH, this->frame == GameTimeframe::H4);
+		this->SetWidgetLoweredState(WID_ST_TF_YEAR, this->frame == GameTimeframe::H12);
+		this->SetWidgetLoweredState(WID_ST_TF_D1, this->frame == GameTimeframe::D1);
+		this->SetWidgetLoweredState(WID_ST_TF_W1, this->frame == GameTimeframe::W1);
+		this->SetWidgetLoweredState(WID_ST_TF_MN, this->frame == GameTimeframe::MN);
+		this->SetWidgetLoweredState(WID_ST_TF_Y1, this->frame == GameTimeframe::Y1);
 	}
 
 	int RowHeight() const { return GetCharacterHeight(FS_NORMAL) + ScaleGUITrad(2); }
@@ -352,47 +300,29 @@ struct StockWindow : Window {
 	}
 
 	/**
-	 * The candles of the selected symbol in the active timeframe, the oldest first: the closed candles and the running one.
-	 * ym holds the number of the candle: for the hour frames the game hours since the start divided by the length of the
-	 * candle, for the day frame the economy date, for the week frame the date divided by 7, for the month frame
-	 * year * 12 + month and for the year frame the year. The prices are whole money units.
+	 * The candles of the selected symbol in the active timeframe of game time, the oldest first: the closed candles and
+	 * the running one. ym holds the number of the candle (game hours since the start, divided by the length of the candle:
+	 * 1, 4, 12, 24, 168, 720 or 8,760 hours); the prices are converted to whole money units, like the other candles.
 	 */
 	std::vector<StockCandle> GetChartCandles() const
 	{
 		std::vector<StockCandle> candles;
 		if (!Company::IsValidID(this->selected)) return candles;
-		const size_t company = this->selected.base();
+		const TimeframeAggregator &frames = _stock_market.frames[this->selected.base()];
 
-		if (IsHourFrame(this->frame)) {
-			const GameTimeframe game_frame = ToGameTimeframe(this->frame);
-			const TimeframeAggregator &frames = _stock_market.frames[company];
-
-			auto convert = [](const TimeframeBucket &b) {
-				StockCandle c;
-				c.ym = static_cast<int32_t>(std::min<uint64_t>(b.index, INT32_MAX));
-				c.open = StockFixedToPrice(b.open);
-				c.high = StockFixedToPrice(b.high);
-				c.low = StockFixedToPrice(b.low);
-				c.close = StockFixedToPrice(b.close);
-				c.volume = b.volume;
-				return c;
-			};
-			for (const TimeframeBucket &b : frames.Closed(game_frame)) candles.push_back(convert(b));
-			if (frames.HasRunning(game_frame)) candles.push_back(convert(frames.Running(game_frame)));
-			return candles;
-		}
-
-		/* Day and week: the daily candles (ym is the economy date); a week is 7 of them. */
-		if (IsDailyFrame(this->frame)) {
-			candles = _stock_market.daily[company];
-			if (_stock_market.has_daily_current[company]) candles.push_back(_stock_market.daily_current[company]);
-			return this->frame == ChartFrame::W1 ? MergeCandles(candles, 7) : candles;
-		}
-
-		/* Month and year: the monthly candles (ym is economy year * 12 + month); a year is 12 of them. */
-		candles = _stock_market.candles[company];
-		if (_stock_market.has_current[company]) candles.push_back(_stock_market.current[company]);
-		return this->frame == ChartFrame::Y1 ? MergeCandles(candles, 12) : candles;
+		auto convert = [](const TimeframeBucket &b) {
+			StockCandle c;
+			c.ym = static_cast<int32_t>(std::min<uint64_t>(b.index, INT32_MAX));
+			c.open = StockFixedToPrice(b.open);
+			c.high = StockFixedToPrice(b.high);
+			c.low = StockFixedToPrice(b.low);
+			c.close = StockFixedToPrice(b.close);
+			c.volume = b.volume;
+			return c;
+		};
+		for (const TimeframeBucket &b : frames.Closed(this->frame)) candles.push_back(convert(b));
+		if (frames.HasRunning(this->frame)) candles.push_back(convert(frames.Running(this->frame)));
+		return candles;
 	}
 
 	/** An open position or a pending order of the local company with this number, or nullptr. */
@@ -685,11 +615,7 @@ struct StockWindow : Window {
 			case WID_ST_TF_W1:
 			case WID_ST_TF_MN:
 			case WID_ST_TF_Y1: {
-				const ChartFrame wanted = FrameOfWidget(widget);
-				/* Daily candles are only recorded once somebody has asked for them. */
-				if (IsDailyFrame(wanted) && !_stock_market.record_daily && Company::IsValidID(_local_company)) {
-					Command<CMD_STOCK_ENABLE_DAILY>::Post(STR_STOCK_ERROR_CANT_ENABLE_DAILY, true);
-				}
+				const GameTimeframe wanted = FrameOfWidget(widget);
 				if (this->frame != wanted) {
 					this->frame = wanted;
 					this->chart_scroll_offset = 0; // The units of the offset change with the timeframe.
@@ -977,7 +903,7 @@ struct StockWindow : Window {
 		if (rsi_height > 0) GfxFillRect(left, full_bottom - rsi_height, right, full_bottom, GREY_SCALE(2));
 
 		if (candles.empty()) {
-			DrawString(left + 4, right - 4, top + 4, IsDailyFrame(this->frame) ? STR_STOCK_DAILY_WAIT : STR_STOCK_FRAME_WAIT, TC_WHITE, SA_LEFT);
+			DrawString(left + 4, right - 4, top + 4, STR_STOCK_FRAME_WAIT, TC_WHITE, SA_LEFT);
 			return;
 		}
 
@@ -1036,33 +962,35 @@ struct StockWindow : Window {
 			/* One small tick for every candle. */
 			GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(2), PC_WHITE);
 
-			/* Labels. Each label is wider than one candle, so only some candles get one: the hour frames every 6 hours (the time,
-			 * or the day at midnight), every day and every 4 days; the day frame every 7 days, the week frame every 4 weeks, the
-			 * month frame every 6 months and the year frame every 3 years. */
+			/* Labels in game time. Each label is wider than one candle, so only some candles get one: every 6 hours on the 1h
+			 * chart (the time, or the day at midnight), every day on the 4h chart, every 4 days on the 12h chart, every 7 days on
+			 * the day chart, every 4 weeks on the week chart, every 6 months on the month chart and every 3 years on the year chart. */
 			std::string label;
 			switch (this->frame) {
-				case ChartFrame::H1:
-				case ChartFrame::H4:
-				case ChartFrame::H12: {
-					const uint64_t start_hour = static_cast<uint64_t>(c.ym) * static_cast<uint64_t>(GameTimeframeHours(ToGameTimeframe(this->frame)));
-					const uint64_t label_every = this->frame == ChartFrame::H1 ? 6 : this->frame == ChartFrame::H4 ? 24 : 96;
+				case GameTimeframe::H1:
+				case GameTimeframe::H4:
+				case GameTimeframe::H12: {
+					const uint64_t start_hour = static_cast<uint64_t>(c.ym) * static_cast<uint64_t>(GameTimeframeHours(this->frame));
+					const uint64_t label_every = this->frame == GameTimeframe::H1 ? 6 : this->frame == GameTimeframe::H4 ? 24 : 96;
 					if (start_hour % label_every == 0) {
-						label = (this->frame == ChartFrame::H1 && start_hour % 24 != 0) ?
+						label = (this->frame == GameTimeframe::H1 && start_hour % 24 != 0) ?
 								fmt::format("{:02}:00", start_hour % 24) : fmt::format("D{}", start_hour / 24 + 1);
 					}
 					break;
 				}
-				case ChartFrame::D1:
-					if (c.ym % 7 == 0) label = StockDateToString(c.ym);
+				case GameTimeframe::D1:
+					if (c.ym % 7 == 0) label = fmt::format("D{}", c.ym + 1);
 					break;
-				case ChartFrame::W1:
-					if (c.ym % 4 == 0) label = StockDateToString(c.ym * 7);
+				case GameTimeframe::W1:
+					if (c.ym % 4 == 0) label = fmt::format("W{}", c.ym + 1);
 					break;
-				case ChartFrame::MN:
-					if (c.ym % 6 == 0) label = StockMonthToString(c.ym);
+				case GameTimeframe::MN:
+					if (c.ym % 6 == 0) label = fmt::format("M{}", c.ym + 1);
 					break;
-				case ChartFrame::Y1:
-					if (c.ym % 3 == 0) label = fmt::format("{}", c.ym);
+				case GameTimeframe::Y1:
+					if (c.ym % 3 == 0) label = fmt::format("{}", GameTimeManager::Get().GetSaveState().start_year + c.ym);
+					break;
+				default:
 					break;
 			}
 			if (!label.empty()) {
@@ -1474,10 +1402,10 @@ static constexpr std::initializer_list<NWidgetPart> _nested_stock_widgets = {
 				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_DAY), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_TF_1H, STR_STOCK_TIP_TF_1H),
 				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_MONTH), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_TF_4H, STR_STOCK_TIP_TF_4H),
 				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_YEAR), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_TF_12H, STR_STOCK_TIP_TF_12H),
-				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_D1), SetMinimalSize(50, 14), SetStringTip(STR_STOCK_TF_D1, STR_STOCK_TIP_TF_DAY),
+				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_D1), SetMinimalSize(50, 14), SetStringTip(STR_STOCK_TF_D1, STR_STOCK_TIP_TF_D1),
 				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_W1), SetMinimalSize(50, 14), SetStringTip(STR_STOCK_TF_W1, STR_STOCK_TIP_TF_W1),
-				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_MN), SetMinimalSize(50, 14), SetStringTip(STR_STOCK_TF_MN, STR_STOCK_TIP_TF_MONTH),
-				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_Y1), SetMinimalSize(50, 14), SetStringTip(STR_STOCK_TF_Y1, STR_STOCK_TIP_TF_YEAR),
+				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_MN), SetMinimalSize(50, 14), SetStringTip(STR_STOCK_TF_MN, STR_STOCK_TIP_TF_MN),
+				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_Y1), SetMinimalSize(50, 14), SetStringTip(STR_STOCK_TF_Y1, STR_STOCK_TIP_TF_Y1),
 				/* A grey panel instead of a spacer: a spacer draws nothing, which leaves a hole in the window. */
 				NWidget(WWT_PANEL, COLOUR_GREY), SetFill(1, 1), SetResize(1, 0),
 				EndContainer(),
