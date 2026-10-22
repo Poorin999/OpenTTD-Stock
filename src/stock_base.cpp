@@ -53,6 +53,7 @@ void StockMarket::Reset()
 	this->record_daily = false;
 	for (TimeframeAggregator &f : this->frames) f.Reset();
 	this->history.clear();
+	for (auto &row : this->session_realized) row.fill(0);
 	this->stats.fill({});
 	this->positions.clear();
 	this->pending.clear();
@@ -327,6 +328,30 @@ int64_t GetStockFreeMargin(CompanyID owner, uint8_t wallet)
  * @param wallet The wallet.
  * @return The margin level, or -1 when the wallet has no open positions.
  */
+StockRisk GetStockRisk(CompanyID owner, uint8_t wallet)
+{
+	StockRisk r;
+	const int64_t used = GetStockUsedMargin(owner, wallet);
+	if (used <= 0) return r;
+	const int64_t equity = GetStockEquity(owner, wallet);
+	if (equity <= 0 || equity <= used) {
+		r.level = StockRiskLevel::MarginCall;
+		r.usage_tenths = 100000;
+		r.free_tenths = 0;
+		return r;
+	}
+	r.usage_tenths = std::min<int64_t>(used / equity, 100) * 1000 + (used % equity) * 1000 / equity;
+	r.free_tenths = std::min<int64_t>(equity - used, equity) / equity * 1000 + ((equity - used) % equity) * 1000 / equity;
+	r.level = (equity - used) * 100 < equity * STOCK_RISK_FREE_MARGIN_WARN_PERCENT ? StockRiskLevel::Warning : StockRiskLevel::Safe;
+	return r;
+}
+
+int64_t GetStockSessionRealized(CompanyID owner, uint8_t wallet)
+{
+	if (owner.base() >= MAX_COMPANIES) return 0;
+	return _stock_market.session_realized[owner.base()][wallet];
+}
+
 int64_t GetStockMarginLevel(CompanyID owner, uint8_t wallet)
 {
 	const int64_t used = GetStockUsedMargin(owner, wallet);
@@ -463,6 +488,7 @@ void StockMarket::HandleRemovedCompanies()
 		this->daily_current[i] = {};
 		this->has_daily_current[i] = false;
 		this->stats[i] = {};
+		this->session_realized[i].fill(0);
 		_central_bank.accounts[i] = {};
 		std::erase_if(this->history, [i](const StockClosedTrade &t) { return t.owner == i; });
 	}
@@ -492,6 +518,7 @@ void StockMarket::AddHistory(const StockOrder &position, int64_t close_price, in
 	t.open_ym = position.open_ym;
 	this->history.push_back(t);
 	this->RecordStats(t);
+	if (t.owner < MAX_COMPANIES) this->session_realized[t.owner][t.wallet] += profit;
 
 	size_t count = 0;
 	for (const StockClosedTrade &h : this->history) count += (h.owner == t.owner);

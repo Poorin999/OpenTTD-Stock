@@ -37,6 +37,9 @@ enum StockWidgets : WidgetID {
 	WID_ST_TF_W1,            ///< Toggle button: chart with one candle per week.
 	WID_ST_TF_MN,            ///< Toggle button: chart with one candle per month.
 	WID_ST_TF_Y1,            ///< Toggle button: chart with one candle per year.
+	WID_ST_WALLET_DROPDOWN,  ///< Dropdown: the wallet that is shown and traded with.
+	WID_ST_PNL,              ///< Panel: floating and realised profit of the selected wallet.
+	WID_ST_RISK,             ///< Panel: margin usage and the margin call warning.
 };
 
 /** Widgets of the #StockOrderWindow class. */

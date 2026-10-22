@@ -19,6 +19,8 @@
 #include "company_base.h"
 #include "company_func.h"
 #include "currency.h"
+#include "dropdown_func.h"
+#include "dropdown_type.h"
 #include "gfx_func.h"
 #include "palette_func.h"
 #include "strings_func.h"
@@ -411,10 +413,38 @@ struct StockWindow : Window {
 		this->SetDirty();
 	}
 
+	void OnDropdownSelect(WidgetID widget, int index, [[maybe_unused]] int click_result) override
+	{
+		if (widget != WID_ST_WALLET_DROPDOWN || !Company::IsValidID(_local_company)) return;
+		for (uint8_t id : _wallets.GetIds(_local_company)) {
+			if (id == index) {
+				SetStockActiveWallet(id);
+				this->OnInvalidateData();
+				return;
+			}
+		}
+	}
+
+	std::string GetWidgetString(WidgetID widget, StringID stringid) const override
+	{
+		if (widget == WID_ST_WALLET_DROPDOWN && Company::IsValidID(_local_company)) {
+			const uint8_t wallet = GetStockActiveWallet();
+			return GetString(STR_STOCK_WALLET, GetWalletName(_local_company, wallet), GetWalletBalance(_local_company, wallet));
+		}
+		return this->Window::GetWidgetString(widget, stringid);
+	}
+
 	void OnPaint() override
 	{
 		this->EnsureValidSelection();
 		this->ClampChartScroll();
+		/* New orders are blocked while the wallet is in margin call danger. */
+		bool block_orders = false;
+		if (Company::IsValidID(_local_company)) {
+			const uint8_t wallet = GetStockActiveWallet();
+			block_orders = !IsTradingWallet(_local_company, wallet) || GetStockRisk(_local_company, wallet).level >= StockRiskLevel::Warning;
+		}
+		this->SetWidgetDisabledState(WID_ST_NEW_ORDER, block_orders);
 		this->DrawWidgets();
 	}
 
@@ -576,18 +606,14 @@ struct StockWindow : Window {
 				break;
 			}
 
-			case WID_ST_WALLET: {
-				/* Switch to the next wallet of the local company. */
+			case WID_ST_WALLET_DROPDOWN: {
 				if (!Company::IsValidID(_local_company)) break;
-				const std::vector<uint8_t> ids = _wallets.GetIds(_local_company);
-				if (ids.empty()) break;
-				const uint8_t current = GetStockActiveWallet();
-				size_t pos = 0;
-				for (size_t i = 0; i < ids.size(); i++) {
-					if (ids[i] == current) pos = i;
+				DropDownList list;
+				for (uint8_t id : _wallets.GetIds(_local_company)) {
+					list.push_back(MakeDropDownListStringItem(GetString(STR_STOCK_WALLET, GetWalletName(_local_company, id), GetWalletBalance(_local_company, id)), id));
 				}
-				SetStockActiveWallet(ids[(pos + 1) % ids.size()]);
-				this->OnInvalidateData();
+				if (list.empty()) break;
+				ShowDropDownList(this, std::move(list), GetStockActiveWallet(), WID_ST_WALLET_DROPDOWN, 0);
 				break;
 			}
 
@@ -735,7 +761,8 @@ struct StockWindow : Window {
 	{
 		switch (widget) {
 			case WID_ST_ACCOUNT: this->DrawAccount(r); break;
-			case WID_ST_WALLET: this->DrawWallet(r); break;
+			case WID_ST_PNL: this->DrawPnl(r); break;
+			case WID_ST_RISK: this->DrawRisk(r); break;
 			case WID_ST_WATCH:   this->DrawWatch(r); break;
 			case WID_ST_TITLE:   this->DrawTitle(r); break;
 			case WID_ST_SUMMARY: this->DrawSummary(r); break;
@@ -784,13 +811,47 @@ struct StockWindow : Window {
 		DrawString(r.left + 4, r.right - 4, top, text, TC_FROMSTRING, SA_LEFT);
 	}
 
-	/** The selected wallet with its balance. */
-	void DrawWallet(const Rect &r) const
+	/** Draw a caption and a money value that is green for a profit and red for a loss. @return The x position after the text. */
+	static int DrawSignedMoney(int x, int right, int top, const std::string &caption, int64_t value)
+	{
+		DrawString(x, right, top, caption, TC_BLACK, SA_LEFT);
+		x += GetStringBoundingBox(caption).width;
+		const std::string money = GetString(STR_JUST_CURRENCY_LONG, value);
+		DrawString(x, right, top, money, value < 0 ? TC_RED : (value > 0 ? TC_GREEN : TC_BLACK), SA_LEFT);
+		return x + GetStringBoundingBox(money).width;
+	}
+
+	/** Floating and realised profit of the selected wallet. */
+	void DrawPnl(const Rect &r) const
 	{
 		if (!Company::IsValidID(_local_company)) return;
-		const int top = CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL));
 		const uint8_t wallet = GetStockActiveWallet();
-		DrawString(r.left + 4, r.right - 4, top, GetString(STR_STOCK_WALLET, GetWalletName(_local_company, wallet), GetWalletBalance(_local_company, wallet)), TC_FROMSTRING, SA_LEFT);
+		if (!IsTradingWallet(_local_company, wallet)) return;
+		const int top = CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL));
+		int x = DrawSignedMoney(r.left + ScaleGUITrad(4), r.right - 4, top, "Unrealized P/L: ", GetStockFloatingProfit(_local_company, wallet));
+		x += ScaleGUITrad(16);
+		DrawSignedMoney(x, r.right - 4, top, "Realized P/L (session): ", GetStockSessionRealized(_local_company, wallet));
+	}
+
+	/** Margin usage and the warning when the free margin is low. */
+	void DrawRisk(const Rect &r) const
+	{
+		if (!Company::IsValidID(_local_company)) return;
+		const uint8_t wallet = GetStockActiveWallet();
+		if (!IsTradingWallet(_local_company, wallet)) return;
+		const int top = CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL));
+		const StockRisk risk = GetStockRisk(_local_company, wallet);
+		if (risk.level == StockRiskLevel::None) {
+			DrawString(r.left + ScaleGUITrad(4), r.right - 4, top, std::string("Margin Usage: 0.0%"), TC_BLACK, SA_LEFT);
+			return;
+		}
+		const TextColour colour = risk.level == StockRiskLevel::Safe ? TC_GREEN : TC_RED;
+		const std::string usage = fmt::format("Margin Usage: {}.{}%", risk.usage_tenths / 10, risk.usage_tenths % 10);
+		DrawString(r.left + ScaleGUITrad(4), r.right - 4, top, usage, colour, SA_LEFT);
+		if (risk.level >= StockRiskLevel::Warning) {
+			const int x = r.left + ScaleGUITrad(4) + GetStringBoundingBox(usage).width + ScaleGUITrad(12);
+			DrawString(x, r.right - 4, top, std::string("WARNING: LOW FREE MARGIN / MARGIN CALL RISK"), TC_RED, SA_LEFT);
+		}
 	}
 
 	/** Market Watch: one row per symbol with the Bid and Ask price. */
@@ -1009,7 +1070,7 @@ struct StockWindow : Window {
 				for (int x = left; x < right; x += 2 * dash) GfxDrawLine(x, y, std::min(x + dash - 1, right), y, colour);
 			};
 			for (const StockOrder &p : _stock_market.positions) {
-				if (p.owner != _local_company.base() || p.target != this->selected.base()) continue;
+				if (p.owner != _local_company.base() || p.target != this->selected.base() || p.wallet != GetStockActiveWallet()) continue;
 				dashed_line(p.price, PC_GREEN);
 				if (p.sl > 0) dashed_line(p.sl, PC_RED);
 				if (p.tp > 0) dashed_line(p.tp, PC_LIGHT_BLUE);
@@ -1381,12 +1442,17 @@ static constexpr std::initializer_list<NWidgetPart> _nested_stock_widgets = {
 		EndContainer(),
 	EndContainer(),
 	NWidget(NWID_HORIZONTAL),
-		NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_WALLET), SetMinimalSize(230, 14), SetFill(0, 0), SetToolTip(STR_STOCK_TIP_WALLET),
-		EndContainer(),
+		NWidget(WWT_DROPDOWN, COLOUR_GREY, WID_ST_WALLET_DROPDOWN), SetMinimalSize(230, 14), SetFill(0, 0), SetStringTip(STR_STOCK_WALLET, STR_STOCK_TIP_WALLET_SELECT),
 		NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_ST_WALLET_NEW), SetMinimalSize(90, 14), SetStringTip(STR_STOCK_WALLET_NEW, STR_STOCK_TIP_WALLET_NEW),
 		NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_ST_WALLET_DELETE), SetMinimalSize(90, 14), SetStringTip(STR_STOCK_WALLET_DELETE, STR_STOCK_TIP_WALLET_DELETE),
 		NWidget(WWT_PUSHBTN, COLOUR_GREY, WID_STOCK_CLOSE_ALL), SetMinimalSize(90, 14),
 		NWidget(WWT_PANEL, COLOUR_GREY), SetFill(1, 1), SetResize(1, 0),
+		EndContainer(),
+	EndContainer(),
+	NWidget(NWID_HORIZONTAL),
+		NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_PNL), SetMinimalSize(400, 16), SetFill(1, 0), SetResize(1, 0),
+		EndContainer(),
+		NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_RISK), SetMinimalSize(400, 16), SetFill(1, 0), SetResize(1, 0),
 		EndContainer(),
 	EndContainer(),
 	NWidget(NWID_HORIZONTAL),

@@ -246,6 +246,7 @@ struct StockMarket {
 	std::vector<StockOrder> positions{};                           ///< Open positions.
 	std::vector<StockOrder> pending{};                             ///< Pending orders.
 	uint32_t next_id = 1;                                          ///< Number of the next order.
+	std::array<std::array<int64_t, 256>, MAX_COMPANIES> session_realized{}; ///< Realised profit per company and wallet since the game was started or loaded. Display only, not saved.
 
 	int32_t dividend_quarter_id = 0;  ///< Economy year * 4 + quarter that was last seen; 0 when not known yet.
 	int32_t dividend_delay = 0;       ///< Economy days to wait before the dividend of the ended quarter is paid; 0 when nothing is due.
@@ -300,6 +301,27 @@ int64_t GetStockFloatingProfit(CompanyID owner, uint8_t wallet);
 int64_t GetStockEquity(CompanyID owner, uint8_t wallet);
 int64_t GetStockFreeMargin(CompanyID owner, uint8_t wallet);
 int64_t GetStockMarginLevel(CompanyID owner, uint8_t wallet);
+
+/** Free margin below this share of the equity (in percent) raises the risk warning. */
+static constexpr int64_t STOCK_RISK_FREE_MARGIN_WARN_PERCENT = 20;
+
+/** How dangerous the margin situation of a wallet is. */
+enum class StockRiskLevel : uint8_t {
+	None,       ///< No margin is used.
+	Safe,       ///< Enough free margin.
+	Warning,    ///< Free margin is below #STOCK_RISK_FREE_MARGIN_WARN_PERCENT of the equity.
+	MarginCall, ///< Free margin is used up.
+};
+
+/** Margin usage of a wallet. */
+struct StockRisk {
+	StockRiskLevel level = StockRiskLevel::None; ///< The danger level.
+	int64_t usage_tenths = 0;                    ///< Used margin / equity in tenths of a percent; 100000 at most.
+	int64_t free_tenths = 0;                     ///< Free margin / equity in tenths of a percent; 0 when there is none.
+};
+
+StockRisk GetStockRisk(CompanyID owner, uint8_t wallet);
+int64_t GetStockSessionRealized(CompanyID owner, uint8_t wallet);
 void PayStockProfit(CompanyID owner, uint8_t wallet, int64_t profit, LedgerItem item = LedgerItem::End);
 
 #endif /* STOCK_BASE_H */
