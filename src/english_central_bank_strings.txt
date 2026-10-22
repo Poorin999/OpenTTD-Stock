@@ -1,0 +1,10 @@
+STR_CENTRAL_BANK_CAPTION                                        :Central Bank
+STR_CENTRAL_BANK_BORROW                                         :Borrow
+STR_CENTRAL_BANK_REPAY                                          :Repay
+STR_CENTRAL_BANK_REPAY_ALL                                      :Repay all
+STR_CENTRAL_BANK_TIP_BORROW                                     :{BLACK}Borrow from the central bank into the company cash. Borrowed money can never be moved to a trading wallet
+STR_CENTRAL_BANK_TIP_REPAY                                      :{BLACK}Repay a part of the debt from the company cash
+STR_CENTRAL_BANK_TIP_REPAY_ALL                                  :{BLACK}Repay as much of the debt as the company cash allows
+STR_BANK_ERROR_NO_TRADING_LOAN                                  :{WHITE}Central bank loans are paid into the company cash only, never into a trading wallet
+STR_BANK_ERROR_BORROWED_FUNDS                                   :{WHITE}Trading wallets can only be funded with your own unborrowed cash
+STR_BANK_ERROR_LEGACY_LOAN                                      :{WHITE}The original loan is switched off. Use the central bank

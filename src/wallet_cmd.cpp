@@ -25,6 +25,7 @@ static void InvalidateWalletWindows()
 {
 	InvalidateWindowData(WC_STOCK_MARKET, 0);
 	InvalidateWindowData(WC_STOCK_ORDER, 0);
+	InvalidateWindowData(WC_CENTRAL_BANK, 0);
 	InvalidateWindowClassesData(WC_FINANCES);
 }
 
@@ -76,7 +77,8 @@ CommandCost CmdWalletDelete(DoCommandFlags flags, uint8_t wallet)
 /**
  * Move money between two wallets of the company, one of which can be the company cash. Neither is an expense,
  * so the cost of the command is zero. Money can only leave a trading wallet when the free margin covers it,
- * so the open positions of that wallet stay covered.
+ * so the open positions of that wallet stay covered. Money can only enter a trading wallet from the unborrowed liquid
+ * cash (see #GetUnborrowedLiquidCash), so money of the central bank is never traded.
  * @param flags Type of operation.
  * @param from Number of the wallet that the money is taken from; #WALLET_CASH for the company cash.
  * @param to Number of the wallet that gets the money.
@@ -91,6 +93,14 @@ CommandCost CmdWalletTransfer(DoCommandFlags flags, uint8_t from, uint8_t to, Mo
 	if (from == to) return CommandCost(STR_WALLET_ERROR_BAD_WALLET);
 	if (GetWalletKind(_current_company, from) == WalletKind::End || GetWalletKind(_current_company, to) == WalletKind::End) {
 		return CommandCost(STR_WALLET_ERROR_BAD_WALLET);
+	}
+
+	/* Strict trading capital: a trading wallet is only funded from unborrowed cash, or from another trading wallet (whose money was unborrowed already). */
+	if (IsTradingWallet(_current_company, to) && !IsTradingWallet(_current_company, from)) {
+		/* Any other wallet (the fuel reserve) could be filled from borrowed cash, so it can not feed a trading wallet. */
+		if (GetWalletKind(_current_company, from) != WalletKind::Cash) return CommandCost(STR_BANK_ERROR_BORROWED_FUNDS);
+		const CommandCost capital = CheckTradingCapital(_current_company, amount);
+		if (capital.Failed()) return capital;
 	}
 
 	if (GetWalletBalance(_current_company, from) < amount) return CommandCost(STR_STOCK_ERROR_NO_FUNDS);

@@ -57,18 +57,50 @@ int64_t GetCentralBankAvailable(CompanyID company)
 	return std::max<int64_t>(0, GetCentralBankCreditLimit(company) - GetCentralBankDebt(company));
 }
 
+/**
+ * The money of a company that may go to the trading wallets: its cash minus everything that is borrowed. That is the cash
+ * minus the original OpenTTD loan (#Company::current_loan, 0 while the legacy loans are bypassed, but an old savegame can
+ * still have one) and minus the debt at the central bank, because a central bank loan is paid into the cash. As long as
+ * the cash is not more than the borrowed money, none of it is the company's own money.
+ * @param company The company.
+ * @return The unborrowed liquid cash, 0 or more.
+ */
+int64_t GetUnborrowedLiquidCash(CompanyID company)
+{
+	const Company *c = Company::GetIfValid(company);
+	if (c == nullptr) return 0;
+	const int64_t liquid = static_cast<int64_t>(c->money) - static_cast<int64_t>(c->current_loan) - GetCentralBankDebt(company);
+	return std::max<int64_t>(0, liquid);
+}
+
+/**
+ * Guard for every command that puts company money into a trading wallet: the amount must come out of the unborrowed
+ * liquid cash, so money of the central bank (or of the legacy loan) can never be traded.
+ * @param company The company that pays.
+ * @param amount The money that is to enter a trading wallet.
+ * @return An error when the amount is more than #GetUnborrowedLiquidCash, otherwise a zero cost.
+ */
+CommandCost CheckTradingCapital(CompanyID company, int64_t amount)
+{
+	if (amount > GetUnborrowedLiquidCash(company)) return CommandCost(STR_BANK_ERROR_BORROWED_FUNDS);
+	return CommandCost();
+}
+
 /** Tell the windows that show the loan that something changed. */
 static void InvalidateBankWindows()
 {
 	InvalidateWindowData(WC_STOCK_MARKET, 0);
 	InvalidateWindowData(WC_STOCK_ORDER, 0);
+	InvalidateWindowData(WC_CENTRAL_BANK, 0);
 	InvalidateWindowClassesData(WC_FINANCES);
 }
 
 /**
- * Borrow money from the central bank. The money is paid out to the company cash or to one of its trading wallets.
+ * Borrow money from the central bank. The money is paid out to the company cash only: loan money may never enter a
+ * trading wallet, so a trading wallet as destination is refused. The loan is not booked as income, so the cash and the
+ * income statistics of the company only show what the company earned.
  * @param flags Type of operation.
- * @param wallet Wallet that gets the money: #WALLET_CASH or a trading wallet.
+ * @param wallet Wallet that gets the money: must be #WALLET_CASH.
  * @param amount Money to borrow, more than zero and at most the available credit.
  * @return Zero cost, or an error.
  */
@@ -78,12 +110,13 @@ CommandCost CmdBankBorrow(DoCommandFlags flags, uint8_t wallet, Money amount_in)
 	if (!Company::IsValidID(_current_company)) return CMD_ERROR;
 	if (amount <= 0) return CommandCost(STR_STOCK_ERROR_BAD_AMOUNT);
 	const WalletKind kind = GetWalletKind(_current_company, wallet);
-	if (kind != WalletKind::Cash && kind != WalletKind::Trading) return CommandCost(STR_WALLET_ERROR_BAD_WALLET);
+	if (kind == WalletKind::Trading) return CommandCost(STR_BANK_ERROR_NO_TRADING_LOAN);
+	if (kind != WalletKind::Cash) return CommandCost(STR_WALLET_ERROR_BAD_WALLET);
 	if (amount > GetCentralBankAvailable(_current_company)) return CommandCost(STR_BANK_ERROR_LIMIT);
 
 	if (flags.Test(DoCommandFlag::Execute)) {
 		_central_bank.accounts[_current_company.base()].debt += amount;
-		AddToWallet(_current_company, wallet, amount);
+		Company::Get(_current_company)->money += Money(amount);
 		InvalidateBankWindows();
 	}
 	return CommandCost();
@@ -110,7 +143,11 @@ CommandCost CmdBankRepay(DoCommandFlags flags, uint8_t wallet, Money amount_in)
 	if (kind == WalletKind::Trading && GetStockFreeMargin(_current_company, wallet) < amount) return CommandCost(STR_STOCK_ERROR_NO_MARGIN);
 
 	if (flags.Test(DoCommandFlag::Execute)) {
-		AddToWallet(_current_company, wallet, -amount);
+		if (kind == WalletKind::Cash) {
+			Company::Get(_current_company)->money -= Money(amount); // A repayment is not an expense either.
+		} else {
+			AddToWallet(_current_company, wallet, -amount);
+		}
 		_central_bank.accounts[_current_company.base()].debt -= amount;
 		InvalidateBankWindows();
 	}

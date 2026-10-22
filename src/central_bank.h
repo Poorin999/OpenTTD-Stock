@@ -40,6 +40,8 @@ extern CentralBank _central_bank;
 int64_t GetCentralBankDebt(CompanyID company);
 int64_t GetCentralBankCreditLimit(CompanyID company);
 int64_t GetCentralBankAvailable(CompanyID company);
+int64_t GetUnborrowedLiquidCash(CompanyID company);
+CommandCost CheckTradingCapital(CompanyID company, int64_t amount);
 
 CommandCost CmdBankBorrow(DoCommandFlags flags, uint8_t wallet, Money amount);
 CommandCost CmdBankRepay(DoCommandFlags flags, uint8_t wallet, Money amount);

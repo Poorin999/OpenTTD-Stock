@@ -14,6 +14,7 @@
 #include "company_base.h"
 #include "company_func.h"
 #include "window_func.h"
+#include "central_bank.h"
 
 #include "table/strings.h"
 
@@ -95,6 +96,14 @@ CommandCost CmdStockOpen(DoCommandFlags flags, CompanyID target, StockOrderType 
 		probe.price = entry;
 		probe.volume = volume;
 		commission = GetStockCommission(entry * static_cast<int64_t>(volume));
+		/*
+		 * Strict trading capital: a position is paid from the balance of the trading wallet alone, never from the company
+		 * cash, so no loan money can be spent here. The wallet only holds unborrowed money (CmdBankBorrow refuses a wallet
+		 * and CmdWalletTransfer checks the unborrowed liquid cash), and the new margin and commission must be covered by it.
+		 */
+		if (GetStockUsedMargin(_current_company, wallet) + GetStockMargin(probe) + commission > GetWalletBalance(_current_company, wallet)) {
+			return CommandCost(STR_STOCK_ERROR_NO_MARGIN);
+		}
 		/* The wallet must be able to hold the margin of the position and to pay the commission. */
 		if (GetStockUsedMargin(_current_company, wallet) + GetStockMargin(probe) + commission > GetStockEquity(_current_company, wallet)) {
 			return CommandCost(STR_STOCK_ERROR_NO_MARGIN);
@@ -252,6 +261,11 @@ CommandCost CmdStockTransfer(DoCommandFlags flags, bool deposit, Money amount)
 {
 	const Wallet *wallet = _wallets.FindFirst(_current_company, WalletKind::Trading);
 	if (wallet == nullptr) return CommandCost(STR_WALLET_ERROR_BAD_WALLET);
+	/* Strict trading capital: a deposit may only be paid with unborrowed liquid cash (CmdWalletTransfer checks it again). */
+	if (deposit && amount > 0) {
+		const CommandCost capital = CheckTradingCapital(_current_company, amount);
+		if (capital.Failed()) return capital;
+	}
 	return deposit ? CmdWalletTransfer(flags, WALLET_CASH, wallet->id, amount) : CmdWalletTransfer(flags, wallet->id, WALLET_CASH, amount);
 }
 

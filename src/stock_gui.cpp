@@ -549,7 +549,8 @@ struct StockWindow : Window {
 			if (!ParseStockNumber(*str, amount) || amount <= 0) return;
 			const uint8_t wallet = GetStockActiveWallet();
 			if (kind == QueryKind::Borrow) {
-				Command<CMD_BANK_BORROW>::Post(STR_BANK_ERROR_CANT_BORROW, wallet, Money(StockDisplayToMoney(amount)));
+				/* Loan money is paid into the company cash only; it can never enter a trading wallet. */
+				Command<CMD_BANK_BORROW>::Post(STR_BANK_ERROR_CANT_BORROW, WALLET_CASH, Money(StockDisplayToMoney(amount)));
 			} else {
 				Command<CMD_BANK_REPAY>::Post(STR_BANK_ERROR_CANT_REPAY, wallet, Money(StockDisplayToMoney(amount)));
 			}
@@ -849,7 +850,7 @@ struct StockWindow : Window {
 
 		const int right = std::min(r.right - ScaleGUITrad(8), r.left + ScaleGUITrad(420));
 		const std::pair<std::string, bool> buttons[3] = {
-			{"Borrow into " + wallet + "...", available > 0},
+			{"Borrow into company cash... (never into a trading wallet)", available > 0},
 			{"Repay from " + wallet + "...", a.debt > 0},
 			{"Repay as much as possible from " + wallet + " (" + money(this->GetRepayable()) + ")", this->GetRepayable() > 0},
 		};
