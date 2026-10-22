@@ -295,8 +295,8 @@ def main(tree):
             sys.exit("ERROR: timer_game_calendar.cpp has a different layout, the calendar was not connected to the game clock")
         new = (
             "\t/* The clock of the mod decides when a day starts: at 00:00 exactly, so the date and HH:MM always belong together.\n"
-            "\t * This needs wallclock timekeeping units: there the economy has its own days, in calendar units it follows the calendar date. */\n"
-            "\tif (GameTimeManager::IsCalendarSynced() && TimerGameEconomy::UsingWallclockUnits()) {\n"
+            "\t * This works in calendar and in wallclock timekeeping units; the economy keeps counting its own 74-tick days. */\n"
+            "\tif (GameTimeManager::IsCalendarSynced()) {\n"
             "\t\tif (!GameTimeManager::Get().TryConsumeCalendarDay()) {\n"
             "\t\t\t/* Same day: date_fract follows the time of the day (for the vehicle calendar updates, one of 74 steps per day). */\n"
             "\t\t\tconst auto fract = static_cast<TimerGameCalendar::DateFract>(GameTimeManager::Get().GetDayFraction(Ticks::DAY_TICKS));\n"
@@ -310,8 +310,7 @@ def main(tree):
             "\tTimerGameCalendar::date_fract = 0;\n"
             "\tTimerGameCalendar::sub_date_fract = 0;\n")
         s = s[:old.start()] + new + s[old.end():]
-        for inc, anchors in (('#include "timer_game_economy.h"', ['#include "timer_game_calendar.h"']),
-                             ('#include "../game_time/game_time_manager.h"', ['#include "timer_game_economy.h"'])):
+        for inc, anchors in (('#include "../game_time/game_time_manager.h"', ['#include "timer_game_calendar.h"']),):
             s = ensure_include(s, inc, anchors + ['#include "../stdafx.h"', '#include "stdafx.h"'])
         p.write_text(s, encoding="utf-8")
         print("timer_game_calendar.cpp: the calendar day follows the game clock")

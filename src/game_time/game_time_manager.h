@@ -59,9 +59,8 @@ static constexpr bool GAME_TIME_BYPASS_LEGACY_LOANS = true;
 /**
  * True: the date of the original game (TimerGameCalendar) is driven by this clock. The calendar moves to the next day exactly when the clock
  * passes 23:59 -> 00:00, so one calendar day is one game day (24 real minutes) and the HH:MM of the status bar and the date always belong
- * together. Needs the change of timer_game_calendar.cpp that apply_overlay.py makes, and wallclock timekeeping units (the economy keeps
- * running in its own 74-tick days, so incomes, costs and the economy timers of OpenTTD are not changed). In calendar timekeeping units the
- * economy date is tied to the calendar date, so there the calendar keeps its original speed.
+ * together. Needs the change of timer_game_calendar.cpp that apply_overlay.py makes. It works in calendar and in wallclock timekeeping units. The
+ * economy keeps running in its own 74-tick days, so incomes, costs and the economy timers of OpenTTD are not changed.
  */
 static constexpr bool GAME_TIME_SYNC_CALENDAR = true;
 /** The cash that a new company starts with while the original loan is bypassed. It is the company's own money: the company starts without any loan. In the base currency (pounds). */
