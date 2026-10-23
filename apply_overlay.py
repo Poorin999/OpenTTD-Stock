@@ -15,6 +15,7 @@ It looks for the mod files by name anywhere next to this script, so it does not 
   - script_company.hpp/.cpp: ScriptCompany::GetCentralBankDebt and GetCentralBankAvailable, so that AIs can see the central bank debt
   - timer_game_calendar.cpp, economy_settings.ini: the date of the original game follows the HH:MM clock (a new day starts at 00:00)
 """
+import hashlib
 import re
 import sys
 from pathlib import Path
@@ -37,6 +38,8 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "wallet_cmd.h": "src", "wallet_cmd.cpp": "src",
     "central_bank.h": "src", "central_bank.cpp": "src",
     "gold_reserve.h": "src", "gold_reserve.cpp": "src",
+    "gold_panel.h": "src", "gold_panel.cpp": "src",
+    "graph_gui.cpp": "src", "graph_widget.h": "src/widgets",
     "central_bank_gui.h": "src", "central_bank_gui.cpp": "src",
     "central_bank_widget.h": "src/widgets",
     "RetailMath.h": "src", "RetailMarketManager.h": "src", "RetailMarketManager.cpp": "src",
@@ -57,7 +60,7 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_GOLD_BUY", "buy gold for the reserve"),
     ("CMD_GOLD_SELL", "sell gold of the reserve"),
 ]
-NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "gold_reserve.cpp", "gold_reserve.h",
+NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "gold_reserve.cpp", "gold_reserve.h", "gold_panel.cpp", "gold_panel.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
                "RetailMath.h", "RetailMarketManager.h", "RetailMarketManager.cpp",
                "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]
@@ -163,7 +166,30 @@ static const GameTimeSubscription _money_trace_minute(GameTimeEvent::Minute, [](
 """
 
 
+# Whole files of OpenTTD that this overlay replaces (the gold panel goes into the operating profit graph window).
+# They were made from the OpenTTD 15.3 files; the sha256 (line ends normalised) is that of the ORIGINAL file, so a tree of another version is refused
+# instead of being overwritten with a file that does not fit it. A file that already has the patch is accepted.
+REPLACED_FILES = {
+    "graph_gui.cpp": ("src", "2085ad159be9fbcd5889a8708f7fa190e606ea43a43ff9075f5979f31fab9167"),
+    "graph_widget.h": ("src/widgets", "383d17134b1969655795947767f78facdc0d3883656255d6da31f4cb07e43f7f"),
+}
+
+
+def check_replaced_files(tree):
+    for name, (folder, digest) in REPLACED_FILES.items():
+        target = tree / folder / name
+        if not target.is_file():
+            sys.exit(f"ERROR: {folder}/{name} not found in the OpenTTD tree")
+        data = target.read_bytes().replace(b"\r\n", b"\n")
+        if b"GOLD_PANEL_PATCH" in data:
+            continue
+        if hashlib.sha256(data).hexdigest() != digest:
+            sys.exit(f"ERROR: {folder}/{name} is not the OpenTTD 15.3 file this overlay was made for. Nothing was changed. "
+                     f"Send this file to the person who maintains the overlay so that the gold panel can be made for your version.")
+
+
 def main(tree):
+    check_replaced_files(tree)
     for name, folder in FILES.items():
         src = find(name, folder)
         dst = tree / folder / name

@@ -1,0 +1,34 @@
+/*
+ * This file is part of OpenTTD.
+ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
+ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
+ */
+
+/** @file gold_panel.h The gold trading panel: drawing and the actions of its buttons. Used by the operating profit graph window. */
+
+#ifndef GOLD_PANEL_H
+#define GOLD_PANEL_H
+
+#include "window_gui.h"
+#include <cstdint>
+#include <optional>
+#include <string>
+
+/** State and actions of one gold trading panel. The window that shows it owns one, and calls these from its draw and click handlers. */
+struct GoldPanel {
+	int64_t buy_qty = 10;   ///< Ounces in the buy field.
+	int64_t sell_qty = 10;  ///< Ounces in the sell field.
+	bool query_buy = true;  ///< Whether the open query window is for the buy field.
+
+	bool CanBuy() const;
+	bool CanSell() const;
+	void Buy() const;
+	void Sell() const;
+	void AskQuantity(Window *parent, bool buy);
+	void QueryFinished(const std::optional<std::string> &text);
+	void DrawInfo(const Rect &r) const;
+	void DrawQuantity(const Rect &r, bool buy) const;
+};
+
+#endif /* GOLD_PANEL_H */

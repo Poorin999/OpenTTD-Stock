@@ -1,7 +1,10 @@
 STR_GOLD_BUY                                                    :Buy Gold
 STR_GOLD_SELL                                                   :Sell Gold
 STR_GOLD_TAB                                                    :Gold
+STR_GOLD_TOGGLE                                                 :Gold / Graph
+STR_GOLD_CAPTION                                                :Gold Trading Panel
 STR_GOLD_TIP_TAB                                                :{BLACK}Show the gold trading panel instead of the chart. Press again to go back to the chart
+STR_GOLD_TIP_TOGGLE                                             :{BLACK}Switch between the gold trading panel and the operating profit graph
 STR_GOLD_TIP_BUY                                                :{BLACK}Buy gold for the reserve. It is paid from the unborrowed liquid cash only
 STR_GOLD_TIP_SELL                                               :{BLACK}Sell gold of your reserve. The money goes into the company cash
 STR_GOLD_TIP_QTY                                                :{BLACK}Click to type the number of ounces

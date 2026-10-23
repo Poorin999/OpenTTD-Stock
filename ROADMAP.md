@@ -9,7 +9,8 @@ A mod of OpenTTD (the build uses OpenTTD 15.x, Windows MSVC, GitHub Actions `bui
 - **Wallets** (`wallet_*`): cash plus trading wallets. Money can only go into a trading wallet from unborrowed cash.
 - **Central Bank** (`central_bank*.{h,cpp}`): the only lender. Loans, daily interest, penalties, account log, account statement (ledger).
 - **Past statements window** (`central_bank_gui.cpp`): 10 years, years on the left, the statement of the chosen year on the right.
-- **Gold reserve** (`gold_reserve.{h,cpp}`): organic gold price, limited market stock, gold held by companies, backing ratio, credit standing. Panel in the Trading Terminal (Gold button).
+- **Gold reserve** (`gold_reserve.{h,cpp}`): organic gold price, limited market stock, gold held by companies, backing ratio, credit standing.
+- **Gold panel** (`gold_panel.{h,cpp}`): drawing and Buy/Sell actions. It is shown in the **operating profit graph window** (OpenTTD `graph_gui.cpp`), in the place of the graph; the Gold / Graph button in the title bar switches back to the graph. It is NOT in the Trading Terminal any more.
 - **Game clock** (`game_time/`): the game has an HH:MM clock; days, candles and timeframes are derived from one number.
 - Retail investors (`RetailMarketManager.*`), stock AI (`stock_ai.cpp`).
 
@@ -23,6 +24,10 @@ The repository is an **overlay**, not a full OpenTTD tree. `apply_overlay.py <op
   Commands run on every client of a multiplayer game, so they must give the same result everywhere.
 - A new saved value needs a record kind in `saveload/stock_sl.cpp` (`StockRecordKind`: used so far 0-25; next free is 26), written in `Save`, read in `Load`, and reset in `StockMarket::Reset` (`stock_base.cpp`).
 - We cannot compile here. The only compiler is the GitHub Actions build. Read its log (the first error is the real one; later ones follow from it).
+
+## 2b. Whole OpenTTD files that the overlay replaces
+`src/graph_gui.cpp` and `src/widgets/graph_widget.h` are modified copies of the OpenTTD 15.3 files (marker: `GOLD_PANEL_PATCH`). `apply_overlay.py` checks the sha256 of the original in the tree (`REPLACED_FILES`) and stops if it differs, so another OpenTTD version is never overwritten silently. To port to another version: take that version's two files, redo the small edits (search `GOLD_PANEL_PATCH` and `WID_PHG_GOLD_`), and update the hashes.
+Note: the 15.3 files use `Colours::Brown`, `WindowClass::...`, `FontSize::...`; the older mod files use `COLOUR_GREY`, `WC_...`, `FS_NORMAL`. If the build says one of those names does not exist, that is the cause.
 
 ## 3. Rules that already cost a failed build
 1. **Comments after `///<` in `src/widgets/*_widget.h` must be plain ASCII with no double quotes.** The script API generator copies them into `script_window.hpp` as strings. A quote or Thai text there gives `C2001 newline in constant` followed by dozens of `enum type redefinition` errors.
@@ -50,6 +55,7 @@ Source of gold: a world market with a limited stock. It is **not** connected to 
 - [x] Past statements window (10 years). Yearly expenses of the game (3 years only) are copied into the ledger every day so 10 years exist from now on; older years show n/a.
 - [x] Gold reserve: price engine, commands `CMD_GOLD_BUY` / `CMD_GOLD_SELL`, savegame records, gold panel in the Trading Terminal (toggle with the Gold button, replaces the chart area while on).
 - [x] Limited market stock for gold (scarcity price).
+- [x] Gold panel moved from the Trading Terminal into the operating profit graph window (replaces the graph; Gold / Graph button switches).
 
 ## 6. Planned (in a sensible order)
 1. **Gold in the account statement**: add `LedgerItem` lines for gold purchases and sales, and a section in both statement windows. Realised profit of gold belongs in "Capital Gains / Realized Profit".
@@ -60,6 +66,13 @@ Source of gold: a world market with a limited stock. It is **not** connected to 
 6. **Script API**: `ScriptCompany::GetGoldHoldings`, `GetGoldPrice`, so game scripts and AIs can see it (see how `GetCentralBankDebt` was added in `apply_overlay.py`).
 7. **Translations**: the gold panel is English only.
 8. **Gold price chart**: a history of the daily price (needs a saved ring buffer).
+
+## 6b. Evaluated and NOT done: three real climates in one map
+The owner asked for Temperate + Sub-arctic + Sub-tropical in one map, chosen at world generation. Checked against OpenTTD 15.3 sources (genworld.cpp, genworld_gui.cpp, industry_cmd.cpp, landscape.cpp, tgp.cpp, settings/*.ini):
+- `game_creation.landscape` is one value for the whole game, read in about 17 places in those files alone (e.g. `industry_cmd.cpp:93` enables industries by `climate_availability`; `:2312` and `:2343` use `appear_creation[landscape]` and `appear_ingame[landscape]`; `landscape.cpp:1643` and `:1702` choose the generator step per climate).
+- Not in those files, but known from OpenTTD: cargo types, houses, vehicles and the ground/tree sprite sets are also loaded per climate and share ids, so they would collide if two climates were active. This cannot be done with an overlay and cannot be tested without a compiler.
+- Native alternative that already exists: Sub-tropical has three zones in one map (Normal, Desert, Rainforest; `TropicZone`, `CreateDesertOrRainForest`, Desert coverage in Generate World).
+Possible work: a Generate World option for the three Sub-tropical zones (rainforest coverage slider, guarantee that all three exist). Needs edits of landscape.cpp, genworld_gui.cpp, world_settings.ini.
 
 ## 7. Open questions for the owner
 - Should the gold panel replace the chart for good, or stay a toggle (now: toggle)?

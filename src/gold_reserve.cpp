@@ -163,6 +163,12 @@ void GoldReserveManager::UpdateDaily()
 	InvalidateWindowData(WC_STOCK_MARKET, 0);
 }
 
+/* The market starts in the first game minute (new game or a savegame from before the gold), not on the first new day: until then the price is 0 and nothing can be traded. */
+static const GameTimeSubscription _gold_start(GameTimeEvent::Minute, [](const GameTimeSnapshot &)
+{
+	if (_gold_reserve.GetPriceCents() <= 0) _gold_reserve.EnsureStarted();
+});
+
 static const GameTimeSubscription _gold_daily(GameTimeEvent::Day, [](const GameTimeSnapshot &)
 {
 	_gold_reserve.UpdateDaily();
