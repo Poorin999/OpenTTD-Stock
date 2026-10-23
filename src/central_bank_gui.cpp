@@ -31,6 +31,7 @@
 
 #include "widgets/central_bank_widget.h"
 #include "game_time/game_time_manager.h"
+#include "stock_dev.h"
 
 #include "table/strings.h"
 
@@ -386,6 +387,7 @@ struct CentralBankWindow : Window {
 	{
 		/* The button is pushed in while the statement window is open. */
 		this->SetWidgetLoweredState(WID_CB_OPEN_STATEMENT, FindWindowById(WC_CENTRAL_BANK, CB_WINDOW_STATEMENT) != nullptr);
+		this->GetWidget<NWidgetStacked>(WID_CB_SKIP_SEL)->SetDisplayedPlane(_stock_dev_tools ? 0 : 1);
 		this->DrawWidgets();
 	}
 
@@ -602,6 +604,12 @@ struct CentralBankWindow : Window {
 				ShowQueryString({}, STR_STOCK_QUERY_REPAY, 24, this, CS_ALPHANUMERAL, {});
 				break;
 
+			case WID_CB_SKIP_1H: SkipGameMinutes(60); break;
+			case WID_CB_SKIP_1D: SkipGameMinutes(60 * 24); break;
+			case WID_CB_SKIP_7D: SkipGameMinutes(60 * 24 * 7); break;
+			case WID_CB_SKIP_30D: SkipGameMinutes(60 * 24 * 30); break;
+			case WID_CB_SKIP_90D: SkipGameMinutes(60 * 24 * 90); break;
+
 			case WID_CB_REPAY_ALL: {
 				const int64_t amount = this->GetRepayable();
 				if (amount > 0) Command<CMD_BANK_REPAY>::Post(STR_BANK_ERROR_CANT_REPAY, WALLET_CASH, Money(amount));
@@ -761,6 +769,17 @@ static constexpr std::initializer_list<NWidgetPart> _nested_central_bank_widgets
 		/* Left: the numbers and the three buttons. */
 		NWidget(NWID_VERTICAL),
 			NWidget(WWT_PANEL, COLOUR_GREY, WID_CB_SUMMARY), SetMinimalSize(270, 120), SetResize(0, 1), SetFill(1, 1),
+			EndContainer(),
+			/* Test tool: move the game clock forward. Shown only after 'stock_dev on' in the console (plane 0); plane 1 is empty. */
+			NWidget(NWID_SELECTION, INVALID_COLOUR, WID_CB_SKIP_SEL),
+				NWidget(NWID_HORIZONTAL),
+					NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_CB_SKIP_1H), SetMinimalSize(52, 14), SetFill(1, 0), SetStringTip(STR_CENTRAL_BANK_SKIP_1H, STR_CENTRAL_BANK_TIP_SKIP),
+					NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_CB_SKIP_1D), SetMinimalSize(52, 14), SetFill(1, 0), SetStringTip(STR_CENTRAL_BANK_SKIP_1D, STR_CENTRAL_BANK_TIP_SKIP),
+					NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_CB_SKIP_7D), SetMinimalSize(52, 14), SetFill(1, 0), SetStringTip(STR_CENTRAL_BANK_SKIP_7D, STR_CENTRAL_BANK_TIP_SKIP),
+					NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_CB_SKIP_30D), SetMinimalSize(52, 14), SetFill(1, 0), SetStringTip(STR_CENTRAL_BANK_SKIP_30D, STR_CENTRAL_BANK_TIP_SKIP),
+					NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_CB_SKIP_90D), SetMinimalSize(52, 14), SetFill(1, 0), SetStringTip(STR_CENTRAL_BANK_SKIP_90D, STR_CENTRAL_BANK_TIP_SKIP),
+				EndContainer(),
+				NWidget(NWID_SPACER),
 			EndContainer(),
 			NWidget(NWID_HORIZONTAL),
 				NWidget(WWT_PUSHTXTBTN, COLOUR_GREEN, WID_CB_BORROW), SetMinimalSize(80, 14), SetFill(1, 0), SetStringTip(STR_CENTRAL_BANK_BORROW, STR_CENTRAL_BANK_TIP_BORROW),

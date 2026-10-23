@@ -12,3 +12,9 @@ STR_CENTRAL_BANK_STATEMENT                                      :ใบแจ้
 STR_CENTRAL_BANK_TIP_STATEMENT                                  :{BLACK}Open the account statement in its own window, next to the bank window: interest and fees, dividends and profit, transfers, and the costs of vehicles and construction
 STR_CENTRAL_BANK_STATEMENT_CAPTION                              :ใบแจ้งยอดบัญชี (ACCOUNT STATEMENT)
 STR_CENTRAL_BANK_ARCHIVE_CAPTION                               :Statement ย้อนหลัง (PAST STATEMENTS)
+STR_CENTRAL_BANK_SKIP_1H                                        :+1 hour
+STR_CENTRAL_BANK_SKIP_1D                                        :+1 day
+STR_CENTRAL_BANK_SKIP_7D                                        :+7 days
+STR_CENTRAL_BANK_SKIP_30D                                       :+30 days
+STR_CENTRAL_BANK_SKIP_90D                                       :+90 days
+STR_CENTRAL_BANK_TIP_SKIP                                       :{BLACK}Test tool: move the game clock forward. Interest, retail investors, candles, gold price and quarters all run as if the time had passed. Single player only

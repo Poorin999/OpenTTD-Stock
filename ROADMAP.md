@@ -32,6 +32,15 @@ History: a first version replaced the whole files with copies of a newer OpenTTD
 The CI workflow (.github/workflows/build-windows.yml) also refuses to copy any file from `src/` of this repository that OpenTTD 15.3 already has, so files of OpenTTD must never be put in `src/` here.
 The CI order is: checkout OpenTTD 15.3, `git apply stock-market.patch`, copy `src/` (no clashes allowed), `python3 mod/apply_overlay.py openttd`, build.
 
+## 2c. Test tools (remove before a release)
+Off at every start. In the OpenTTD console (key `` ` ``):
+- `stock_dev on` / `stock_dev off`: switch the tools (`_stock_dev_tools`, `stock_dev.h`). While on, the Central Bank window shows a row of buttons `+1 hour`, `+1 day`, `+7 days`, `+30 days`, `+90 days` (`WID_CB_SKIP_*`, in a selection `WID_CB_SKIP_SEL`, plane 0 = buttons, plane 1 = nothing; the hidden row still leaves a blank line).
+- `stock_skip <days>` or `stock_skip <hours>h` (for example `stock_skip 30`, `stock_skip 12h`; at most 400 days): move the clock forward from the console. It needs `stock_dev on`.
+- Both call `SkipGameMinutes` (`stock_console.cpp`) -> `GameTimeManager::AdvanceMilliseconds`, so every system that listens to the clock runs its events in time order: central bank interest, retail investors (daily), candles of all timeframes, gold price, the 90-day quarter close. Single player only (`_networking` is refused). Only the clock moves: vehicles and the economy of OpenTTD do not, and the calendar date catches up one day per tick afterwards.
+- A game day is 24 real minutes at normal speed, a quarter 36 real hours: without the skip, the retail investors (they need 30 days of price) and the dividends (they need 3 profitable quarters) cannot be tested.
+- The commands are registered by `patch_console_file` in `apply_overlay.py`: one declaration and one call in `IConsoleStdLibRegister()` of `console_cmds.cpp` (marker `STOCK_CONSOLE_PATCH`). The code uses the console API of the files that the owner uploaded (`IConsole::CmdRegister`, handlers `bool Fn(std::span<std::string_view> argv)`, `IConsolePrint(CC_DEFAULT, ...)`); those files may come from master, so if the build fails in stock_console.cpp, compare with the real 15.3 `console_cmds.cpp`.
+- To remove: delete `stock_console.cpp`, `stock_dev.h`, their entries in `FILES` and `NEW_SOURCES`, `patch_console_file`, the `WID_CB_SKIP_*` row and its cases in `central_bank_gui.cpp`, the enum entries and the `STR_CENTRAL_BANK_SKIP_*` strings.
+
 ## 3. Rules that already cost a failed build
 1. **Comments after `///<` in `src/widgets/*_widget.h` must be plain ASCII with no double quotes.** The script API generator copies them into `script_window.hpp` as strings. A quote or Thai text there gives `C2001 newline in constant` followed by dozens of `enum type redefinition` errors.
 2. All game maths is **integer** (no `double`, `pow`, `sqrt` in anything that changes game state). Floating point can desync multiplayer. `double` is fine for drawing and for parsing what the player types.

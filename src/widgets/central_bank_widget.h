@@ -19,6 +19,12 @@ enum CentralBankWidgets : WidgetID {
 	WID_CB_REPAY,           ///< Button: repay a part of the debt from the company cash.
 	WID_CB_REPAY_ALL,       ///< Button: repay as much of the debt as the company cash allows.
 	WID_CB_OPEN_STATEMENT,  ///< Button: open the account statement in its own window.
+	WID_CB_SKIP_SEL,        ///< Selection: the test buttons (after the console command) or nothing.
+	WID_CB_SKIP_1H,         ///< Test button: move the game clock forward by 1 hour (single player only).
+	WID_CB_SKIP_1D,         ///< Test button: move the game clock forward by 1 day (single player only).
+	WID_CB_SKIP_7D,         ///< Test button: move the game clock forward by 7 days (single player only).
+	WID_CB_SKIP_30D,        ///< Test button: move the game clock forward by 30 days (single player only).
+	WID_CB_SKIP_90D,        ///< Test button: move the game clock forward by 90 days, one quarter (single player only).
 	WID_CBS_CAPTION,        ///< Caption of the account statement window.
 	WID_CBS_PANEL,          ///< Panel with the account statement.
 	WID_CBS_NEWER,          ///< Button: show the statement of a newer period.

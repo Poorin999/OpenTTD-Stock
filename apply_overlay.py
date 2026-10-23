@@ -38,6 +38,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "central_bank.h": "src", "central_bank.cpp": "src",
     "gold_reserve.h": "src", "gold_reserve.cpp": "src",
     "gold_panel.h": "src", "gold_panel.cpp": "src",
+    "stock_dev.h": "src", "stock_console.cpp": "src",
     "central_bank_gui.h": "src", "central_bank_gui.cpp": "src",
     "central_bank_widget.h": "src/widgets",
     "RetailMath.h": "src", "RetailMarketManager.h": "src", "RetailMarketManager.cpp": "src",
@@ -58,7 +59,7 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_GOLD_BUY", "buy gold for the reserve"),
     ("CMD_GOLD_SELL", "sell gold of the reserve"),
 ]
-NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "gold_reserve.cpp", "gold_reserve.h", "gold_panel.cpp", "gold_panel.h",
+NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "gold_reserve.cpp", "gold_reserve.h", "gold_panel.cpp", "gold_panel.h", "stock_console.cpp", "stock_dev.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
                "RetailMath.h", "RetailMarketManager.h", "RetailMarketManager.cpp",
                "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]
@@ -265,6 +266,29 @@ def _write_like(path, text, crlf):
     path.write_bytes((text.replace("\n", "\r\n") if crlf else text).encode("utf-8"))
 
 
+CONSOLE_MARKER = "STOCK_CONSOLE_PATCH"
+
+
+def patch_console_file(tree):
+    """Register the test commands of the mod ('stock_dev', 'stock_skip', in stock_console.cpp): one declaration and one call in
+    IConsoleStdLibRegister() of console_cmds.cpp. In place, at an anchor; nothing is written when the anchor is missing."""
+    target = tree / "src" / "console_cmds.cpp"
+    if not target.is_file():
+        sys.exit(f"ERROR: {target} not found in the OpenTTD tree")
+    text, crlf = _read_lf(target)
+    if CONSOLE_MARKER in text:
+        print("console_cmds.cpp: test commands already registered")
+        return
+    m = re.search(r"^void IConsoleStdLibRegister\(\)\n\{\n", text, re.M)
+    if not m:
+        sys.exit("ERROR: void IConsoleStdLibRegister() not found in console_cmds.cpp (anchor of the console patch)")
+    call = f"\tRegisterStockConsoleCommands(); /* {CONSOLE_MARKER} */\n"
+    decl = f"void RegisterStockConsoleCommands(); /* {CONSOLE_MARKER}: stock_console.cpp */\n\n"
+    text = text[:m.start()] + decl + text[m.start():m.end()] + call + text[m.end():]
+    _write_like(target, text, crlf)
+    print("console_cmds.cpp: test commands registered")
+
+
 def patch_graph_files(tree):
     gui = tree / "src" / "graph_gui.cpp"
     wid = tree / "src" / "widgets" / "graph_widget.h"
@@ -333,6 +357,7 @@ def patch_graph_files(tree):
 
 def main(tree):
     patch_graph_files(tree)
+    patch_console_file(tree)
     for name, folder in FILES.items():
         src = find(name, folder)
         dst = tree / folder / name
