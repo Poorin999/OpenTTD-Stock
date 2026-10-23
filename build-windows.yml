@@ -1,0 +1,91 @@
+name: Build OpenTTD 15.3 (Stock Market) for Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  windows:
+    # windows-latest uses a newer MSVC toolchain than the legacy breakpad port supports.
+    # Pin to 2022 until the dependency is updated.
+    runs-on: windows-2022
+
+    steps:
+    - name: Checkout this repository (holds stock-market.patch and the new source files in src/)
+      uses: actions/checkout@v4
+      with:
+        path: mod
+
+    - name: Checkout OpenTTD 15.3
+      uses: actions/checkout@v4
+      with:
+        repository: OpenTTD/OpenTTD
+        ref: '15.3'
+        path: openttd
+
+    # The patch only changes files that already exist in OpenTTD 15.3.
+    - name: Apply stock market patch
+      shell: bash
+      run: |
+        cd openttd
+        git apply --whitespace=nowarn ../mod/stock-market.patch
+        git status --short
+
+    # The new files of the trading terminal live in src/ of this repository.
+    # Refuse to overwrite anything that OpenTTD already has, so that the two sources can never clash.
+    - name: Add stock market source files
+      shell: bash
+      run: |
+        cd mod/src
+        status=0
+        while IFS= read -r f; do
+          if [ -e "../../openttd/src/$f" ]; then
+            echo "::error::src/$f already exists in OpenTTD 15.3 (or in the patch); refusing to overwrite it"
+            status=1
+          fi
+        done < <(find . -type f | sed 's|^\./||' | sort)
+        [ "$status" -eq 0 ] || exit 1
+        cp -rv . ../../openttd/src/
+        
+    - name: Register wallet commands, sources and strings
+      shell: bash
+      run: python3 mod/apply_overlay.py openttd
+      
+    - name: Setup vcpkg
+      id: vcpkg
+      uses: OpenTTD/actions/setup-vcpkg@v6
+      with:
+        path: openttd
+
+    - name: Configure developer command prompt
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+
+    - name: Build
+      shell: bash
+      working-directory: openttd
+      run: |
+        mkdir build
+        cd build
+        cmake .. \
+          -GNinja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DVCPKG_TARGET_TRIPLET=x64-windows-static \
+          -DCMAKE_TOOLCHAIN_FILE="${{ steps.vcpkg.outputs.vcpkg-cmake }}"
+        cmake --build .
+
+    - name: Collect files
+      shell: bash
+      run: |
+        mkdir -p out/lang
+        cp openttd/build/openttd.exe out/
+        cp -r openttd/bin/ai openttd/bin/game out/ 2>/dev/null || true
+        cp openttd/build/lang/*.lng out/lang/ 2>/dev/null || true
+
+    - name: Upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: OpenTTD-15.3-StockMarket-Windows
+        path: out

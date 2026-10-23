@@ -12,6 +12,7 @@ It looks for the mod files by name anywhere next to this script, so it does not 
     old loans are moved to the central bank by central_bank.cpp; bankruptcy and the loan score count the central bank debt
   - window_type.h / widgets: the Central Bank window class (WC_CENTRAL_BANK)
   - ShowCompanyFinances() (company_gui.cpp), statusbar_gui.cpp: the finances menu and the statusbar button open ShowCentralBankWindow()
+  - script_company.hpp/.cpp: ScriptCompany::GetCentralBankDebt and GetCentralBankAvailable, so that AIs can see the central bank debt
   - timer_game_calendar.cpp, economy_settings.ini: the date of the original game follows the HH:MM clock (a new day starts at 00:00)
 """
 import re
@@ -483,6 +484,47 @@ def main(tree):
                 s = ensure_include(s, '#include "core/format.hpp"', ['#include "company_func.h"', '#include "stdafx.h"'])
                 p.write_text(s, encoding="utf-8")
                 print(f"{p.name}: money trace added (money_trace.log)")
+
+    # Script API: the AI companies (and game scripts) can read the debt of the central bank. The original loan functions of ScriptCompany stay as they are
+    # (they only describe the loan that does not exist any more); these are the functions of the money system of the mod.
+    hpp = tree / "src" / "script" / "api" / "script_company.hpp"
+    cpp = tree / "src" / "script" / "api" / "script_company.cpp"
+    if not hpp.exists() or not cpp.exists():
+        print("WARNING: src/script/api/script_company.hpp/.cpp not found, the script API has no central bank functions")
+    else:
+        h = hpp.read_text(encoding="utf-8")
+        c = cpp.read_text(encoding="utf-8")
+        decl_rx = r"^([ \t]*)static Money GetLoanAmount\(\);[ \t]*\n"
+        if "GetCentralBankDebt" in h and "GetCentralBankDebt" in c:
+            print("script_company: central bank functions already present")
+        elif not re.search(decl_rx, h, re.M):
+            print("WARNING: ScriptCompany::GetLoanAmount not found in script_company.hpp, the script API has no central bank functions")
+        else:
+            decls = (
+                "\n\t/**\n\t * Get the money that the company owes to the central bank (OpenTTD-Stock mod). The original loan does not exist in this game.\n"
+                "\t * @param company The company to get the debt of.\n\t * @pre ResolveCompanyID(company) != COMPANY_INVALID.\n"
+                "\t * @return The debt in the money of the game, or -1 when the company is not valid.\n\t */\n"
+                "\tstatic Money GetCentralBankDebt(CompanyID company);\n"
+                "\n\t/**\n\t * Get the credit that the central bank still lends to the company (OpenTTD-Stock mod): the credit limit minus the debt.\n"
+                "\t * @param company The company to get the available credit of.\n\t * @pre ResolveCompanyID(company) != COMPANY_INVALID.\n"
+                "\t * @return The available credit, or -1 when the company is not valid.\n\t */\n"
+                "\tstatic Money GetCentralBankAvailable(CompanyID company);\n"
+            )
+            m = re.search(decl_rx, h, re.M)
+            h = h[:m.end()] + decls + h[m.end():]
+            impl = (
+                "\n/* static */ Money ScriptCompany::GetCentralBankDebt(ScriptCompany::CompanyID company)\n{\n"
+                "\tcompany = ResolveCompanyID(company);\n\tif (company == ScriptCompany::COMPANY_INVALID) return -1;\n\n"
+                "\treturn ::GetCentralBankDebt(ScriptCompany::FromScriptCompanyID(company));\n}\n"
+                "\n/* static */ Money ScriptCompany::GetCentralBankAvailable(ScriptCompany::CompanyID company)\n{\n"
+                "\tcompany = ResolveCompanyID(company);\n\tif (company == ScriptCompany::COMPANY_INVALID) return -1;\n\n"
+                "\treturn ::GetCentralBankAvailable(ScriptCompany::FromScriptCompanyID(company));\n}\n"
+            )
+            c = ensure_include(c, '#include "../../central_bank.h"', ['#include "../../company_base.h"', '#include "../../company_func.h"', '#include "script_company.hpp"', '#include "../../stdafx.h"'])
+            c = c.rstrip("\n") + "\n" + impl
+            hpp.write_text(h, encoding="utf-8")
+            cpp.write_text(c, encoding="utf-8")
+            print("script_company: GetCentralBankDebt and GetCentralBankAvailable added to the script API")
 
     print("overlay applied")
 
