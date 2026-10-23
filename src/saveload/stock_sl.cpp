@@ -15,6 +15,7 @@
 #include "../stock_base.h"
 #include "../central_bank.h"
 #include "../wallet_base.h"
+#include "../gold_reserve.h"
 #include "../game_time/game_time_manager.h"
 
 #include "../safeguards.h"
@@ -38,6 +39,8 @@ enum StockRecordKind : uint8_t {
 	SRK_TIMEFRAME = 20, ///< Candle of game time: a = company, b = timeframe | 0x80 when still running, ym = samples, v1 = candle number, v2..v5 = open/high/low/close times STOCK_PRICE_SCALE.
 	SRK_TIMEFRAME_VOL = 21, ///< Traded volume of the SRK_TIMEFRAME row just before it: a = company, v1 = volume. Only written when it is not 0.
 	SRK_LEDGER = 22,  ///< Line of the account statement: a = company, b = line (LedgerItem), ym = economy year, v1 = income, v2 = expense.
+	SRK_GOLD = 24,    ///< Gold market: v1 = price in 1/100 money units, v2 = baseline cash supply, v3 = ounces of the central bank, v4 = demand pressure in ppm.
+	SRK_GOLD_HOLD = 25, ///< Gold of a company: a = company, v1 = ounces.
 	SRK_BANK = 18,    ///< Loan at the central bank: a = company, v1 = debt, v2 = interest that has been added.
 	SRK_BANK_RISK = 23, ///< Rate and penalty of the loan at the central bank: a = company, v1 = penalty level | in default << 8 | days paid on time << 16, v2 = rest of the daily interest, v3 = annual rate in bp, v4 = number of the game day charged last.
 	SRK_POSITION_EXT = 15, ///< More data of an open position: a = owner, ym = id, v1 = trailing stop distance, v2 = month of opening.
@@ -232,6 +235,24 @@ struct STCKChunkHandler : ChunkHandler {
 			r.v2 = b.carry;
 			r.v3 = b.rate_bp;
 			r.v4 = b.last_charged_day;
+			write(r);
+		}
+
+		if (_gold_reserve.price_cents > 0) {
+			StockRecord r;
+			r.kind = SRK_GOLD;
+			r.v1 = _gold_reserve.price_cents;
+			r.v2 = _gold_reserve.baseline_supply;
+			r.v3 = _gold_reserve.bank_reserve_oz;
+			r.v4 = _gold_reserve.pressure_ppm;
+			write(r);
+		}
+		for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
+			if (_gold_reserve.holdings_oz[i] == 0) continue;
+			StockRecord r;
+			r.kind = SRK_GOLD_HOLD;
+			r.a = i;
+			r.v1 = _gold_reserve.holdings_oz[i];
 			write(r);
 		}
 
@@ -494,6 +515,17 @@ struct STCKChunkHandler : ChunkHandler {
 					b.last_charged_day = std::max<int64_t>(r.v4, -1);
 					break;
 				}
+
+				case SRK_GOLD:
+					_gold_reserve.price_cents = std::max<int64_t>(r.v1, 0);
+					_gold_reserve.baseline_supply = std::max<int64_t>(r.v2, 0);
+					_gold_reserve.bank_reserve_oz = std::max<int64_t>(r.v3, 0);
+					_gold_reserve.pressure_ppm = std::clamp<int64_t>(r.v4, -GoldReserveManager::PRESSURE_MAX_PPM, GoldReserveManager::PRESSURE_MAX_PPM);
+					break;
+
+				case SRK_GOLD_HOLD:
+					if (r.a < MAX_COMPANIES) _gold_reserve.holdings_oz[r.a] = std::max<int64_t>(r.v1, 0);
+					break;
 
 				case SRK_LEDGER:
 					if (r.a >= MAX_COMPANIES || r.b >= LEDGER_ITEMS) break;

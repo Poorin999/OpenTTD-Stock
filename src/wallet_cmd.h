@@ -16,6 +16,8 @@
 #include "wallet_base.h"
 /* The commands of the central bank are made known to the command system through this header. */
 #include "central_bank.h"
+/* The commands of the gold reserve too. */
+#include "gold_reserve.h"
 
 CommandCost CmdWalletCreate(DoCommandFlags flags, WalletKind kind);
 CommandCost CmdWalletDelete(DoCommandFlags flags, uint8_t wallet);

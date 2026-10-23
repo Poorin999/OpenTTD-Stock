@@ -40,6 +40,13 @@ enum StockWidgets : WidgetID {
 	WID_ST_WALLET_DROPDOWN,  ///< Dropdown: the wallet that is shown and traded with.
 	WID_ST_PNL,              ///< Panel: floating and realised profit of the selected wallet.
 	WID_ST_RISK,             ///< Panel: margin usage and the margin call warning.
+	WID_ST_GOLD_TOGGLE,      ///< Toggle button: show the gold trading panel in the place of the chart.
+	WID_ST_GOLD_SEL,         ///< Selection: the chart or the gold panel.
+	WID_ST_GOLD_INFO,        ///< Gold panel: spot price, backing ratio, credit standing, holdings.
+	WID_ST_GOLD_BUY_QTY,     ///< Gold panel: ounces to buy (click to type).
+	WID_ST_GOLD_BUY,         ///< Gold panel: Buy Gold button.
+	WID_ST_GOLD_SELL_QTY,    ///< Gold panel: ounces to sell (click to type).
+	WID_ST_GOLD_SELL,        ///< Gold panel: Sell Gold button.
 	WID_ST_CHART_EXPAND,     ///< Button: enlarge the window to (nearly) the whole screen so that the chart gets bigger; press again to restore.
 };
 

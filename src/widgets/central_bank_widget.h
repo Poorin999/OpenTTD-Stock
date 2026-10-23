@@ -22,7 +22,7 @@ enum CentralBankWidgets : WidgetID {
 	WID_CBS_CAPTION,        ///< Caption of the account statement window.
 	WID_CBS_PANEL,          ///< Panel with the account statement.
 	WID_CBS_NEWER,          ///< Button: show the statement of a newer period.
-	WID_CBS_OLDER,          ///< Button: open the "Statement ย้อนหลัง" window (10 years of statements).
+	WID_CBS_OLDER,          ///< Button: open the past statements window (10 years of statements).
 	WID_CBA_CAPTION,        ///< Caption of the past statements window.
 	WID_CBA_YEARS,          ///< Left list: the last 10 years, one row each.
 	WID_CBA_PANEL,          ///< Right panel: the statement of the chosen year, in its sections.

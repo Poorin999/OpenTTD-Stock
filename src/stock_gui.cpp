@@ -32,6 +32,7 @@
 
 #include "widgets/stock_widget.h"
 #include "central_bank.h"
+#include "gold_reserve.h"
 #include "game_time/game_time_manager.h"
 
 #include "table/strings.h"
@@ -232,6 +233,27 @@ static constexpr int CHART_ZOOM_MAX = static_cast<int>(std::size(CHART_SLOT_WIDT
 static constexpr double CHART_VZOOM_MIN = 0.05; ///< Most zoomed in price range.
 static constexpr double CHART_VZOOM_MAX = 8.0;  ///< Most zoomed out price range.
 
+/** Why the Buy Gold button can not be used now. */
+enum class GoldBuyBlock : uint8_t {
+	Ok,        ///< It can be used.
+	Spectator, ///< There is no company.
+	NoMarket,  ///< The gold market has not started.
+	BadQty,    ///< The number of ounces is not valid.
+	Borrowed,  ///< The money that is there is (partly) borrowed from the central bank.
+	NoCash,    ///< There is not enough cash.
+};
+
+/** Check whether the company can buy this many ounces now: the gold is paid from the unborrowed liquid cash only. */
+static GoldBuyBlock GetGoldBuyBlock(int64_t ounces)
+{
+	if (!Company::IsValidID(_local_company)) return GoldBuyBlock::Spectator;
+	if (_gold_reserve.GetPriceCents() <= 0) return GoldBuyBlock::NoMarket;
+	if (ounces <= 0 || ounces > 1000000) return GoldBuyBlock::BadQty;
+	const int64_t cost = _gold_reserve.GetBuyCost(ounces);
+	if (cost <= GetUnborrowedLiquidCash(_local_company)) return GoldBuyBlock::Ok;
+	return static_cast<int64_t>(Company::Get(_local_company)->money) >= cost ? GoldBuyBlock::Borrowed : GoldBuyBlock::NoCash;
+}
+
 struct StockWindow : Window {
 	static constexpr size_t PORTFOLIO_FIXED_ROWS = 3; ///< Lines of the portfolio that do not scroll: two summary lines and the table header.
 
@@ -245,6 +267,8 @@ struct StockWindow : Window {
 		Withdraw,     ///< Amount to move from the trading balance to the company cash.
 		PendingPrice, ///< New trigger price of a pending order.
 		Trail,        ///< New trailing stop distance of a position.
+		GoldBuy,      ///< Ounces of gold to buy.
+		GoldSell,     ///< Ounces of gold to sell.
 	};
 
 	/** What the toolbox shows. */
@@ -274,6 +298,9 @@ struct StockWindow : Window {
 	int restore_width = 0;
 	int restore_height = 0;
 	double chart_vshift = 0.0;          ///< Vertical scroll of the price range as a part of the fitted range; positive shows higher prices. Drag up/down.
+	bool gold_view = false;             ///< Whether the gold trading panel is shown in the place of the chart.
+	int64_t gold_buy_qty = 10;          ///< Ounces of gold in the buy field.
+	int64_t gold_sell_qty = 10;         ///< Ounces of gold in the sell field.
 	GameTimeframe frame = GameTimeframe::H1; ///< Timeframe of the chart: one candle per 1h, 4h, 12h, game day, game week, game month (30 days) or game year (365 days).
 
 	StockWindow(WindowDesc &desc) : Window(desc)
@@ -521,6 +548,10 @@ struct StockWindow : Window {
 			block_orders = !IsTradingWallet(_local_company, wallet) || GetStockRisk(_local_company, wallet).level >= StockRiskLevel::Warning;
 		}
 		this->SetWidgetDisabledState(WID_ST_NEW_ORDER, block_orders);
+		this->SetWidgetLoweredState(WID_ST_GOLD_TOGGLE, this->gold_view);
+		this->SetWidgetDisabledState(WID_ST_GOLD_BUY, GetGoldBuyBlock(this->gold_buy_qty) != GoldBuyBlock::Ok);
+		this->SetWidgetDisabledState(WID_ST_GOLD_SELL, !Company::IsValidID(_local_company) || this->gold_sell_qty <= 0 ||
+				_gold_reserve.GetHoldings(_local_company) < this->gold_sell_qty);
 		this->DrawWidgets();
 	}
 
@@ -564,6 +595,14 @@ struct StockWindow : Window {
 		const QueryKind kind = this->query_kind;
 		this->query_kind = QueryKind::None;
 		if (!str.has_value() || !Company::IsValidID(_local_company)) return;
+
+		if (kind == QueryKind::GoldBuy || kind == QueryKind::GoldSell) {
+			double ounces = 0;
+			if (!ParseStockNumber(*str, ounces) || ounces < 1) return;
+			(kind == QueryKind::GoldBuy ? this->gold_buy_qty : this->gold_sell_qty) = static_cast<int64_t>(std::min(ounces, 1000000.0));
+			this->SetDirty();
+			return;
+		}
 
 		if (kind == QueryKind::Deposit || kind == QueryKind::Withdraw) {
 			double amount = 0;
@@ -726,6 +765,30 @@ struct StockWindow : Window {
 				if (Company::IsValidID(_local_company)) Command<CMD_WALLET_DELETE>::Post(STR_WALLET_ERROR_CANT_DELETE, GetStockActiveWallet());
 				break;
 
+			case WID_ST_GOLD_TOGGLE:
+				this->gold_view = !this->gold_view;
+				this->GetWidget<NWidgetStacked>(WID_ST_GOLD_SEL)->SetDisplayedPlane(this->gold_view ? 1 : 0);
+				this->SetDirty();
+				break;
+
+			case WID_ST_GOLD_BUY_QTY:
+			case WID_ST_GOLD_SELL_QTY:
+				if (!Company::IsValidID(_local_company)) break;
+				this->query_kind = widget == WID_ST_GOLD_BUY_QTY ? QueryKind::GoldBuy : QueryKind::GoldSell;
+				ShowQueryString({}, widget == WID_ST_GOLD_BUY_QTY ? STR_GOLD_QUERY_BUY : STR_GOLD_QUERY_SELL, 10, this, CS_NUMERAL, {});
+				break;
+
+			case WID_ST_GOLD_BUY:
+				/* The button is disabled when the check fails; check again, a click can arrive in the same frame as a change of the cash. */
+				if (GetGoldBuyBlock(this->gold_buy_qty) == GoldBuyBlock::Ok) Command<CMD_GOLD_BUY>::Post(STR_GOLD_ERROR_CANT_BUY, static_cast<uint32_t>(this->gold_buy_qty));
+				break;
+
+			case WID_ST_GOLD_SELL:
+				if (Company::IsValidID(_local_company) && this->gold_sell_qty > 0 && _gold_reserve.GetHoldings(_local_company) >= this->gold_sell_qty) {
+					Command<CMD_GOLD_SELL>::Post(STR_GOLD_ERROR_CANT_SELL, static_cast<uint32_t>(this->gold_sell_qty));
+				}
+				break;
+
 			case WID_ST_DEPOSIT:
 			case WID_ST_WITHDRAW: {
 				if (!Company::IsValidID(_local_company)) break;
@@ -865,6 +928,9 @@ struct StockWindow : Window {
 	{
 		switch (widget) {
 			case WID_ST_ACCOUNT: this->DrawAccount(r); break;
+			case WID_ST_GOLD_INFO: this->DrawGoldInfo(r); break;
+			case WID_ST_GOLD_BUY_QTY: this->DrawGoldQty(r, true); break;
+			case WID_ST_GOLD_SELL_QTY: this->DrawGoldQty(r, false); break;
 			case WID_ST_PNL: this->DrawPnl(r); break;
 			case WID_ST_RISK: this->DrawRisk(r); break;
 			case WID_ST_WATCH:   this->DrawWatch(r); break;
@@ -886,6 +952,79 @@ struct StockWindow : Window {
 				break;
 			default: break;
 		}
+	}
+
+	/** One line of the gold panel: the caption on the left, the value on the right. Everything stays inside [left, right] x [.., bottom). */
+	static void DrawGoldLine(int left, int right, int &y, int bottom, int row_h, const std::string &caption, const std::string &value, TextColour colour = TC_WHITE)
+	{
+		if (right <= left || y + row_h > bottom) return; // A line that does not fit completely is not drawn at all.
+		const int value_w = std::min(GetStringBoundingBox(value).width, static_cast<uint>(std::max(0, right - left)));
+		DrawString(std::max(left, right - value_w), right, y, value, colour, SA_RIGHT);
+		const int caption_right = right - value_w - ScaleGUITrad(8);
+		if (caption_right > left) DrawString(left, caption_right, y, caption, TC_SILVER, SA_LEFT);
+		y += row_h;
+	}
+
+	/** The gold panel: spot price, backing, credit standing, holdings, and the alert when the gold can not be bought. */
+	void DrawGoldInfo(const Rect &r) const
+	{
+		const int pad = ScaleGUITrad(6);
+		const int left = r.left + pad;
+		const int right = r.right - pad;
+		const int bottom = r.bottom - ScaleGUITrad(2);
+		const int row_h = GetCharacterHeight(FS_NORMAL) + ScaleGUITrad(3);
+		int y = r.top + ScaleGUITrad(4);
+		if (right <= left) return;
+
+		auto money = [](int64_t v) { return GetString(STR_JUST_CURRENCY_LONG, v); };
+		auto ounces = [](int64_t v) { return fmt::format("{} oz", v); };
+
+		if (_gold_reserve.GetPriceCents() <= 0) {
+			DrawStringMultiLine(left, right, y, bottom, std::string("The gold market has not started yet."), TC_GREY, SA_TOP | SA_LEFT);
+			return;
+		}
+		const int64_t price = _gold_reserve.GetPriceCents();
+		const int64_t backing = _gold_reserve.GetBackingBp();
+		const CreditTier tier = _gold_reserve.GetCreditTier();
+
+		DrawGoldLine(left, right, y, bottom, row_h, "GOLD TRADING PANEL", "", TC_LIGHT_BLUE);
+		DrawGoldLine(left, right, y, bottom, row_h, "Spot price per oz", money(price / 100), TC_GOLD);
+		DrawGoldLine(left, right, y, bottom, row_h, "Spot price per ton", money(price * GoldReserveManager::OUNCES_PER_TON / 100), TC_GOLD);
+		DrawGoldLine(left, right, y, bottom, row_h, "Gold reserves (all)", money(_gold_reserve.GetReserveValue()) + "  (" + ounces(_gold_reserve.GetTotalReserveOunces()) + ")");
+		DrawGoldLine(left, right, y, bottom, row_h, "Circulating cash", money(_gold_reserve.GetCirculatingCash()));
+		DrawGoldLine(left, right, y, bottom, row_h, "Backing ratio (reserves / cash)", fmt::format("{}.{:02}%", backing / 100, backing % 100));
+		DrawGoldLine(left, right, y, bottom, row_h, "Credit standing", std::string(GetCreditTierName(tier)),
+				tier >= CreditTier::A ? TC_GREEN : (tier == CreditTier::B ? TC_YELLOW : TC_RED));
+
+		if (!Company::IsValidID(_local_company)) return;
+		y += ScaleGUITrad(4);
+		const int64_t held = _gold_reserve.GetHoldings(_local_company);
+		DrawGoldLine(left, right, y, bottom, row_h, "Your gold reserve", ounces(held) + "  (" + money(_gold_reserve.GetSellProceeds(held)) + ")");
+		DrawGoldLine(left, right, y, bottom, row_h, "Unborrowed liquid cash", money(GetUnborrowedLiquidCash(_local_company)));
+
+		/* The alert: why Buy Gold is switched off. */
+		const char *alert = nullptr;
+		switch (GetGoldBuyBlock(this->gold_buy_qty)) {
+			case GoldBuyBlock::Borrowed: alert = "Alert: the cash for this order is borrowed from the central bank. Gold can only be bought with unborrowed liquid cash."; break;
+			case GoldBuyBlock::NoCash:   alert = "Alert: not enough unborrowed liquid cash for this order."; break;
+			default: break;
+		}
+		if (alert != nullptr && y < bottom) DrawStringMultiLine(left, right, y + ScaleGUITrad(2), bottom, std::string(alert), TC_RED, SA_TOP | SA_LEFT);
+	}
+
+	/** The quantity field of the gold panel: the ounces, and what they cost (buy) or bring (sell). */
+	void DrawGoldQty(const Rect &r, bool buy) const
+	{
+		const int left = r.left + ScaleGUITrad(4);
+		const int right = r.right - ScaleGUITrad(4);
+		if (right <= left) return;
+		const int64_t qty = buy ? this->gold_buy_qty : this->gold_sell_qty;
+		std::string text = fmt::format("{}: {} oz", buy ? "Buy" : "Sell", qty);
+		if (_gold_reserve.GetPriceCents() > 0) {
+			const int64_t value = buy ? _gold_reserve.GetBuyCost(qty) : _gold_reserve.GetSellProceeds(qty);
+			text += fmt::format("  ~ {}", GetString(STR_JUST_CURRENCY_LONG, value));
+		}
+		DrawString(left, right, CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL)), text, TC_BLACK, SA_LEFT);
 	}
 
 	void DrawAccount(const Rect &r) const
@@ -1610,9 +1749,25 @@ static constexpr std::initializer_list<NWidgetPart> _nested_stock_widgets = {
 				/* A grey panel instead of a spacer: a spacer draws nothing, which leaves a hole in the window. */
 				NWidget(WWT_PANEL, COLOUR_GREY), SetFill(1, 1), SetResize(1, 0),
 				EndContainer(),
+				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_GOLD_TOGGLE), SetMinimalSize(60, 14), SetStringTip(STR_GOLD_TAB, STR_GOLD_TIP_TAB),
 				NWidget(WWT_PUSHBTN, COLOUR_GREY, WID_ST_CHART_EXPAND), SetMinimalSize(70, 14),
 			EndContainer(),
-			NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_CHART), SetMinimalSize(400, 184), SetResize(1, 1), SetFill(1, 1), SetToolTip(STR_STOCK_TIP_CHART),
+			/* The area of the chart: the chart (plane 0) or the gold trading panel (plane 1). Both fill and resize with the window. */
+			NWidget(NWID_SELECTION, INVALID_COLOUR, WID_ST_GOLD_SEL),
+				NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_CHART), SetMinimalSize(400, 184), SetResize(1, 1), SetFill(1, 1), SetToolTip(STR_STOCK_TIP_CHART),
+				EndContainer(),
+				NWidget(NWID_VERTICAL),
+					NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_GOLD_INFO), SetMinimalSize(400, 150), SetResize(1, 1), SetFill(1, 1),
+					EndContainer(),
+					NWidget(NWID_HORIZONTAL),
+						NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_GOLD_BUY_QTY), SetMinimalSize(150, 14), SetResize(1, 0), SetFill(1, 0), SetToolTip(STR_GOLD_TIP_QTY),
+						EndContainer(),
+						NWidget(WWT_PUSHTXTBTN, COLOUR_GREEN, WID_ST_GOLD_BUY), SetMinimalSize(90, 14), SetStringTip(STR_GOLD_BUY, STR_GOLD_TIP_BUY),
+						NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_GOLD_SELL_QTY), SetMinimalSize(150, 14), SetResize(1, 0), SetFill(1, 0), SetToolTip(STR_GOLD_TIP_QTY),
+						EndContainer(),
+						NWidget(WWT_PUSHTXTBTN, COLOUR_RED, WID_ST_GOLD_SELL), SetMinimalSize(90, 14), SetStringTip(STR_GOLD_SELL, STR_GOLD_TIP_SELL),
+					EndContainer(),
+				EndContainer(),
 			EndContainer(),
 		EndContainer(),
 	EndContainer(),
