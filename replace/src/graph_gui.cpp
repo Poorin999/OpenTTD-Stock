@@ -21,7 +21,7 @@
 #include "sound_func.h"
 #include "gfx_func.h"
 #include "core/geometry_func.hpp"
-#include "currency.h"
+#include 
 #include "timer/timer.h"
 #include "timer/timer_window.h"
 #include "timer/timer_game_tick.h"
