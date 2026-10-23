@@ -37,10 +37,14 @@ struct GoldReserveManager {
 	static constexpr int64_t PPM = 1000000;                 ///< 1.0 in the factors of the price.
 	static constexpr int64_t DEPTH_OUNCES = 20000;          ///< Market depth: buying this many ounces moves the price by +100%.
 	static constexpr int64_t PRESSURE_MAX_PPM = 300000;     ///< The demand effect never moves the price more than 30%.
+	static constexpr int64_t MARKET_STOCK_START = 200000;   ///< Ounces that the market has for sale at the start. Buying takes from it, selling gives back.
+	static constexpr int64_t SCARCITY_FLOOR_DIV = 4;        ///< The scarcity factor stops growing when the stock is 1/4 of the start stock (price x4).
+
 
 	int64_t price_cents = 0;      ///< Price of one ounce in 1/100 of a money unit. 0 = not started yet.
 	int64_t baseline_supply = 0;  ///< Cash in circulation when the market started; the supply factor is measured against it.
 	int64_t bank_reserve_oz = 0;  ///< The ounces that the central bank holds from the start.
+	int64_t market_stock_oz = 0;  ///< Ounces that the market still has for sale. Less stock = a dearer price (scarcity).
 	int64_t pressure_ppm = 0;     ///< Demand effect of the buying and selling of the companies; fades by 3% a day.
 	std::array<int64_t, MAX_COMPANIES> holdings_oz{}; ///< Ounces of every company.
 

@@ -13,4 +13,5 @@ STR_GOLD_ERROR_BAD_QUANTITY                                     :{WHITE}The numb
 STR_GOLD_ERROR_NO_MARKET                                        :{WHITE}The gold market has not started yet
 STR_GOLD_ERROR_BORROWED                                         :{WHITE}Gold can only be bought with unborrowed cash. The rest of your money is borrowed from the central bank
 STR_GOLD_ERROR_NO_CASH                                          :{WHITE}Not enough unborrowed liquid cash
+STR_GOLD_ERROR_NO_STOCK                                         :{WHITE}The market does not have that much gold for sale
 STR_GOLD_ERROR_NO_GOLD                                          :{WHITE}You do not hold that much gold

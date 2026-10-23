@@ -39,7 +39,7 @@ enum StockRecordKind : uint8_t {
 	SRK_TIMEFRAME = 20, ///< Candle of game time: a = company, b = timeframe | 0x80 when still running, ym = samples, v1 = candle number, v2..v5 = open/high/low/close times STOCK_PRICE_SCALE.
 	SRK_TIMEFRAME_VOL = 21, ///< Traded volume of the SRK_TIMEFRAME row just before it: a = company, v1 = volume. Only written when it is not 0.
 	SRK_LEDGER = 22,  ///< Line of the account statement: a = company, b = line (LedgerItem), ym = economy year, v1 = income, v2 = expense.
-	SRK_GOLD = 24,    ///< Gold market: v1 = price in 1/100 money units, v2 = baseline cash supply, v3 = ounces of the central bank, v4 = demand pressure in ppm.
+	SRK_GOLD = 24,    ///< Gold market: v1 = price in 1/100 money units, v2 = baseline cash supply, v3 = ounces of the central bank, v4 = demand pressure in ppm, v5 = ounces for sale in the market plus 1 (0 = savegame from before the stock).
 	SRK_GOLD_HOLD = 25, ///< Gold of a company: a = company, v1 = ounces.
 	SRK_BANK = 18,    ///< Loan at the central bank: a = company, v1 = debt, v2 = interest that has been added.
 	SRK_BANK_RISK = 23, ///< Rate and penalty of the loan at the central bank: a = company, v1 = penalty level | in default << 8 | days paid on time << 16, v2 = rest of the daily interest, v3 = annual rate in bp, v4 = number of the game day charged last.
@@ -245,6 +245,7 @@ struct STCKChunkHandler : ChunkHandler {
 			r.v2 = _gold_reserve.baseline_supply;
 			r.v3 = _gold_reserve.bank_reserve_oz;
 			r.v4 = _gold_reserve.pressure_ppm;
+			r.v5 = _gold_reserve.market_stock_oz + 1;
 			write(r);
 		}
 		for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
@@ -520,6 +521,7 @@ struct STCKChunkHandler : ChunkHandler {
 					_gold_reserve.price_cents = std::max<int64_t>(r.v1, 0);
 					_gold_reserve.baseline_supply = std::max<int64_t>(r.v2, 0);
 					_gold_reserve.bank_reserve_oz = std::max<int64_t>(r.v3, 0);
+					_gold_reserve.market_stock_oz = r.v5 <= 0 ? GoldReserveManager::MARKET_STOCK_START : r.v5 - 1;
 					_gold_reserve.pressure_ppm = std::clamp<int64_t>(r.v4, -GoldReserveManager::PRESSURE_MAX_PPM, GoldReserveManager::PRESSURE_MAX_PPM);
 					break;
 

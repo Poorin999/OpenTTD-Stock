@@ -30,6 +30,7 @@ void GoldReserveManager::Reset()
 	this->price_cents = 0;
 	this->baseline_supply = 0;
 	this->bank_reserve_oz = 0;
+	this->market_stock_oz = 0;
 	this->pressure_ppm = 0;
 	this->holdings_oz.fill(0);
 }
@@ -60,6 +61,7 @@ bool GoldReserveManager::EnsureStarted()
 	const int64_t supply = this->GetCirculatingCash();
 	if (supply <= 0) return false;
 	this->price_cents = BASE_PRICE_CENTS;
+	this->market_stock_oz = MARKET_STOCK_START;
 	this->baseline_supply = supply;
 	this->bank_reserve_oz = std::max<int64_t>(1, supply * 8 / 100 / (BASE_PRICE_CENTS / 100));
 	return true;
@@ -133,6 +135,10 @@ void GoldReserveManager::UpdateDaily()
 	this->pressure_ppm = std::clamp<int64_t>(this->pressure_ppm - this->pressure_ppm * 3 / 100, -PRESSURE_MAX_PPM, PRESSURE_MAX_PPM);
 	const int64_t demand_factor = PPM + this->pressure_ppm;
 
+	/* 3b. Scarcity: the market has a limited stock. Half of the stock left = twice the price, down to a quarter (x4). Stock above the start makes it cheaper. */
+	const int64_t stock_floor = MARKET_STOCK_START / SCARCITY_FLOOR_DIV;
+	const int64_t scarcity_factor = std::clamp<int64_t>(PPM * MARKET_STOCK_START / std::max(this->market_stock_oz, stock_floor), PPM / 2, SCARCITY_FLOOR_DIV * PPM);
+
 	/* 4. Safe haven: when the company values of the map fall from one quarter to the next, gold gets up to 20% dearer. */
 	int64_t now_value = 0, before_value = 0;
 	for (const Company *c : Company::Iterate()) {
@@ -146,6 +152,7 @@ void GoldReserveManager::UpdateDaily()
 	target = target * inflation / PPM;
 	target = target * supply_factor / PPM;
 	target = target * demand_factor / PPM;
+	target = target * scarcity_factor / PPM;
 	target = target * haven_factor / PPM;
 	target = std::max<int64_t>(target, BASE_PRICE_CENTS / 10);
 
@@ -181,6 +188,7 @@ CommandCost CmdGoldBuy(DoCommandFlags flags, uint32_t ounces)
 	if (ounces == 0 || ounces > 1000000) return CommandCost(STR_GOLD_ERROR_BAD_QUANTITY);
 	if (!_gold_reserve.EnsureStarted()) return CommandCost(STR_GOLD_ERROR_NO_MARKET);
 
+	if (_gold_reserve.market_stock_oz < static_cast<int64_t>(ounces)) return CommandCost(STR_GOLD_ERROR_NO_STOCK);
 	const int64_t cost = _gold_reserve.GetBuyCost(ounces);
 	Company *c = Company::Get(_current_company);
 	if (static_cast<int64_t>(c->money) >= cost && cost > GetUnborrowedLiquidCash(_current_company)) return CommandCost(STR_GOLD_ERROR_BORROWED);
@@ -189,6 +197,7 @@ CommandCost CmdGoldBuy(DoCommandFlags flags, uint32_t ounces)
 	if (flags.Test(DoCommandFlag::Execute)) {
 		c->money -= Money(cost);
 		_gold_reserve.holdings_oz[_current_company.base()] += ounces;
+		_gold_reserve.market_stock_oz -= ounces;
 		_gold_reserve.pressure_ppm = std::min<int64_t>(GoldReserveManager::PRESSURE_MAX_PPM,
 				_gold_reserve.pressure_ppm + static_cast<int64_t>(ounces) * GoldReserveManager::PPM / GoldReserveManager::DEPTH_OUNCES);
 		InvalidateGoldWindows();
@@ -212,6 +221,7 @@ CommandCost CmdGoldSell(DoCommandFlags flags, uint32_t ounces)
 	if (flags.Test(DoCommandFlag::Execute)) {
 		Company::Get(_current_company)->money += Money(_gold_reserve.GetSellProceeds(ounces));
 		_gold_reserve.holdings_oz[_current_company.base()] -= ounces;
+		_gold_reserve.market_stock_oz += ounces;
 		_gold_reserve.pressure_ppm = std::max<int64_t>(-GoldReserveManager::PRESSURE_MAX_PPM,
 				_gold_reserve.pressure_ppm - static_cast<int64_t>(ounces) * GoldReserveManager::PPM / GoldReserveManager::DEPTH_OUNCES);
 		InvalidateGoldWindows();

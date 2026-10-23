@@ -241,6 +241,7 @@ enum class GoldBuyBlock : uint8_t {
 	BadQty,    ///< The number of ounces is not valid.
 	Borrowed,  ///< The money that is there is (partly) borrowed from the central bank.
 	NoCash,    ///< There is not enough cash.
+	NoStock,   ///< The market does not have that many ounces for sale.
 };
 
 /** Check whether the company can buy this many ounces now: the gold is paid from the unborrowed liquid cash only. */
@@ -249,6 +250,7 @@ static GoldBuyBlock GetGoldBuyBlock(int64_t ounces)
 	if (!Company::IsValidID(_local_company)) return GoldBuyBlock::Spectator;
 	if (_gold_reserve.GetPriceCents() <= 0) return GoldBuyBlock::NoMarket;
 	if (ounces <= 0 || ounces > 1000000) return GoldBuyBlock::BadQty;
+	if (_gold_reserve.market_stock_oz < ounces) return GoldBuyBlock::NoStock;
 	const int64_t cost = _gold_reserve.GetBuyCost(ounces);
 	if (cost <= GetUnborrowedLiquidCash(_local_company)) return GoldBuyBlock::Ok;
 	return static_cast<int64_t>(Company::Get(_local_company)->money) >= cost ? GoldBuyBlock::Borrowed : GoldBuyBlock::NoCash;
@@ -991,6 +993,7 @@ struct StockWindow : Window {
 		DrawGoldLine(left, right, y, bottom, row_h, "Spot price per oz", money(price / 100), TC_GOLD);
 		DrawGoldLine(left, right, y, bottom, row_h, "Spot price per ton", money(price * GoldReserveManager::OUNCES_PER_TON / 100), TC_GOLD);
 		DrawGoldLine(left, right, y, bottom, row_h, "Gold reserves (all)", money(_gold_reserve.GetReserveValue()) + "  (" + ounces(_gold_reserve.GetTotalReserveOunces()) + ")");
+		DrawGoldLine(left, right, y, bottom, row_h, "Market stock for sale", ounces(_gold_reserve.market_stock_oz));
 		DrawGoldLine(left, right, y, bottom, row_h, "Circulating cash", money(_gold_reserve.GetCirculatingCash()));
 		DrawGoldLine(left, right, y, bottom, row_h, "Backing ratio (reserves / cash)", fmt::format("{}.{:02}%", backing / 100, backing % 100));
 		DrawGoldLine(left, right, y, bottom, row_h, "Credit standing", std::string(GetCreditTierName(tier)),
@@ -1006,6 +1009,7 @@ struct StockWindow : Window {
 		const char *alert = nullptr;
 		switch (GetGoldBuyBlock(this->gold_buy_qty)) {
 			case GoldBuyBlock::Borrowed: alert = "Alert: the cash for this order is borrowed from the central bank. Gold can only be bought with unborrowed liquid cash."; break;
+			case GoldBuyBlock::NoStock:  alert = "Alert: the market does not have that much gold for sale."; break;
 			case GoldBuyBlock::NoCash:   alert = "Alert: not enough unborrowed liquid cash for this order."; break;
 			default: break;
 		}
