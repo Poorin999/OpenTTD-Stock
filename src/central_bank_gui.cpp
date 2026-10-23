@@ -17,6 +17,7 @@
 #include "stock_gui.h"
 #include "command_func.h"
 #include "company_base.h"
+#include "core/format.hpp"
 #include "company_func.h"
 #include "economy_type.h"
 #include "gfx_func.h"
@@ -43,7 +44,7 @@ struct CentralBankWindow : Window {
 		Repay,
 	};
 
-	static constexpr int ROWS = 9;            ///< Number of rows in the summary panel.
+	static constexpr int ROWS = 13;           ///< Number of rows in the summary panel.
 	static constexpr int STATEMENT_ROWS = 26; ///< Number of rows in the account statement.
 
 	QueryKind query_kind = QueryKind::None; ///< What the open query window is for.
@@ -87,7 +88,7 @@ struct CentralBankWindow : Window {
 			size.height = std::max<uint>(size.height, this->RowHeight() * STATEMENT_ROWS + ScaleGUITrad(12));
 			return;
 		}
-		size.width = std::max<uint>(size.width, ScaleGUITrad(420));
+		size.width = std::max<uint>(size.width, ScaleGUITrad(520));
 		size.height = std::max<uint>(size.height, this->RowHeight() * ROWS + ScaleGUITrad(8));
 	}
 
@@ -112,7 +113,8 @@ struct CentralBankWindow : Window {
 		const Company *c = Company::Get(_local_company);
 		const BankAccount &a = _central_bank.accounts[_local_company.base()];
 		const int64_t limit = GetCentralBankCreditLimit(_local_company);
-		const int64_t per_day = a.debt * CENTRAL_BANK_RATE_PPM_PER_DAY / STOCK_PPM;
+		const int64_t rate_bp = GetCentralBankAnnualRateBp(_local_company);
+		const int64_t per_day = BankDailyInterest(a.debt, rate_bp, a.carry).interest;
 		const int64_t liquid = GetUnborrowedLiquidCash(_local_company);
 
 		auto money = [](int64_t v) { return GetString(STR_JUST_CURRENCY_LONG, v); };
@@ -127,9 +129,26 @@ struct CentralBankWindow : Window {
 		row("Central bank debt", money(a.debt), a.debt > limit ? TC_RED : TC_WHITE);
 		row("Credit limit", money(limit));
 		row("Available to borrow", money(GetCentralBankAvailable(_local_company)));
-		row("Interest per game day (added to the debt)", money(per_day), TC_GREY);
+		row("Interest rate now (per year)", fmt::format("{}.{:02}%", rate_bp / 100, rate_bp % 100), a.in_default ? TC_RED : TC_WHITE);
+		row("Interest per game day (paid from cash at 00:00)", money(per_day), TC_GREY);
 		row("Unborrowed liquid cash (may be traded)", money(liquid), TC_LIGHT_BLUE);
 		row("Money in trading wallets", money(GetWalletsTotal(_local_company)));
+
+		/* Penalty status: shown only when the company is in default or still has a penalty level. */
+		if (a.in_default) {
+			row("DEFAULT: not enough cash for the interest", fmt::format("penalty rate {}.{:02}%", rate_bp / 100, rate_bp % 100), TC_RED);
+			row("Unpaid interest is added to the debt", "pay in full to end the default", TC_RED);
+		}
+		if (a.penalty_level > 0) {
+			const TextColour colour = a.in_default ? TC_RED : TC_ORANGE;
+			row(fmt::format("Penalty level {} of {}: credit limit reduced", static_cast<int>(a.penalty_level), BANK_PENALTY_LEVEL_MAX), fmt::format("{}% of normal", BankCreditPercentForPenalty(a.penalty_level)), colour);
+			if (!a.in_default) {
+				const int days_left = std::max(0, BANK_PENALTY_RECOVERY_DAYS - static_cast<int>(a.clean_days));
+				row("Pay the interest on time to lower the penalty", fmt::format("{} game days to the next level", days_left), TC_ORANGE);
+			}
+		} else if (!a.in_default && a.debt > 0) {
+			row("Credit standing", "Good", TC_GREEN);
+		}
 	}
 
 	/** The net cost of some kinds of expenses of the game in one year as a ledger entry: the costs are expenses, a net refund is income. */
@@ -284,7 +303,7 @@ static constexpr std::initializer_list<NWidgetPart> _nested_central_bank_widgets
 		NWidget(WWT_SHADEBOX, COLOUR_GREY),
 		NWidget(WWT_STICKYBOX, COLOUR_GREY),
 	EndContainer(),
-	NWidget(WWT_PANEL, COLOUR_GREY, WID_CB_SUMMARY), SetMinimalSize(420, 120), SetResize(1, 0), SetFill(1, 0),
+	NWidget(WWT_PANEL, COLOUR_GREY, WID_CB_SUMMARY), SetMinimalSize(520, 120), SetResize(1, 0), SetFill(1, 0),
 	EndContainer(),
 	NWidget(NWID_HORIZONTAL),
 		NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_CB_STATEMENT), SetMinimalSize(100, 14), SetResize(1, 0), SetFill(1, 0), SetStringTip(STR_CENTRAL_BANK_STATEMENT, STR_CENTRAL_BANK_TIP_STATEMENT),

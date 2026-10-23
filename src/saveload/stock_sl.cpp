@@ -39,6 +39,7 @@ enum StockRecordKind : uint8_t {
 	SRK_TIMEFRAME_VOL = 21, ///< Traded volume of the SRK_TIMEFRAME row just before it: a = company, v1 = volume. Only written when it is not 0.
 	SRK_LEDGER = 22,  ///< Line of the account statement: a = company, b = line (LedgerItem), ym = economy year, v1 = income, v2 = expense.
 	SRK_BANK = 18,    ///< Loan at the central bank: a = company, v1 = debt, v2 = interest that has been added.
+	SRK_BANK_RISK = 23, ///< Rate and penalty of the loan at the central bank: a = company, v1 = penalty level | in default << 8 | days paid on time << 16, v2 = rest of the daily interest, v3 = annual rate in bp, v4 = number of the game day charged last.
 	SRK_POSITION_EXT = 15, ///< More data of an open position: a = owner, ym = id, v1 = trailing stop distance, v2 = month of opening.
 	SRK_STATS = 16,   ///< Trading results of a company: a = company, v1 = closed trades, v2 = winning trades, v3 = total profit.
 	SRK_STATS_MONTH = 17, ///< Profit of one month: a = company, ym = month, v1 = profit, v2 = trades, v3 = winning trades.
@@ -217,6 +218,20 @@ struct STCKChunkHandler : ChunkHandler {
 			r.a = i;
 			r.v1 = b.debt;
 			r.v2 = b.interest_paid;
+			write(r);
+		}
+
+		/* The penalty status of the loans: without it a default would be forgotten when the game is loaded. */
+		for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
+			const BankAccount &b = _central_bank.accounts[i];
+			if (b.penalty_level == 0 && !b.in_default && b.clean_days == 0 && b.carry == 0 && b.rate_bp == 0 && b.last_charged_day < 0) continue;
+			StockRecord r;
+			r.kind = SRK_BANK_RISK;
+			r.a = i;
+			r.v1 = static_cast<int64_t>(b.penalty_level) | (b.in_default ? int64_t{1} << 8 : 0) | (static_cast<int64_t>(b.clean_days) << 16);
+			r.v2 = b.carry;
+			r.v3 = b.rate_bp;
+			r.v4 = b.last_charged_day;
 			write(r);
 		}
 
@@ -467,6 +482,18 @@ struct STCKChunkHandler : ChunkHandler {
 					_central_bank.accounts[r.a].debt = std::max<int64_t>(r.v1, 0);
 					_central_bank.accounts[r.a].interest_paid = std::max<int64_t>(r.v2, 0);
 					break;
+
+				case SRK_BANK_RISK: {
+					if (r.a >= MAX_COMPANIES) break;
+					BankAccount &b = _central_bank.accounts[r.a];
+					b.penalty_level = static_cast<uint8_t>(std::clamp<int64_t>(r.v1 & 0xFF, 0, BANK_PENALTY_LEVEL_MAX));
+					b.in_default = ((r.v1 >> 8) & 1) != 0;
+					b.clean_days = static_cast<uint16_t>(std::clamp<int64_t>((r.v1 >> 16) & 0xFFFF, 0, UINT16_MAX));
+					b.carry = std::clamp<int64_t>(r.v2, 0, BANK_INTEREST_DIVISOR - 1);
+					b.rate_bp = std::clamp<int64_t>(r.v3, 0, BANK_PENALTY_MAX_BP);
+					b.last_charged_day = std::max<int64_t>(r.v4, -1);
+					break;
+				}
 
 				case SRK_LEDGER:
 					if (r.a >= MAX_COMPANIES || r.b >= LEDGER_ITEMS) break;

@@ -18,6 +18,10 @@ import re
 import sys
 from pathlib import Path
 
+# True: the game writes money_trace.log (next to openttd.exe) with every change of company cash, to find out where money goes.
+# Set to False and build again to remove it.
+MONEY_TRACE = True
+
 HERE = Path(__file__).resolve().parent
 
 FILES = {  # file name -> folder in the OpenTTD tree
@@ -93,6 +97,60 @@ def find_definition(tree, pattern):
         if rx.search(f.read_text(encoding="utf-8", errors="replace")):
             return f
     return None
+
+
+TRACE_CODE = r"""/* MONEY_TRACE_BEGIN: debug trace of the cash of the companies, written to money_trace.log once per game minute. */
+static const char *MoneyTraceName(int type)
+{
+	static const char *const names[] = {"CONSTRUCTION", "NEW_VEHICLES", "TRAIN_RUN", "ROADVEH_RUN", "AIRCRAFT_RUN", "SHIP_RUN", "PROPERTY",
+			"TRAIN_REVENUE", "ROADVEH_REVENUE", "AIRCRAFT_REVENUE", "SHIP_REVENUE", "LOAN_INTEREST", "OTHER"};
+	return (type >= 0 && type < 13) ? names[type] : "?";
+}
+
+/** Sum of the costs (positive = money out) per company and expense type since the last game minute. */
+static std::map<std::pair<int, int>, int64_t> _money_trace_sum;
+/** The cash of every company at the last game minute, and the total that the expense functions took since then. */
+static int64_t _money_trace_last[MAX_COMPANIES];
+static bool _money_trace_known[MAX_COMPANIES];
+static int64_t _money_trace_explained[MAX_COMPANIES];
+
+static void MoneyTraceRecord(CompanyID company, int type, int64_t cost)
+{
+	_money_trace_sum[{company.base(), type}] += cost;
+	_money_trace_explained[company.base()] += cost;
+}
+
+static void MoneyTraceLine(std::ofstream &f, const GameTimeSnapshot &now, int company, const char *what, int64_t amount)
+{
+	f << fmt::format("year {} day {:3} {:02}:{:02}  company {}  {:<16} {:+}\n", now.year, now.day, now.hour, now.minute, company, what, amount);
+}
+
+static void MoneyTraceWrite(const GameTimeSnapshot &now)
+{
+	std::ofstream f("money_trace.log", std::ios::app);
+	if (!f) return;
+	for (const auto &[key, sum] : _money_trace_sum) {
+		if (sum != 0) MoneyTraceLine(f, now, key.first, MoneyTraceName(key.second), -sum);
+	}
+	_money_trace_sum.clear();
+	for (const Company *c : Company::Iterate()) {
+		const int i = c->index.base();
+		const int64_t money = static_cast<int64_t>(c->money);
+		if (_money_trace_known[i]) {
+			/* Change of the cash that the expense functions do not explain: wallets, central bank, scripts, cheats. */
+			const int64_t direct = (money - _money_trace_last[i]) + _money_trace_explained[i];
+			if (direct != 0) MoneyTraceLine(f, now, i, "DIRECT", direct);
+		}
+		_money_trace_known[i] = true;
+		_money_trace_last[i] = money;
+		_money_trace_explained[i] = 0;
+	}
+}
+
+static const GameTimeSubscription _money_trace_minute(GameTimeEvent::Minute, [](const GameTimeSnapshot &now) { MoneyTraceWrite(now); });
+/* MONEY_TRACE_END */
+
+"""
 
 
 def main(tree):
@@ -380,6 +438,33 @@ def main(tree):
     s = s[:anchor.end()] + "\n".join(todo) + ("\n" if todo else "") + s[anchor.end():]
     p.write_text(s, encoding="utf-8")
     print(f"english.txt: {len(todo)} strings added")
+    # Money trace (debug): every change of the cash of a company is summed per game minute and written to money_trace.log.
+    # Money that moves without the normal expense functions (wallets, central bank) shows as "DIRECT". Switch off with MONEY_TRACE = False.
+    p = find_definition(tree, r"^void SubtractMoneyFromCompanyFract\(")
+    if p is None:
+        print("WARNING: company_cmd.cpp not found, money trace not added")
+    else:
+        s = p.read_text(encoding="utf-8")
+        if "MONEY_TRACE_BEGIN" in s:
+            print(f"{p.name}: money trace already present")
+        elif not MONEY_TRACE:
+            print(f"{p.name}: money trace is switched off")
+        else:
+            anchor = "/**\n * Deduct costs of a command from the money of a company."
+            call_old = "\tif (cost.GetCost() == 0) return;\n\tassert(cost.GetExpensesType() != INVALID_EXPENSES);\n"
+            if anchor not in s or call_old not in s:
+                print("WARNING: company_cmd.cpp has a different layout, money trace not added")
+            else:
+                trace = TRACE_CODE
+                s = s.replace(anchor, trace + anchor, 1)
+                s = s.replace(call_old, call_old + "\tMoneyTraceRecord(c->index, static_cast<int>(cost.GetExpensesType()), static_cast<int64_t>(cost.GetCost()));\n", 1)
+                for inc in ('#include <fstream>', '#include <map>'):
+                    s = ensure_include(s, inc, ['#include "stdafx.h"'])
+                s = ensure_include(s, '#include "game_time/game_time_manager.h"', ['#include "company_func.h"', '#include "stdafx.h"'])
+                s = ensure_include(s, '#include "core/format.hpp"', ['#include "company_func.h"', '#include "stdafx.h"'])
+                p.write_text(s, encoding="utf-8")
+                print(f"{p.name}: money trace added (money_trace.log)")
+
     print("overlay applied")
 
 
