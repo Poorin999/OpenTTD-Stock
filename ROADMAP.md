@@ -60,6 +60,7 @@ Source of gold: a world market with a limited stock. It is **not** connected to 
 - [x] Gold reserve: price engine, commands `CMD_GOLD_BUY` / `CMD_GOLD_SELL`, savegame records, gold panel in the Trading Terminal (toggle with the Gold button, replaces the chart area while on).
 - [x] Limited market stock for gold (scarcity price).
 - [x] Gold panel moved from the Trading Terminal into the operating profit graph window (replaces the graph; Gold / Graph button switches).
+- [x] Build fix 3: `replace/src/widgets/graph_widget.h` used `ScoreID::End` in the enum; the script API files compile that header without the full ScoreID type (C2838 'End' illegal qualified name). It is now the literal 10, with a static_assert in graph_gui.cpp that it equals ScoreID::End. Rule: widget headers must not use game types, only literals.
 - [x] Build fix 2: the hash check of the replaced files is now a warning that prints the real sha256 (the stored hash did not match 15.3 and stopped the build at \"Register wallet commands\").
 - [x] Build fix: removed the duplicate `src/graph_gui.cpp` and `src/widgets/graph_widget.h` (identical to the files in `replace/`), which made the "Add stock market source files" step fail.
 

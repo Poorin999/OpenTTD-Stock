@@ -2167,6 +2167,7 @@ static std::unique_ptr<NWidgetBase> MakePerformanceDetailPanels()
 	};
 
 	static_assert(lengthof(performance_tips) == to_underlying(ScoreID::End));
+	static_assert(WID_PRD_SCORE_LAST - WID_PRD_SCORE_FIRST + 1 == to_underlying(ScoreID::End));
 
 	auto vert = std::make_unique<NWidgetVertical>(NWidContainerFlag::EqualSize);
 	for (WidgetID widnum = WID_PRD_SCORE_FIRST; widnum <= WID_PRD_SCORE_LAST; widnum++) {
