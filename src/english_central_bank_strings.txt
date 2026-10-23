@@ -11,3 +11,4 @@ STR_BANK_ERROR_LEGACY_LOAN                                      :{WHITE}The orig
 STR_CENTRAL_BANK_STATEMENT                                      :ใบแจ้งยอดบัญชี (Account statement)
 STR_CENTRAL_BANK_TIP_STATEMENT                                  :{BLACK}Open the account statement in its own window, next to the bank window: interest and fees, dividends and profit, transfers, and the costs of vehicles and construction
 STR_CENTRAL_BANK_STATEMENT_CAPTION                              :ใบแจ้งยอดบัญชี (ACCOUNT STATEMENT)
+STR_CENTRAL_BANK_ARCHIVE_CAPTION                               :Statement ย้อนหลัง (PAST STATEMENTS)

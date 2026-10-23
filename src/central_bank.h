@@ -241,6 +241,14 @@ enum class LedgerItem : uint8_t {
 	RealizedProfit,  ///< Profit (income) and loss (expense) of closed trades.
 	WalletTransfer,  ///< Money moved between the company cash and another wallet: into the cash (income) and out of the cash (expense).
 	BankLoan,        ///< Money that the central bank paid out (income) and what was repaid (expense).
+	/* Copies of the yearly expenses of the game. The game keeps three years only; the copy is kept #LEDGER_KEEP_YEARS years (past statements). */
+	YearTrain,       ///< Income of trains.
+	YearRoadVeh,     ///< Income of road vehicles.
+	YearShip,        ///< Income of ships.
+	YearAircraft,    ///< Income of aircraft.
+	YearRunning,     ///< Running costs of vehicles and property.
+	YearConstruction,///< Construction and land purchase.
+	YearNewVehicles, ///< Purchases of new vehicles.
 	End,
 };
 static constexpr size_t LEDGER_ITEMS = static_cast<size_t>(LedgerItem::End);
@@ -251,7 +259,10 @@ struct LedgerEntry {
 	int64_t expense = 0; ///< Money that went out.
 };
 
-/** The ledgers of the companies: per company and game year the entry of every line. Only this year and the two before it are kept. Saved in the 'STCK' chunk. */
+/** How many game years the ledger keeps: this year and the nine before it. */
+static constexpr int32_t LEDGER_KEEP_YEARS = 10;
+
+/** The ledgers of the companies: per company and game year the entry of every line. Only the last #LEDGER_KEEP_YEARS years are kept. Saved in the 'STCK' chunk. */
 struct Ledger {
 	std::array<std::map<int32_t, std::array<LedgerEntry, LEDGER_ITEMS>>, MAX_COMPANIES> years;
 
@@ -276,6 +287,7 @@ extern std::array<std::deque<BankLogEntry>, MAX_COMPANIES> _bank_log;
 void RecordLedger(CompanyID company, LedgerItem item, int64_t amount);
 LedgerEntry GetLedgerEntry(CompanyID company, LedgerItem item, int32_t year);
 int32_t GetLedgerCurrentYear();
+void SnapshotYearlyExpenses();
 
 int64_t GetCentralBankDebt(CompanyID company);
 int64_t GetCentralBankAnnualRateBp(CompanyID company);

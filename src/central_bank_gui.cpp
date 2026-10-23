@@ -30,6 +30,7 @@
 #include "timer/timer_window.h"
 
 #include "widgets/central_bank_widget.h"
+#include "game_time/game_time_manager.h"
 
 #include "table/strings.h"
 
@@ -47,6 +48,7 @@ static std::string CbText(const char *thai, const char *english)
 /** The window number of the bank window and of the statement window: both belong to the class #WC_CENTRAL_BANK, so both can be open together. */
 static constexpr int CB_WINDOW_BANK = 0;
 static constexpr int CB_WINDOW_STATEMENT = 1;
+static constexpr int CB_WINDOW_ARCHIVE = 2; ///< The past statements window: 10 years.
 
 static int CbRowHeight() { return GetCharacterHeight(FS_NORMAL) + ScaleGUITrad(2); }
 
@@ -78,9 +80,6 @@ static LedgerEntry FromYearlyExpenses(const Company *c, size_t age, std::initial
 	}
 	return entry;
 }
-
-/** How many periods back the statement can go: the game keeps this year and the two before it, so the statement can show (0) this and last year or (1) last year and the year before. */
-static constexpr int STATEMENT_MAX_OFFSET = 1;
 
 /**
  * The account statement of the local company: two periods side by side, in five groups.
@@ -117,11 +116,11 @@ static void DrawAccountStatement(const Rect &r, int offset)
 		if (row_index++ % 2 == 1) GfxFillRect(left - ScaleGUITrad(2), y, right + ScaleGUITrad(2), y + row_h - 1, GREY_SCALE(4));
 	};
 
-	const char *first_name = offset == 0 ? "This Year (Current)" : "Last Year";
-	const char *second_name = offset == 0 ? "Last Year (Previous)" : "2 Years Ago";
+	const std::string first_name = offset == 0 ? std::string("This Year (Current)") : fmt::format("Year {}", year);
+	const std::string second_name = offset == 0 ? std::string("Last Year (Previous)") : fmt::format("Year {}", year - 1);
 	DrawString(left, edge[0] - col_w, y, fmt::format("For the period of:  {} and {}", year, year - 1), TC_WHITE, SA_LEFT);
-	DrawString(edge[0] - col_w, edge[1], y, std::string(first_name), TC_WHITE, SA_HOR_CENTER);
-	DrawString(edge[2] - col_w, edge[3], y, std::string(second_name), TC_WHITE, SA_HOR_CENTER);
+	DrawString(edge[0] - col_w, edge[1], y, first_name, TC_WHITE, SA_HOR_CENTER);
+	DrawString(edge[2] - col_w, edge[3], y, second_name, TC_WHITE, SA_HOR_CENTER);
 	y += row_h;
 	for (int k = 0; k < 4; k++) cell(k, k % 2 == 0 ? "In" : "Out", TC_GREY);
 	y += row_h;
@@ -134,22 +133,35 @@ static void DrawAccountStatement(const Rect &r, int offset)
 		GfxDrawLine(left, y - 1, right, y - 1, GREY_SCALE(6));
 		row_index = 0;
 	};
-	auto line = [&](const char *label, const LedgerEntry &now, const LedgerEntry &before, bool total = false) {
+	/* now_known / before_known: false when the game has no numbers for that year (the yearly expenses of the game are only kept for three years): "n/a". */
+	auto line = [&](const char *label, const LedgerEntry &now, const LedgerEntry &before, bool total = false, bool now_known = true, bool before_known = true) {
 		shade();
 		if (total) GfxDrawLine(edge[0] - col_w, y, right, y, GREY_SCALE(8));
 		DrawString(left + ScaleGUITrad(8), edge[0] - col_w, y, std::string(label), total ? TC_LIGHT_BLUE : TC_WHITE, SA_LEFT);
-		cell(0, money(now.income), TC_GREEN);
-		cell(1, money(now.expense), TC_RED);
-		cell(2, money(before.income), TC_GREEN);
-		cell(3, money(before.expense), TC_RED);
+		if (now_known) {
+			cell(0, money(now.income), TC_GREEN);
+			cell(1, money(now.expense), TC_RED);
+		} else {
+			cell(0, "n/a", TC_GREY);
+			cell(1, "n/a", TC_GREY);
+		}
+		if (before_known) {
+			cell(2, money(before.income), TC_GREEN);
+			cell(3, money(before.expense), TC_RED);
+		} else {
+			cell(2, "n/a", TC_GREY);
+			cell(3, "n/a", TC_GREY);
+		}
 		y += row_h;
 	};
 	auto booked = [&](const char *label, LedgerItem item) {
 		line(label, GetLedgerEntry(_local_company, item, year), GetLedgerEntry(_local_company, item, year - 1));
 	};
-	/* The yearly expenses of the game: age 0 is this year, 1 last year, 2 the year before. The ages are shifted by the offset. */
+	/* The yearly expenses of the game: age 0 is this year, 1 last year, 2 the year before; older years are not kept by the game. The ages are shifted by the offset. */
 	auto yearly = [&](const char *label, std::initializer_list<ExpensesType> types, bool total = false) {
-		line(label, FromYearlyExpenses(c, offset, types), FromYearlyExpenses(c, offset + 1, types), total);
+		const bool now_known = offset < 3;
+		const bool before_known = offset + 1 < 3;
+		line(label, now_known ? FromYearlyExpenses(c, offset, types) : LedgerEntry{}, before_known ? FromYearlyExpenses(c, offset + 1, types) : LedgerEntry{}, total, now_known, before_known);
 	};
 
 	/* The income of the transport goes straight into the company cash (the game pays it when the cargo is delivered), nothing is held back. */
@@ -183,8 +195,158 @@ static void DrawAccountStatement(const Rect &r, int offset)
 	DrawStringMultiLine(left, right, y, r.bottom - ScaleGUITrad(2),
 			std::string("Dividends: Out is the dividend that your own company pays. Margin: the daily swap of open positions. "
 					"Operations are the yearly expenses of the game. Vehicle depreciation is not a cash expense and is not listed. "
-					"The game keeps three years, so past statements go back to the year before last."),
+					"The transport, running cost, construction and vehicle lines are kept by the game for three years only: older years show n/a. The other lines go back up to nine years."),
 			TC_GREY, SA_TOP | SA_LEFT);
+}
+
+
+/** How many years the past statements window lists: this year and the nine before it. */
+static constexpr int ARCHIVE_YEARS = 10;
+
+/** The first game year that exists: nothing is listed before it. */
+static int ArchiveFirstYear()
+{
+	return GameTimeManager::Get().GetSaveState().start_year;
+}
+
+/** The year as the design shows it: the game year and, next to it, the Thai Buddhist year. */
+static std::string ArchiveYearName(int32_t year)
+{
+	return fmt::format("{}  (พ.ศ. {})", year, year + 543);
+}
+
+/** The list of the last 10 years (left side of the past statements window). The chosen year is highlighted. */
+static void DrawArchiveYears(const Rect &r, int selected)
+{
+	const int row_h = CbRowHeight() + ScaleGUITrad(6);
+	const int left = r.left + ScaleGUITrad(4);
+	const int right = r.right - ScaleGUITrad(4);
+	int y = r.top + ScaleGUITrad(4);
+	DrawString(left, right, y, CbText("คลังเอกสาร (10 ปี)", "Archive (10 years)"), TC_LIGHT_BLUE, SA_LEFT);
+	y += row_h;
+	for (int k = 0; k < ARCHIVE_YEARS; k++, y += row_h) {
+		const int32_t year = GetLedgerCurrentYear() - k;
+		const bool exists = year >= ArchiveFirstYear();
+		if (k == selected) GfxFillRect(left - ScaleGUITrad(2), y - ScaleGUITrad(2), right + ScaleGUITrad(2), y + row_h - ScaleGUITrad(4), GREY_SCALE(5));
+		DrawString(left + ScaleGUITrad(4), right, y, ArchiveYearName(year), !exists ? TC_GREY : (k == selected ? TC_WHITE : TC_SILVER), SA_LEFT);
+		if (k == 0) DrawString(left, right - ScaleGUITrad(4), y, CbText("ปัจจุบัน", "current"), TC_GREEN, SA_RIGHT);
+	}
+}
+
+/**
+ * The statement of one year (right side of the past statements window), in the same sections as the account statement window.
+ * @param r The panel.
+ * @param age How many years back: 0 = this year, 9 = nine years ago.
+ */
+static void DrawArchiveStatement(const Rect &r, int age)
+{
+	const int left = r.left + ScaleGUITrad(6);
+	const int right = r.right - ScaleGUITrad(6);
+	const int row_h = CbRowHeight();
+	int y = r.top + ScaleGUITrad(4);
+
+	if (!Company::IsValidID(_local_company)) {
+		DrawString(left, right, y, STR_STOCK_SPECTATOR, TC_FROMSTRING, SA_LEFT);
+		return;
+	}
+	const Company *c = Company::Get(_local_company);
+	const int32_t year = GetLedgerCurrentYear() - age;
+	const int col_w = ScaleGUITrad(110);
+	const int pad = ScaleGUITrad(4);
+	const int edge[3] = {right - 2 * col_w, right - col_w, right}; // In, Out, Net
+
+	DrawString(left, edge[0] - col_w, y, CbText("Statement ปี ", "Statement ") + ArchiveYearName(year), TC_WHITE, SA_LEFT);
+	y += row_h;
+	if (year < ArchiveFirstYear()) {
+		DrawString(left, right, y, CbText("ไม่มีข้อมูล: เกมยังไม่เริ่มในปีนี้", "No data: the game had not started in this year"), TC_GREY, SA_LEFT);
+		return;
+	}
+	const char *heads[3] = {"In", "Out", "Net"};
+	for (int k = 0; k < 3; k++) DrawString(edge[k] - col_w + pad, edge[k] - pad, y, std::string(heads[k]), TC_GREY, SA_RIGHT);
+	y += row_h;
+	GfxDrawLine(left, y - 1, right, y - 1, GREY_SCALE(8));
+
+	auto money = [](int64_t v) { return v == 0 ? std::string("-") : GetString(STR_JUST_CURRENCY_LONG, v); };
+	int row_index = 0;
+	int64_t total_in = 0, total_out = 0;
+	bool any_unknown = false;
+
+	auto category = [&](const char *name) {
+		y += ScaleGUITrad(3);
+		DrawString(left, right, y, std::string(name), TC_LIGHT_BLUE, SA_LEFT);
+		y += row_h;
+		GfxDrawLine(left, y - 1, right, y - 1, GREY_SCALE(6));
+		row_index = 0;
+	};
+	auto line = [&](const char *label, const LedgerEntry &e, bool known, bool count = true) {
+		if (row_index++ % 2 == 1) GfxFillRect(left - ScaleGUITrad(2), y, right + ScaleGUITrad(2), y + row_h - 1, GREY_SCALE(4));
+		DrawString(left + ScaleGUITrad(8), edge[0] - col_w, y, std::string(label), TC_WHITE, SA_LEFT);
+		if (known) {
+			DrawString(edge[0] - col_w + pad, edge[0] - pad, y, money(e.income), TC_GREEN, SA_RIGHT);
+			DrawString(edge[1] - col_w + pad, edge[1] - pad, y, money(e.expense), TC_RED, SA_RIGHT);
+			const int64_t net = e.income - e.expense;
+			DrawString(edge[2] - col_w + pad, edge[2] - pad, y, money(net), net < 0 ? TC_RED : TC_GREEN, SA_RIGHT);
+			if (count) { total_in += e.income; total_out += e.expense; }
+		} else {
+			for (int k = 0; k < 3; k++) DrawString(edge[k] - col_w + pad, edge[k] - pad, y, std::string("n/a"), TC_GREY, SA_RIGHT);
+			any_unknown = true;
+		}
+		y += row_h;
+	};
+	auto booked = [&](const char *label, LedgerItem item) { line(label, GetLedgerEntry(_local_company, item, year), true); };
+
+	/* The game keeps three years of yearly expenses; older years come from the copy in the ledger, which exists only for the years played with it. */
+	auto has_copy = [&]() {
+		for (LedgerItem item : {LedgerItem::YearTrain, LedgerItem::YearRoadVeh, LedgerItem::YearShip, LedgerItem::YearAircraft, LedgerItem::YearRunning, LedgerItem::YearConstruction, LedgerItem::YearNewVehicles}) {
+			const LedgerEntry e = GetLedgerEntry(_local_company, item, year);
+			if (e.income != 0 || e.expense != 0) return true;
+		}
+		return false;
+	};
+	const bool yearly_known = age < 3 || has_copy();
+	auto yearly = [&](const char *label, LedgerItem item, std::initializer_list<ExpensesType> types) {
+		line(label, age < 3 ? FromYearlyExpenses(c, age, types) : GetLedgerEntry(_local_company, item, year), yearly_known);
+	};
+
+	category("Organic Operating Income (paid into Company Cash)");
+	yearly("Trains", LedgerItem::YearTrain, {EXPENSES_TRAIN_REVENUE});
+	yearly("Road Vehicles", LedgerItem::YearRoadVeh, {EXPENSES_ROADVEH_REVENUE});
+	yearly("Ships", LedgerItem::YearShip, {EXPENSES_SHIP_REVENUE});
+	yearly("Aircraft", LedgerItem::YearAircraft, {EXPENSES_AIRCRAFT_REVENUE});
+
+	category("Interest & Fees");
+	booked("Central Bank Daily Interest", LedgerItem::BankInterest);
+	booked("Stock Commission & Brokerage Fees", LedgerItem::TradeCommission);
+	booked("Margin Maintenance / Swap Fees", LedgerItem::MarginSwap);
+
+	category("Dividends & Yields");
+	booked("Stock Dividend Payouts", LedgerItem::Dividends);
+	booked("Capital Gains / Realized Profit", LedgerItem::RealizedProfit);
+
+	category("Internal Transfers");
+	/* Moves between wallets and loans are not earnings: they are shown, but not added to the result of the year. */
+	line("Inter-Wallet Transfer (cash in / out)", GetLedgerEntry(_local_company, LedgerItem::WalletTransfer, year), true, false);
+	line("Company Injection: Loans (paid out / repaid)", GetLedgerEntry(_local_company, LedgerItem::BankLoan, year), true, false);
+
+	category("Assets & Operations");
+	yearly("Vehicle & Infrastructure Running Costs", LedgerItem::YearRunning, {EXPENSES_TRAIN_RUN, EXPENSES_ROADVEH_RUN, EXPENSES_AIRCRAFT_RUN, EXPENSES_SHIP_RUN, EXPENSES_PROPERTY});
+	yearly("Construction & Land Purchase", LedgerItem::YearConstruction, {EXPENSES_CONSTRUCTION});
+	yearly("Vehicle Purchases", LedgerItem::YearNewVehicles, {EXPENSES_NEW_VEHICLES});
+
+	/* The result of the year. */
+	y += ScaleGUITrad(3);
+	GfxDrawLine(left, y, right, y, GREY_SCALE(8));
+	DrawString(left + ScaleGUITrad(8), edge[0] - col_w, y, CbText("ผลรวมของปี (ไม่รวมการโอน/เงินกู้)", "Result of the year (without transfers and loans)"), TC_LIGHT_BLUE, SA_LEFT);
+	DrawString(edge[0] - col_w + pad, edge[0] - pad, y, money(total_in), TC_GREEN, SA_RIGHT);
+	DrawString(edge[1] - col_w + pad, edge[1] - pad, y, money(total_out), TC_RED, SA_RIGHT);
+	DrawString(edge[2] - col_w + pad, edge[2] - pad, y, money(total_in - total_out), total_in - total_out < 0 ? TC_RED : TC_GREEN, SA_RIGHT);
+	y += row_h + ScaleGUITrad(4);
+	if (any_unknown) {
+		DrawStringMultiLine(left, right, y, r.bottom - ScaleGUITrad(2),
+				CbText("n/a: ปีนี้เกิดก่อนที่ม็อดจะเริ่มเก็บค่าใช้จ่ายรายปี (เกมเก็บเองแค่ 3 ปี) จากนี้ไปจะเก็บครบ 10 ปี",
+						"n/a: this year is from before the mod kept the yearly expenses (the game keeps only 3 years). From now on 10 years are kept."),
+				TC_GREY, SA_TOP | SA_LEFT);
+	}
 }
 
 
@@ -488,19 +650,25 @@ struct CentralBankStatementWindow : Window {
 	/** The buttons of the past statements: no newer period than this year, no older period than the game keeps. */
 	void UpdateButtons()
 	{
-		this->SetWidgetDisabledState(WID_CBS_NEWER, this->offset <= 0);
-		this->SetWidgetDisabledState(WID_CBS_OLDER, this->offset >= STATEMENT_MAX_OFFSET);
+		this->SetWidgetLoweredState(WID_CBS_OLDER, FindWindowById(WC_CENTRAL_BANK, CB_WINDOW_ARCHIVE) != nullptr);
 	}
 
 	void OnClick([[maybe_unused]] Point pt, WidgetID widget, [[maybe_unused]] int click_count) override
 	{
-		switch (widget) {
-			case WID_CBS_NEWER: this->offset = std::max(0, this->offset - 1); break;
-			case WID_CBS_OLDER: this->offset = std::min(STATEMENT_MAX_OFFSET, this->offset + 1); break;
-			default: return;
+		/* "Statement ย้อนหลัง": the 10 years open in their own window; a second click closes it. */
+		if (widget != WID_CBS_OLDER) return;
+		if (FindWindowById(WC_CENTRAL_BANK, CB_WINDOW_ARCHIVE) != nullptr) {
+			CloseWindowById(WC_CENTRAL_BANK, CB_WINDOW_ARCHIVE);
+		} else {
+			ShowCentralBankArchiveWindow();
 		}
-		this->UpdateButtons();
 		this->SetDirty();
+	}
+
+	void OnPaint() override
+	{
+		this->UpdateButtons();
+		this->DrawWidgets();
 	}
 
 	void OnInvalidateData([[maybe_unused]] int data = 0, [[maybe_unused]] bool gui_scope = true) override
@@ -519,12 +687,64 @@ struct CentralBankStatementWindow : Window {
 	{
 		switch (widget) {
 			case WID_CBS_PANEL: DrawAccountStatement(r, this->offset); break;
-			case WID_CBS_NEWER:
-				DrawString(r.left + 2, r.right - 2, CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL)), std::string("< Newer"), TC_BLACK, SA_HOR_CENTER);
-				break;
 			case WID_CBS_OLDER:
-				DrawString(r.left + 2, r.right - 2, CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL)), std::string("View Past Statements >"), TC_BLACK, SA_HOR_CENTER);
+				DrawString(r.left + 2, r.right - 2, CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL)), CbText("Statement ย้อนหลัง", "Past Statements"), TC_BLACK, SA_HOR_CENTER);
 				break;
+			default: break;
+		}
+	}
+};
+
+/** The past statements window ("Statement ย้อนหลัง"): the last 10 years in a list, and the statement of the chosen year. */
+struct CentralBankArchiveWindow : Window {
+	int selected = 0; ///< Chosen year: 0 = this year, 9 = nine years ago.
+
+	/** Redraw regularly: this year changes all the time. */
+	const IntervalTimer<TimerWindow> redraw_interval = {std::chrono::milliseconds(500), [this](auto) {
+		this->SetDirty();
+	}};
+
+	CentralBankArchiveWindow(WindowDesc &desc) : Window(desc)
+	{
+		this->InitNested(CB_WINDOW_ARCHIVE);
+	}
+
+	void OnInvalidateData([[maybe_unused]] int data = 0, [[maybe_unused]] bool gui_scope = true) override
+	{
+		this->SetDirty();
+	}
+
+	void OnClick(Point pt, WidgetID widget, [[maybe_unused]] int click_count) override
+	{
+		if (widget != WID_CBA_YEARS) return;
+		const NWidgetBase *nw = this->GetWidget<NWidgetBase>(WID_CBA_YEARS);
+		const int row_h = CbRowHeight() + ScaleGUITrad(6);
+		const int row = (pt.y - static_cast<int>(nw->pos_y) - ScaleGUITrad(4)) / row_h - 1; // the first row is the heading
+		if (pt.y < static_cast<int>(nw->pos_y) + ScaleGUITrad(4) + row_h || row < 0 || row >= ARCHIVE_YEARS) return;
+		this->selected = row;
+		this->SetDirty();
+	}
+
+	void UpdateWidgetSize(WidgetID widget, Dimension &size, [[maybe_unused]] const Dimension &padding, [[maybe_unused]] Dimension &fill, [[maybe_unused]] Dimension &resize) override
+	{
+		switch (widget) {
+			case WID_CBA_YEARS:
+				size.width = std::max<uint>(size.width, ScaleGUITrad(190));
+				size.height = std::max<uint>(size.height, (CbRowHeight() + ScaleGUITrad(6)) * (ARCHIVE_YEARS + 1) + ScaleGUITrad(12));
+				break;
+			case WID_CBA_PANEL:
+				size.width = std::max<uint>(size.width, ScaleGUITrad(640));
+				size.height = std::max<uint>(size.height, CbRowHeight() * 29 + ScaleGUITrad(12));
+				break;
+			default: break;
+		}
+	}
+
+	void DrawWidget(const Rect &r, WidgetID widget) const override
+	{
+		switch (widget) {
+			case WID_CBA_YEARS: DrawArchiveYears(r, this->selected); break;
+			case WID_CBA_PANEL: DrawArchiveStatement(r, this->selected); break;
 			default: break;
 		}
 	}
@@ -569,8 +789,22 @@ static constexpr std::initializer_list<NWidgetPart> _nested_central_bank_stateme
 	NWidget(NWID_HORIZONTAL),
 		NWidget(WWT_PANEL, COLOUR_GREY), SetFill(1, 1), SetResize(1, 0),
 		EndContainer(),
-		NWidget(WWT_PUSHBTN, COLOUR_GREY, WID_CBS_NEWER), SetMinimalSize(90, 14),
 		NWidget(WWT_PUSHBTN, COLOUR_GREY, WID_CBS_OLDER), SetMinimalSize(190, 14),
+	EndContainer(),
+};
+
+static constexpr std::initializer_list<NWidgetPart> _nested_central_bank_archive_widgets = {
+	NWidget(NWID_HORIZONTAL),
+		NWidget(WWT_CLOSEBOX, COLOUR_GREY),
+		NWidget(WWT_CAPTION, COLOUR_GREY, WID_CBA_CAPTION), SetStringTip(STR_CENTRAL_BANK_ARCHIVE_CAPTION, STR_TOOLTIP_WINDOW_TITLE_DRAG_THIS),
+		NWidget(WWT_SHADEBOX, COLOUR_GREY),
+		NWidget(WWT_STICKYBOX, COLOUR_GREY),
+	EndContainer(),
+	NWidget(NWID_HORIZONTAL),
+		NWidget(WWT_PANEL, COLOUR_GREY, WID_CBA_YEARS), SetMinimalSize(190, 120), SetFill(0, 1), SetResize(0, 1),
+		EndContainer(),
+		NWidget(WWT_PANEL, COLOUR_GREY, WID_CBA_PANEL), SetMinimalSize(640, 120), SetFill(1, 1), SetResize(1, 1),
+		EndContainer(),
 	EndContainer(),
 };
 
@@ -586,6 +820,13 @@ static WindowDesc _central_bank_statement_desc(
 	WC_CENTRAL_BANK, WC_NONE,
 	{},
 	_nested_central_bank_statement_widgets
+);
+
+static WindowDesc _central_bank_archive_desc(
+	WDP_AUTO, "central_bank_archive", 0, 0,
+	WC_CENTRAL_BANK, WC_NONE,
+	{},
+	_nested_central_bank_archive_widgets
 );
 
 /**
@@ -605,4 +846,12 @@ void ShowCentralBankStatementWindow()
 	if (!Company::IsValidID(_local_company)) return;
 	if (BringWindowToFrontById(WC_CENTRAL_BANK, CB_WINDOW_STATEMENT) != nullptr) return;
 	new CentralBankStatementWindow(_central_bank_statement_desc);
+}
+
+/** Open the past statements window (window number 2 of #WC_CENTRAL_BANK): the last 10 years, or bring it to the front. */
+void ShowCentralBankArchiveWindow()
+{
+	if (!Company::IsValidID(_local_company)) return;
+	if (BringWindowToFrontById(WC_CENTRAL_BANK, CB_WINDOW_ARCHIVE) != nullptr) return;
+	new CentralBankArchiveWindow(_central_bank_archive_desc);
 }

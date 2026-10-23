@@ -145,8 +145,8 @@ void RecordLedger(CompanyID company, LedgerItem item, int64_t amount)
 		entry.expense += -amount;
 	}
 
-	/* Keep this year and the two before it. */
-	years.erase(years.begin(), years.lower_bound(year - 2));
+	/* Keep this year and the years before it, #LEDGER_KEEP_YEARS in all. */
+	years.erase(years.begin(), years.lower_bound(year - LEDGER_KEEP_YEARS + 1));
 
 	/* The latest lines for the account log of the Central Bank window (newest in front). */
 	auto &log = _bank_log[company.base()];
@@ -168,6 +168,41 @@ LedgerEntry GetLedgerEntry(CompanyID company, LedgerItem item, int32_t year)
 	const auto it = years.find(year);
 	if (it == years.end()) return {};
 	return it->second[static_cast<size_t>(item)];
+}
+
+/** The net cost of some kinds of yearly expenses as a ledger entry: costs are expenses, a net refund (revenue) is income. */
+static LedgerEntry YearlyAsEntry(const Company *c, size_t age, std::initializer_list<ExpensesType> types)
+{
+	int64_t sum = 0;
+	for (ExpensesType type : types) sum += static_cast<int64_t>(c->yearly_expenses[age][type]);
+	LedgerEntry e;
+	if (sum >= 0) e.expense = sum; else e.income = -sum;
+	return e;
+}
+
+/**
+ * Copy the yearly expenses of the game (it keeps this year and two years back) into the ledger, which keeps #LEDGER_KEEP_YEARS years.
+ * The copy replaces the old value of the year, so it is safe to call every day. No account log line is made.
+ */
+void SnapshotYearlyExpenses()
+{
+	const int32_t now = GetLedgerCurrentYear();
+	for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
+		const Company *c = Company::GetIfValid(CompanyID{i});
+		if (c == nullptr) continue;
+		auto &years = _ledger.years[i];
+		for (size_t age = 0; age < 3; age++) {
+			auto &row = years[now - static_cast<int32_t>(age)];
+			row[static_cast<size_t>(LedgerItem::YearTrain)] = YearlyAsEntry(c, age, {EXPENSES_TRAIN_REVENUE});
+			row[static_cast<size_t>(LedgerItem::YearRoadVeh)] = YearlyAsEntry(c, age, {EXPENSES_ROADVEH_REVENUE});
+			row[static_cast<size_t>(LedgerItem::YearShip)] = YearlyAsEntry(c, age, {EXPENSES_SHIP_REVENUE});
+			row[static_cast<size_t>(LedgerItem::YearAircraft)] = YearlyAsEntry(c, age, {EXPENSES_AIRCRAFT_REVENUE});
+			row[static_cast<size_t>(LedgerItem::YearRunning)] = YearlyAsEntry(c, age, {EXPENSES_TRAIN_RUN, EXPENSES_ROADVEH_RUN, EXPENSES_AIRCRAFT_RUN, EXPENSES_SHIP_RUN, EXPENSES_PROPERTY});
+			row[static_cast<size_t>(LedgerItem::YearConstruction)] = YearlyAsEntry(c, age, {EXPENSES_CONSTRUCTION});
+			row[static_cast<size_t>(LedgerItem::YearNewVehicles)] = YearlyAsEntry(c, age, {EXPENSES_NEW_VEHICLES});
+		}
+		years.erase(years.begin(), years.lower_bound(now - LEDGER_KEEP_YEARS + 1));
+	}
 }
 
 /** Tell the windows that show the loan that something changed. */
@@ -300,6 +335,7 @@ void CentralBank::UpdateDaily(int64_t day)
 		RecordLedger(company, LedgerItem::BankInterest, -r.interest_due);
 
 	}
+	SnapshotYearlyExpenses();
 	InvalidateWindowData(WC_STOCK_MARKET, 0);
 	InvalidateWindowData(WC_CENTRAL_BANK, 0);
 }

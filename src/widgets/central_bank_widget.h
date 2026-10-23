@@ -10,7 +10,7 @@
 #ifndef WIDGETS_CENTRAL_BANK_WIDGET_H
 #define WIDGETS_CENTRAL_BANK_WIDGET_H
 
-/** Widgets of the #CentralBankWindow class (window number 0) and of the #CentralBankStatementWindow class (window number 1). */
+/** Widgets of the #CentralBankWindow class (window number 0) and of the #CentralBankStatementWindow class (window number 1) and of the #CentralBankArchiveWindow class (window number 2). */
 enum CentralBankWidgets : WidgetID {
 	WID_CB_CAPTION,         ///< Caption of the bank window.
 	WID_CB_SUMMARY,         ///< Left panel: cash, deposits, debt, credit limit, interest rate, credit rating.
@@ -22,7 +22,10 @@ enum CentralBankWidgets : WidgetID {
 	WID_CBS_CAPTION,        ///< Caption of the account statement window.
 	WID_CBS_PANEL,          ///< Panel with the account statement.
 	WID_CBS_NEWER,          ///< Button: show the statement of a newer period.
-	WID_CBS_OLDER,          ///< Button: show the statement of an older period (past statements).
+	WID_CBS_OLDER,          ///< Button: open the "Statement ย้อนหลัง" window (10 years of statements).
+	WID_CBA_CAPTION,        ///< Caption of the past statements window.
+	WID_CBA_YEARS,          ///< Left list: the last 10 years, one row each.
+	WID_CBA_PANEL,          ///< Right panel: the statement of the chosen year, in its sections.
 };
 
 #endif /* WIDGETS_CENTRAL_BANK_WIDGET_H */
