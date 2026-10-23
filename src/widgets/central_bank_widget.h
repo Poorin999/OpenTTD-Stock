@@ -21,6 +21,8 @@ enum CentralBankWidgets : WidgetID {
 	WID_CB_OPEN_STATEMENT,  ///< Button: open the account statement in its own window.
 	WID_CBS_CAPTION,        ///< Caption of the account statement window.
 	WID_CBS_PANEL,          ///< Panel with the account statement.
+	WID_CBS_NEWER,          ///< Button: show the statement of a newer period.
+	WID_CBS_OLDER,          ///< Button: show the statement of an older period (past statements).
 };
 
 #endif /* WIDGETS_CENTRAL_BANK_WIDGET_H */

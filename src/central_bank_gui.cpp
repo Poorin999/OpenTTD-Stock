@@ -79,8 +79,15 @@ static LedgerEntry FromYearlyExpenses(const Company *c, size_t age, std::initial
 	return entry;
 }
 
-/** The account statement of the local company: this year and last year, in four groups. */
-static void DrawAccountStatement(const Rect &r)
+/** How many periods back the statement can go: the game keeps this year and the two before it, so the statement can show (0) this and last year or (1) last year and the year before. */
+static constexpr int STATEMENT_MAX_OFFSET = 1;
+
+/**
+ * The account statement of the local company: two periods side by side, in five groups.
+ * @param r The panel.
+ * @param offset 0 shows this year and last year; 1 shows last year and the year before (past statement).
+ */
+static void DrawAccountStatement(const Rect &r, int offset)
 {
 	const int left = r.left + ScaleGUITrad(6);
 	const int right = r.right - ScaleGUITrad(6);
@@ -93,30 +100,44 @@ static void DrawAccountStatement(const Rect &r)
 	}
 
 	const Company *c = Company::Get(_local_company);
-	const int32_t year = GetLedgerCurrentYear();
-	const int col_w = ScaleGUITrad(96);
+	const int32_t year = GetLedgerCurrentYear() - offset;
+	const int col_w = ScaleGUITrad(116);
 	const int pad = ScaleGUITrad(4);
-	/* Right edges of the four number columns: this year in and out, last year in and out. */
+	/* Right edges of the four number columns: first period in and out, second period in and out. */
 	const int edge[4] = {right - 3 * col_w, right - 2 * col_w, right - col_w, right};
 
-	auto money = [](int64_t v) { return v == 0 ? std::string("-") : GetString(STR_JUST_CURRENCY_SHORT, v); };
+	auto money = [](int64_t v) { return v == 0 ? std::string("-") : GetString(STR_JUST_CURRENCY_LONG, v); };
 	auto cell = [&](int k, const std::string &text, TextColour colour) {
 		DrawString(edge[k] - col_w + pad, edge[k] - pad, y, text, colour, SA_RIGHT);
 	};
 
-	DrawString(edge[0] - col_w, edge[1], y, std::string("This year"), TC_WHITE, SA_HOR_CENTER);
-	DrawString(edge[2] - col_w, edge[3], y, std::string("Last year"), TC_WHITE, SA_HOR_CENTER);
+	/* Every second row is shaded, so that the eye can follow a line from the label to its numbers. */
+	int row_index = 0;
+	auto shade = [&]() {
+		if (row_index++ % 2 == 1) GfxFillRect(left - ScaleGUITrad(2), y, right + ScaleGUITrad(2), y + row_h - 1, GREY_SCALE(4));
+	};
+
+	const char *first_name = offset == 0 ? "This Year (Current)" : "Last Year";
+	const char *second_name = offset == 0 ? "Last Year (Previous)" : "2 Years Ago";
+	DrawString(left, edge[0] - col_w, y, fmt::format("For the period of:  {} and {}", year, year - 1), TC_WHITE, SA_LEFT);
+	DrawString(edge[0] - col_w, edge[1], y, std::string(first_name), TC_WHITE, SA_HOR_CENTER);
+	DrawString(edge[2] - col_w, edge[3], y, std::string(second_name), TC_WHITE, SA_HOR_CENTER);
 	y += row_h;
 	for (int k = 0; k < 4; k++) cell(k, k % 2 == 0 ? "In" : "Out", TC_GREY);
 	y += row_h;
+	GfxDrawLine(left, y - 1, right, y - 1, GREY_SCALE(8));
 
 	auto category = [&](const char *name) {
-		y += ScaleGUITrad(2);
+		y += ScaleGUITrad(3);
 		DrawString(left, right, y, std::string(name), TC_LIGHT_BLUE, SA_LEFT);
 		y += row_h;
+		GfxDrawLine(left, y - 1, right, y - 1, GREY_SCALE(6));
+		row_index = 0;
 	};
-	auto line = [&](const char *label, const LedgerEntry &now, const LedgerEntry &before) {
-		DrawString(left + ScaleGUITrad(8), edge[0] - col_w, y, std::string(label), TC_WHITE, SA_LEFT);
+	auto line = [&](const char *label, const LedgerEntry &now, const LedgerEntry &before, bool total = false) {
+		shade();
+		if (total) GfxDrawLine(edge[0] - col_w, y, right, y, GREY_SCALE(8));
+		DrawString(left + ScaleGUITrad(8), edge[0] - col_w, y, std::string(label), total ? TC_LIGHT_BLUE : TC_WHITE, SA_LEFT);
 		cell(0, money(now.income), TC_GREEN);
 		cell(1, money(now.expense), TC_RED);
 		cell(2, money(before.income), TC_GREEN);
@@ -126,8 +147,9 @@ static void DrawAccountStatement(const Rect &r)
 	auto booked = [&](const char *label, LedgerItem item) {
 		line(label, GetLedgerEntry(_local_company, item, year), GetLedgerEntry(_local_company, item, year - 1));
 	};
-	auto yearly = [&](const char *label, std::initializer_list<ExpensesType> types) {
-		line(label, FromYearlyExpenses(c, 0, types), FromYearlyExpenses(c, 1, types));
+	/* The yearly expenses of the game: age 0 is this year, 1 last year, 2 the year before. The ages are shifted by the offset. */
+	auto yearly = [&](const char *label, std::initializer_list<ExpensesType> types, bool total = false) {
+		line(label, FromYearlyExpenses(c, offset, types), FromYearlyExpenses(c, offset + 1, types), total);
 	};
 
 	/* The income of the transport goes straight into the company cash (the game pays it when the cargo is delivered), nothing is held back. */
@@ -136,7 +158,7 @@ static void DrawAccountStatement(const Rect &r)
 	yearly("Road Vehicles", {EXPENSES_ROADVEH_REVENUE});
 	yearly("Ships", {EXPENSES_SHIP_REVENUE});
 	yearly("Aircraft", {EXPENSES_AIRCRAFT_REVENUE});
-	yearly("Total Transport Income", {EXPENSES_TRAIN_REVENUE, EXPENSES_ROADVEH_REVENUE, EXPENSES_SHIP_REVENUE, EXPENSES_AIRCRAFT_REVENUE});
+	yearly("Total Transport Income", {EXPENSES_TRAIN_REVENUE, EXPENSES_ROADVEH_REVENUE, EXPENSES_SHIP_REVENUE, EXPENSES_AIRCRAFT_REVENUE}, true);
 
 	category("Interest & Fees");
 	booked("Central Bank Daily Interest", LedgerItem::BankInterest);
@@ -156,10 +178,13 @@ static void DrawAccountStatement(const Rect &r)
 	yearly("Construction & Land Purchase", {EXPENSES_CONSTRUCTION});
 	yearly("Vehicle Purchases", {EXPENSES_NEW_VEHICLES});
 
-	y += ScaleGUITrad(4);
-	DrawString(left, right, y, std::string("Dividends: Out is the dividend that your own company pays. Margin: the daily swap of open positions."), TC_GREY, SA_LEFT);
-	y += row_h;
-	DrawString(left, right, y, std::string("Operations are the yearly expenses of the game. Vehicle depreciation is not a cash expense and is not listed."), TC_GREY, SA_LEFT);
+	/* The notes wrap inside the window instead of running out of it. */
+	y += ScaleGUITrad(6);
+	DrawStringMultiLine(left, right, y, r.bottom - ScaleGUITrad(2),
+			std::string("Dividends: Out is the dividend that your own company pays. Margin: the daily swap of open positions. "
+					"Operations are the yearly expenses of the game. Vehicle depreciation is not a cash expense and is not listed. "
+					"The game keeps three years, so past statements go back to the year before last."),
+			TC_GREY, SA_TOP | SA_LEFT);
 }
 
 
@@ -445,7 +470,9 @@ struct CentralBankWindow : Window {
 
 /** The account statement window: this year and last year, in four groups. It is its own window, so it can stay open next to the bank window. */
 struct CentralBankStatementWindow : Window {
-	static constexpr int STATEMENT_ROWS = 26; ///< Number of rows in the account statement.
+	static constexpr int STATEMENT_ROWS = 31; ///< Number of rows in the account statement, with room for the notes.
+
+	int offset = 0; ///< How many years back the statement is: 0 = this year and last year.
 
 	/** Redraw regularly: the numbers change all the time. */
 	const IntervalTimer<TimerWindow> redraw_interval = {std::chrono::milliseconds(500), [this](auto) {
@@ -455,6 +482,25 @@ struct CentralBankStatementWindow : Window {
 	CentralBankStatementWindow(WindowDesc &desc) : Window(desc)
 	{
 		this->InitNested(CB_WINDOW_STATEMENT);
+		this->UpdateButtons();
+	}
+
+	/** The buttons of the past statements: no newer period than this year, no older period than the game keeps. */
+	void UpdateButtons()
+	{
+		this->SetWidgetDisabledState(WID_CBS_NEWER, this->offset <= 0);
+		this->SetWidgetDisabledState(WID_CBS_OLDER, this->offset >= STATEMENT_MAX_OFFSET);
+	}
+
+	void OnClick([[maybe_unused]] Point pt, WidgetID widget, [[maybe_unused]] int click_count) override
+	{
+		switch (widget) {
+			case WID_CBS_NEWER: this->offset = std::max(0, this->offset - 1); break;
+			case WID_CBS_OLDER: this->offset = std::min(STATEMENT_MAX_OFFSET, this->offset + 1); break;
+			default: return;
+		}
+		this->UpdateButtons();
+		this->SetDirty();
 	}
 
 	void OnInvalidateData([[maybe_unused]] int data = 0, [[maybe_unused]] bool gui_scope = true) override
@@ -465,13 +511,22 @@ struct CentralBankStatementWindow : Window {
 	void UpdateWidgetSize(WidgetID widget, Dimension &size, [[maybe_unused]] const Dimension &padding, [[maybe_unused]] Dimension &fill, [[maybe_unused]] Dimension &resize) override
 	{
 		if (widget != WID_CBS_PANEL) return;
-		size.width = std::max<uint>(size.width, ScaleGUITrad(700));
+		size.width = std::max<uint>(size.width, ScaleGUITrad(760));
 		size.height = std::max<uint>(size.height, CbRowHeight() * STATEMENT_ROWS + ScaleGUITrad(12));
 	}
 
 	void DrawWidget(const Rect &r, WidgetID widget) const override
 	{
-		if (widget == WID_CBS_PANEL) DrawAccountStatement(r);
+		switch (widget) {
+			case WID_CBS_PANEL: DrawAccountStatement(r, this->offset); break;
+			case WID_CBS_NEWER:
+				DrawString(r.left + 2, r.right - 2, CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL)), std::string("< Newer"), TC_BLACK, SA_HOR_CENTER);
+				break;
+			case WID_CBS_OLDER:
+				DrawString(r.left + 2, r.right - 2, CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL)), std::string("View Past Statements >"), TC_BLACK, SA_HOR_CENTER);
+				break;
+			default: break;
+		}
 	}
 };
 
@@ -509,7 +564,13 @@ static constexpr std::initializer_list<NWidgetPart> _nested_central_bank_stateme
 		NWidget(WWT_SHADEBOX, COLOUR_GREY),
 		NWidget(WWT_STICKYBOX, COLOUR_GREY),
 	EndContainer(),
-	NWidget(WWT_PANEL, COLOUR_GREY, WID_CBS_PANEL), SetMinimalSize(700, 120), SetFill(1, 1), SetResize(1, 0),
+	NWidget(WWT_PANEL, COLOUR_GREY, WID_CBS_PANEL), SetMinimalSize(760, 120), SetFill(1, 1), SetResize(1, 0),
+	EndContainer(),
+	NWidget(NWID_HORIZONTAL),
+		NWidget(WWT_PANEL, COLOUR_GREY), SetFill(1, 1), SetResize(1, 0),
+		EndContainer(),
+		NWidget(WWT_PUSHBTN, COLOUR_GREY, WID_CBS_NEWER), SetMinimalSize(90, 14),
+		NWidget(WWT_PUSHBTN, COLOUR_GREY, WID_CBS_OLDER), SetMinimalSize(190, 14),
 	EndContainer(),
 };
 
