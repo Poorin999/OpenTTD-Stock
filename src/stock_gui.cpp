@@ -268,6 +268,11 @@ struct StockWindow : Window {
 	int drag_start_y = 0;               ///< Y position (in the window) where the last vertical drag step was made.
 	int chart_zoom = CHART_ZOOM_DEFAULT; ///< Index in #CHART_SLOT_WIDTHS: the width of one candle. Mouse wheel on the chart.
 	double chart_vzoom = 1.0;           ///< Height of the visible price range, 1.0 = fit all visible candles; smaller is zoomed in. Ctrl + mouse wheel.
+	bool chart_expanded = false;        ///< Whether the window is enlarged to the screen by the Expand button.
+	int restore_left = 0;               ///< Position and size of the window before it was enlarged.
+	int restore_top = 0;
+	int restore_width = 0;
+	int restore_height = 0;
 	double chart_vshift = 0.0;          ///< Vertical scroll of the price range as a part of the fitted range; positive shows higher prices. Drag up/down.
 	GameTimeframe frame = GameTimeframe::H1; ///< Timeframe of the chart: one candle per 1h, 4h, 12h, game day, game week, game month (30 days) or game year (365 days).
 
@@ -369,6 +374,31 @@ struct StockWindow : Window {
 	{
 		this->chart_vzoom = 1.0;
 		this->chart_vshift = 0.0;
+	}
+
+	/** Enlarge the window to (nearly) the whole screen, so that the chart gets big, or put it back to its old size. */
+	void ToggleChartExpand()
+	{
+		this->SetDirty();
+		if (!this->chart_expanded) {
+			this->restore_left = this->left;
+			this->restore_top = this->top;
+			this->restore_width = this->width;
+			this->restore_height = this->height;
+			const int new_top = ScaleGUITrad(32); // Below the main toolbar.
+			const int new_height = std::max(this->height, static_cast<int>(_screen.height) - new_top - ScaleGUITrad(16)); // Above the status bar.
+			const int new_width = std::max(this->width, static_cast<int>(_screen.width));
+			this->left = 0;
+			this->top = new_top;
+			ResizeWindow(this, new_width - this->width, new_height - this->height);
+			this->chart_expanded = true;
+		} else {
+			this->left = this->restore_left;
+			this->top = this->restore_top;
+			ResizeWindow(this, this->restore_width - this->width, this->restore_height - this->height);
+			this->chart_expanded = false;
+		}
+		this->SetDirty();
 	}
 
 	/** Height in pixels of the price pane of the chart; must follow the layout of DrawChart. */
@@ -656,6 +686,10 @@ struct StockWindow : Window {
 				this->drag_start_y = pt.y;
 				break;
 
+			case WID_ST_CHART_EXPAND:
+				this->ToggleChartExpand();
+				break;
+
 			case WID_ST_NEW_ORDER:
 				ShowStockOrderWindow(this->selected);
 				break;
@@ -843,6 +877,9 @@ struct StockWindow : Window {
 				break;
 			case WID_ST_RANKING:
 				DrawString(r.left + 2, r.right - 2, CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL)), std::string("Ranking"), TC_BLACK, SA_HOR_CENTER);
+				break;
+			case WID_ST_CHART_EXPAND:
+				DrawString(r.left + 2, r.right - 2, CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL)), std::string(this->chart_expanded ? "Shrink" : "Expand"), TC_BLACK, SA_HOR_CENTER);
 				break;
 			case WID_STOCK_CLOSE_ALL:
 				DrawString(r.left + 2, r.right - 2, CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL)), std::string("Close All"), TC_BLACK, SA_HOR_CENTER);
@@ -1077,6 +1114,21 @@ struct StockWindow : Window {
 			return bottom - static_cast<int>(static_cast<double>(value - lo) * (bottom - top) / range);
 		};
 
+		/* Everything of the price pane is clipped to the pane: when the price range is zoomed or scrolled, candles and lines
+		 * can lie outside of it, and must not be drawn over the title above or the volume pane below. */
+		auto clipped_line = [&](int x1, int y1, int x2, int y2, PixelColour colour) {
+			if ((y1 < top && y2 < top) || (y1 > bottom && y2 > bottom)) return;
+			const int ox1 = x1, oy1 = y1, ox2 = x2, oy2 = y2;
+			if (oy1 != oy2) {
+				auto x_at = [&](int yc) { return ox1 + static_cast<int>(static_cast<int64_t>(ox2 - ox1) * (yc - oy1) / (oy2 - oy1)); };
+				if (oy1 < top) { x1 = x_at(top); y1 = top; } else if (oy1 > bottom) { x1 = x_at(bottom); y1 = bottom; }
+				if (oy2 < top) { x2 = x_at(top); y2 = top; } else if (oy2 > bottom) { x2 = x_at(bottom); y2 = bottom; }
+			} else {
+				y1 = y2 = std::clamp(y1, top, bottom);
+			}
+			GfxDrawLine(x1, y1, x2, y2, colour);
+		};
+
 		/* Horizontal grid lines with price labels. */
 		for (int i = 0; i <= 4; i++) {
 			const int64_t value = lo + (hi - lo) * i / 4;
@@ -1094,12 +1146,12 @@ struct StockWindow : Window {
 			const int cx = x0 + i * slot + slot / 2;
 			const PixelColour colour = c.close >= c.open ? PC_GREEN : PC_RED;
 
-			GfxDrawLine(cx, to_y(c.high), cx, to_y(c.low), PC_WHITE);
+			clipped_line(cx, to_y(c.high), cx, to_y(c.low), PC_WHITE);
 
 			const int body_top = to_y(std::max(c.open, c.close));
 			int body_bottom = to_y(std::min(c.open, c.close));
 			if (body_bottom <= body_top) body_bottom = body_top + 1;
-			GfxFillRect(cx - body_half, body_top, cx + body_half, body_bottom, colour);
+			if (body_bottom >= top && body_top <= bottom) GfxFillRect(cx - body_half, std::clamp(body_top, top, bottom), cx + body_half, std::clamp(body_bottom, top, bottom), colour);
 
 			/* One small tick for every candle. */
 			GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(2), PC_WHITE);
@@ -1172,8 +1224,8 @@ struct StockWindow : Window {
 					continue;
 				}
 				const int x = x0 + static_cast<int>(i - first) * slot + slot / 2;
-				const int y = std::clamp(to_y(sma[i]), top, bottom);
-				if (have_prev) GfxDrawLine(prev_x, prev_y, x, y, colour);
+				const int y = to_y(sma[i]);
+				if (have_prev) clipped_line(prev_x, prev_y, x, y, colour);
 				prev_x = x;
 				prev_y = y;
 				have_prev = true;
@@ -1558,6 +1610,7 @@ static constexpr std::initializer_list<NWidgetPart> _nested_stock_widgets = {
 				/* A grey panel instead of a spacer: a spacer draws nothing, which leaves a hole in the window. */
 				NWidget(WWT_PANEL, COLOUR_GREY), SetFill(1, 1), SetResize(1, 0),
 				EndContainer(),
+				NWidget(WWT_PUSHBTN, COLOUR_GREY, WID_ST_CHART_EXPAND), SetMinimalSize(70, 14),
 			EndContainer(),
 			NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_CHART), SetMinimalSize(400, 184), SetResize(1, 1), SetFill(1, 1), SetToolTip(STR_STOCK_TIP_CHART),
 			EndContainer(),
