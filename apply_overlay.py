@@ -15,7 +15,6 @@ It looks for the mod files by name anywhere next to this script, so it does not 
   - script_company.hpp/.cpp: ScriptCompany::GetCentralBankDebt and GetCentralBankAvailable, so that AIs can see the central bank debt
   - timer_game_calendar.cpp, economy_settings.ini: the date of the original game follows the HH:MM clock (a new day starts at 00:00)
 """
-import hashlib
 import re
 import sys
 from pathlib import Path
@@ -165,50 +164,175 @@ static const GameTimeSubscription _money_trace_minute(GameTimeEvent::Minute, [](
 """
 
 
-# Whole files of OpenTTD that this overlay replaces (the gold panel goes into the operating profit graph window).
-# They were made from the OpenTTD 15.3 files; the sha256 (line ends normalised) is that of the ORIGINAL file, so a tree of another version is refused
-# instead of being overwritten with a file that does not fit it. A file that already has the patch is accepted.
-REPLACED_FILES = {
-    "graph_gui.cpp": ("src", "2085ad159be9fbcd5889a8708f7fa190e606ea43a43ff9075f5979f31fab9167"),
-    "graph_widget.h": ("src/widgets", "383d17134b1969655795947767f78facdc0d3883656255d6da31f4cb07e43f7f"),
-}
+# The gold panel goes into the operating profit graph window of OpenTTD (graph_gui.cpp, widgets/graph_widget.h).
+# These two files are PATCHED IN PLACE, not replaced: the code is inserted at anchors, and the names that the file itself uses
+# (colours, base class) are read from the file, so it fits the real OpenTTD 15.3 whatever the naming style of that version is.
+# If an anchor is not found the script stops with an error and nothing is written. A file that has the marker is left alone.
+GOLD_MARKER = "GOLD_PANEL_PATCH"
+
+GOLD_STRUCT_CODE = r"""
+	/* GOLD_PANEL_PATCH: the gold trading panel is shown in the place of the profit graph. */
+	GoldPanel gold;         ///< The gold trading panel (state and actions).
+	bool show_gold = true;  ///< Whether the gold panel (plane 1) or the profit graph (plane 0) is shown.
+
+	/** Redraw regularly while the gold panel is shown: the price and the cash change all the time. */
+	const IntervalTimer<TimerWindow> gold_interval = {std::chrono::milliseconds(500), [this](auto) {
+		if (this->show_gold) this->SetDirty();
+	}};
+
+	/** Show the gold trading panel (true) or the profit graph (false) in the main area of the window. */
+	void ShowGold(bool show)
+	{
+		this->show_gold = show;
+		this->GetWidget<NWidgetStacked>(WID_PHG_GOLD_SEL)->SetDisplayedPlane(show ? 1 : 0);
+		this->SetWidgetLoweredState(WID_PHG_GOLD_TOGGLE, show);
+		this->SetDirty();
+	}
+
+	void OnPaint() override
+	{
+		/* Buy Gold only works with unborrowed liquid cash (and stock in the market); Sell Gold only with gold that the company holds. */
+		this->SetWidgetDisabledState(WID_PHG_GOLD_BUY, !this->gold.CanBuy());
+		this->SetWidgetDisabledState(WID_PHG_GOLD_SELL, !this->gold.CanSell());
+		this->DrawWidgets();
+	}
+
+	void DrawWidget(const Rect &r, WidgetID widget) const override
+	{
+		switch (widget) {
+			case WID_PHG_GOLD_INFO: this->gold.DrawInfo(r); return;
+			case WID_PHG_GOLD_BUY_QTY: this->gold.DrawQuantity(r, true); return;
+			case WID_PHG_GOLD_SELL_QTY: this->gold.DrawQuantity(r, false); return;
+			default: break;
+		}
+		this->@BASE@::DrawWidget(r, widget);
+	}
+
+	void OnClick(Point pt, WidgetID widget, int click_count) override
+	{
+		switch (widget) {
+			case WID_PHG_GOLD_TOGGLE: this->ShowGold(!this->show_gold); return;
+			case WID_PHG_GOLD_BUY_QTY: this->gold.AskQuantity(this, true); return;
+			case WID_PHG_GOLD_SELL_QTY: this->gold.AskQuantity(this, false); return;
+			case WID_PHG_GOLD_BUY: this->gold.Buy(); this->SetDirty(); return;
+			case WID_PHG_GOLD_SELL: this->gold.Sell(); this->SetDirty(); return;
+			default: break;
+		}
+		this->@BASE@::OnClick(pt, widget, click_count);
+	}
+
+	void OnQueryTextFinished(std::optional<std::string> str) override
+	{
+		this->gold.QueryFinished(str);
+		this->SetDirty();
+	}
+
+"""
+
+GOLD_NESTED_CODE = r"""		/* GOLD_PANEL_PATCH: the main area is the profit graph (plane 0) or the gold trading panel (plane 1). Both fill and resize with the window. */
+		NWidget(NWID_SELECTION, @INVALID@, WID_PHG_GOLD_SEL),
+@GRAPH_LINE@			NWidget(NWID_VERTICAL),
+				NWidget(WWT_PANEL, @PANEL@, WID_PHG_GOLD_INFO), SetMinimalSize(576, 140), SetFill(1, 1), SetResize(1, 1),
+				EndContainer(),
+				NWidget(NWID_HORIZONTAL),
+					NWidget(WWT_PANEL, @PANEL@, WID_PHG_GOLD_BUY_QTY), SetMinimalSize(150, 14), SetFill(1, 0), SetResize(1, 0), SetToolTip(STR_GOLD_TIP_QTY),
+					EndContainer(),
+					NWidget(WWT_PUSHTXTBTN, @PANEL@, WID_PHG_GOLD_BUY), SetMinimalSize(90, 14), SetStringTip(STR_GOLD_BUY, STR_GOLD_TIP_BUY),
+					NWidget(WWT_PANEL, @PANEL@, WID_PHG_GOLD_SELL_QTY), SetMinimalSize(150, 14), SetFill(1, 0), SetResize(1, 0), SetToolTip(STR_GOLD_TIP_QTY),
+					EndContainer(),
+					NWidget(WWT_PUSHTXTBTN, @PANEL@, WID_PHG_GOLD_SELL), SetMinimalSize(90, 14), SetStringTip(STR_GOLD_SELL, STR_GOLD_TIP_SELL),
+				EndContainer(),
+			EndContainer(),
+		EndContainer(),
+"""
+
+GOLD_WIDGET_IDS = """	WID_PHG_GOLD_SEL,       ///< Selection: the profit graph or the gold trading panel (GOLD_PANEL_PATCH).
+	WID_PHG_GOLD_TOGGLE,    ///< Button: switch between the gold panel and the profit graph.
+	WID_PHG_GOLD_INFO,      ///< Gold panel: price, backing, credit standing and holdings.
+	WID_PHG_GOLD_BUY_QTY,   ///< Gold panel: ounces to buy (click to type).
+	WID_PHG_GOLD_BUY,       ///< Gold panel: Buy Gold button.
+	WID_PHG_GOLD_SELL_QTY,  ///< Gold panel: ounces to sell (click to type).
+	WID_PHG_GOLD_SELL,      ///< Gold panel: Sell Gold button.
+"""
 
 
-def check_replaced_files(tree):
-    """Warn (do not stop) when the original file is not the one the digest was made from.
-    The workflow pins OpenTTD to 15.3, so a mismatch is only printed with the real hash; set STRICT_REPLACE=1 to make it an error."""
-    import os
-    strict = os.environ.get("STRICT_REPLACE") == "1"
-    for name, (folder, digest) in REPLACED_FILES.items():
-        target = tree / folder / name
-        if not target.is_file():
-            sys.exit(f"ERROR: {folder}/{name} not found in the OpenTTD tree")
-        data = target.read_bytes().replace(b"\r\n", b"\n")
-        if b"GOLD_PANEL_PATCH" in data:
-            continue
-        actual = hashlib.sha256(data).hexdigest()
-        if actual != digest:
-            msg = (f"{folder}/{name}: sha256 of the OpenTTD file is {actual}, expected {digest}. "
-                   f"The replacement file may not fit this OpenTTD version.")
-            if strict:
-                sys.exit("ERROR: " + msg)
-            print("WARNING: " + msg)
+def _read_lf(path):
+    raw = path.read_bytes().decode("utf-8")
+    return raw.replace("\r\n", "\n"), "\r\n" in raw
 
 
-def install_replaced_files(tree):
-    """Copy the replaced files from replace/ of this repository over the OpenTTD files (the check above has accepted them).
-    They are NOT in src/ of this repository: the workflow refuses to copy anything from src/ that OpenTTD already has."""
-    for name, (folder, digest) in REPLACED_FILES.items():
-        src = HERE / "replace" / folder / name
-        if not src.is_file():
-            sys.exit(f"ERROR: {src} is missing")
-        (tree / folder / name).write_bytes(src.read_bytes())
-        print(f"replace {src.relative_to(HERE)} -> {folder}/{name}")
+def _write_like(path, text, crlf):
+    path.write_bytes((text.replace("\n", "\r\n") if crlf else text).encode("utf-8"))
+
+
+def patch_graph_files(tree):
+    gui = tree / "src" / "graph_gui.cpp"
+    wid = tree / "src" / "widgets" / "graph_widget.h"
+    for f in (gui, wid):
+        if not f.is_file():
+            sys.exit(f"ERROR: {f} not found in the OpenTTD tree")
+    g, g_crlf = _read_lf(gui)
+    w, w_crlf = _read_lf(wid)
+
+    if GOLD_MARKER in g and GOLD_MARKER in w:
+        print("graph_gui.cpp, graph_widget.h: gold panel already there")
+        return
+    if GOLD_MARKER in g or GOLD_MARKER in w:
+        sys.exit("ERROR: only one of graph_gui.cpp and graph_widget.h has the gold panel patch; restore both from OpenTTD and run again")
+
+    # 1. the widget numbers
+    m = re.search(r"^[ \t]*WID_PHG_DETAILED_PERFORMANCE,[^\n]*\n", w, re.M)
+    if not m:
+        sys.exit("ERROR: WID_PHG_DETAILED_PERFORMANCE not found in widgets/graph_widget.h (anchor of the gold panel patch)")
+    w = w[:m.end()] + "\n" + GOLD_WIDGET_IDS + w[m.end():]
+
+    # 2. the include
+    includes = list(re.finditer(r'^#include "widgets/graph_widget\.h"[^\n]*\n', g, re.M))
+    if not includes:
+        sys.exit('ERROR: #include "widgets/graph_widget.h" not found in graph_gui.cpp (anchor of the gold panel patch)')
+    g = g[:includes[-1].end()] + '#include "gold_panel.h" /* GOLD_PANEL_PATCH */\n' + g[includes[-1].end():]
+
+    # 3. the window: new members and handlers; the base class is read from the file
+    m = re.search(r"^struct OperatingProfitGraphWindow : ([A-Za-z_]\w*) \{\n", g, re.M)
+    if not m:
+        sys.exit("ERROR: struct OperatingProfitGraphWindow not found in graph_gui.cpp (anchor of the gold panel patch)")
+    base = m.group(1)
+    struct_start = m.end()
+    nxt = re.search(r"^(?:struct|static|/\*\*|void) ", g[struct_start:], re.M)
+    struct_end = struct_start + (nxt.start() if nxt else len(g) - struct_start)
+    body = g[struct_start:struct_end]
+    ctor = re.search(r"^([ \t]*)this->InitializeWindow\(window_number\);[^\n]*\n", body, re.M)
+    if not ctor:
+        sys.exit("ERROR: this->InitializeWindow(window_number); not found in OperatingProfitGraphWindow (anchor of the gold panel patch)")
+    body = body[:ctor.end()] + ctor.group(1) + "this->ShowGold(true);\n" + body[ctor.end():]
+    g = g[:struct_start] + GOLD_STRUCT_CODE.replace("@BASE@", base) + body + g[struct_end:]
+
+    # 4. the layout: the colours are read from the file
+    m = re.search(r"_nested_operating_profit_widgets\s*=\s*\{\n(.*?)\n\};", g, re.S)
+    if not m:
+        sys.exit("ERROR: _nested_operating_profit_widgets not found in graph_gui.cpp (anchor of the gold panel patch)")
+    block = m.group(1)
+    panel = re.search(r"NWidget\(WWT_PANEL, ([\w:]+), WID_GRAPH_BACKGROUND\)", block)
+    graph = re.search(r"^([ \t]*)(NWidget\(WWT_EMPTY, ([\w:]+), WID_GRAPH_GRAPH\)[^\n]*\n)", block, re.M)
+    key = re.search(r"^([ \t]*)NWidget\(WWT_PUSHTXTBTN, ([\w:]+), WID_GRAPH_KEY_BUTTON\)", block, re.M)
+    if not (panel and graph and key):
+        sys.exit("ERROR: the layout of the operating profit window is not what the gold panel patch expects (WID_GRAPH_BACKGROUND, WID_GRAPH_GRAPH, WID_GRAPH_KEY_BUTTON)")
+    nested = (GOLD_NESTED_CODE.replace("@INVALID@", graph.group(3)).replace("@PANEL@", panel.group(1))
+              .replace("@GRAPH_LINE@", "\t" + graph.group(1) + graph.group(2)))
+    toggle = (f"{key.group(1)}NWidget(WWT_PUSHTXTBTN, {key.group(2)}, WID_PHG_GOLD_TOGGLE), SetMinimalSize(80, 0), "
+              f"SetStringTip(STR_GOLD_TOGGLE, STR_GOLD_TIP_TOGGLE),\n")
+    # the later position first, so that the earlier one stays valid
+    new_block = block[:graph.start()] + nested + block[graph.end():]
+    new_block = new_block[:key.start()] + toggle + new_block[key.start():]
+    g = g[:m.start(1)] + new_block + g[m.end(1):]
+
+    _write_like(gui, g, g_crlf)
+    _write_like(wid, w, w_crlf)
+    print(f"graph_gui.cpp, graph_widget.h: gold panel added (base class {base}, panel colour {panel.group(1)})")
 
 
 def main(tree):
-    check_replaced_files(tree)
-    install_replaced_files(tree)
+    patch_graph_files(tree)
     for name, folder in FILES.items():
         src = find(name, folder)
         dst = tree / folder / name

@@ -25,11 +25,11 @@ The repository is an **overlay**, not a full OpenTTD tree. `apply_overlay.py <op
 - A new saved value needs a record kind in `saveload/stock_sl.cpp` (`StockRecordKind`: used so far 0-25; next free is 26), written in `Save`, read in `Load`, and reset in `StockMarket::Reset` (`stock_base.cpp`).
 - We cannot compile here. The only compiler is the GitHub Actions build. Read its log (the first error is the real one; later ones follow from it).
 
-## 2b. Whole OpenTTD files that the overlay replaces
-`replace/src/graph_gui.cpp` and `replace/src/widgets/graph_widget.h` are modified copies of the OpenTTD 15.3 files (marker: `GOLD_PANEL_PATCH`). `apply_overlay.py` compares the sha256 of the original in the tree (`REPLACED_FILES`) and PRINTS A WARNING with the real hash if it differs (it stopped the build before, because the stored hash of graph_gui.cpp did not match the real 15.3 file; set STRICT_REPLACE=1 to make it an error again). If the build then fails inside graph_gui.cpp, the replacement file does not fit the real 15.3 file: redo it from the real file. To port to another version: take that version's two files, redo the small edits (search `GOLD_PANEL_PATCH` and `WID_PHG_GOLD_`), and update the hashes.
-Note: the 15.3 files use `Colours::Brown`, `WindowClass::...`, `FontSize::...`; the older mod files use `COLOUR_GREY`, `WC_...`, `FS_NORMAL`. If the build says one of those names does not exist, that is the cause.
-
-The files are in `replace/`, NOT in `src/`: the workflow step "Add stock market source files" (.github/workflows/build-windows.yml) refuses to copy any file from `src/` of this repository that OpenTTD 15.3 already has, and fails the build. `apply_overlay.py` copies them (`install_replaced_files`) after checking the original.
+## 2b. OpenTTD files that the overlay patches in place
+`apply_overlay.py` (`patch_graph_files`) inserts the gold panel into `src/graph_gui.cpp` and `src/widgets/graph_widget.h` of OpenTTD (marker: `GOLD_PANEL_PATCH`, widget numbers `WID_PHG_GOLD_*`).
+It does NOT replace the files: it finds anchors (struct `OperatingProfitGraphWindow`, `_nested_operating_profit_widgets`, `WID_PHG_DETAILED_PERFORMANCE`, the `#include` of `widgets/graph_widget.h`) and reads the base class and the colour names from the file itself, so it fits the naming style of the OpenTTD version that is built. If an anchor is missing it stops with a clear error and writes nothing.
+History: a first version replaced the whole files with copies of a newer OpenTTD (master) and failed to compile on 15.3 (`Colours::Brown`, `FontSize::Normal` do not exist there; 15.3 uses `COLOUR_BROWN`, `FS_NORMAL`, `WC_...`). Never copy whole OpenTTD files from another version.
+The CI workflow (.github/workflows/build-windows.yml) also refuses to copy any file from `src/` of this repository that OpenTTD 15.3 already has, so files of OpenTTD must never be put in `src/` here.
 The CI order is: checkout OpenTTD 15.3, `git apply stock-market.patch`, copy `src/` (no clashes allowed), `python3 mod/apply_overlay.py openttd`, build.
 
 ## 3. Rules that already cost a failed build
@@ -39,7 +39,7 @@ The CI order is: checkout OpenTTD 15.3, `git apply stock-market.patch`, copy `sr
 4. Drawing: keep every `DrawString` inside `[left, right]` and skip lines that do not fit above `bottom` (see `DrawGoldLine`). Never draw outside the widget rectangle.
 5. Fund isolation: nothing may be bought with borrowed money. Use `GetUnborrowedLiquidCash(company)` (central_bank.h).
 6. Thai text is allowed in `.cpp` files (see `CbText("ไทย", "English")` in `central_bank_gui.cpp`), not in widget headers.
-7. **Never put a copy of an OpenTTD file in `src/` or `src/widgets/` of this repository.** The build step "Add stock market source files" fails with `src/<file> already exists in OpenTTD 15.3 ... refusing to overwrite it` (happened with `graph_gui.cpp` and `widgets/graph_widget.h`, which were duplicated in `src/` and `replace/src/`). Modified copies of OpenTTD files go ONLY in `replace/` and are listed in `REPLACED_FILES` of `apply_overlay.py`.
+7. **Never put a copy of an OpenTTD file anywhere in this repository** (not in `src/`, not in a `replace/` folder). The build step "Add stock market source files" fails with `src/<file> already exists in OpenTTD 15.3 ... refusing to overwrite it`, and a copy made from another OpenTTD version does not compile on 15.3 (names differ: `Colours::Brown` vs `COLOUR_BROWN`). Changes to OpenTTD files are made in place by `apply_overlay.py` (anchors, see section 2b) or by `stock-market.patch`.
 8. Do not mention or rely on window numbers twice: `WC_CENTRAL_BANK` uses number 0 (bank), 1 (statement), 2 (past statements).
 
 ## 4. Gold system (current design)
@@ -56,6 +56,7 @@ Source of gold: a world market with a limited stock. It is **not** connected to 
 
 ## 5. Done
 - [x] Cleanup: deleted duplicate/stale files (`src/stock_sl.cpp`, `src/stock_widget.h`, `saveload_and_overlay.patch`, `apply_wallet_fix.py`, root `CMakeLists.txt`, `build/`), added `.gitignore`.
+- [x] Build fix 6: `graph_gui.cpp` and `graph_widget.h` are no longer copied from a newer OpenTTD. They are patched in place by `patch_graph_files` in `apply_overlay.py`, which reads the base class and colour names from the real 15.3 file. This makes build fixes 3-5 and the `replace/` folder unnecessary (they were all caused by the copy). The compile errors were `Normal`/`Black`/`Brown` illegal qualified name at graph_gui.cpp(82).
 - [x] Build fix 5: `replace/src/graph_gui.cpp` line 24 was an empty `#include` (C2006/C1083 at graph_gui.cpp(24)); now `#include "currency.h"`. Rule: never write `<...>` includes in chat-copied text without checking the line is not empty.
 - [x] Central bank, loans, interest, account log, ledger and account statement.
 - [x] Past statements window (10 years). Yearly expenses of the game (3 years only) are copied into the ledger every day so 10 years exist from now on; older years show n/a.
