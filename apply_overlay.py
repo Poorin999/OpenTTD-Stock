@@ -22,6 +22,10 @@ from pathlib import Path
 # Set to False and build again to remove it.
 MONEY_TRACE = True
 
+# True: the fixed fee that OpenTTD takes from every company (about 1/4 of the base station price, 99 pounds at the start) is removed.
+# The money trace showed it is taken about once per game hour. Set to False and build again to keep the fee.
+REMOVE_FIXED_COMPANY_FEE = True
+
 HERE = Path(__file__).resolve().parent
 
 FILES = {  # file name -> folder in the OpenTTD tree
@@ -214,6 +218,19 @@ def main(tree):
         s = ensure_include(s, '#include "game_time/game_time_manager.h"', ['#include "company_func.h"', '#include "stdafx.h"'])
     if changed:
         p.write_text(s, encoding="utf-8")
+
+    # economy.cpp: the fixed fee of OpenTTD (EXPENSES_OTHER, a quarter of the base station price) that is taken together with the loan interest.
+    p = tree / "src" / "economy.cpp"
+    s = p.read_text(encoding="utf-8")
+    fee = "\t\tSubtractMoneyFromCompany(CommandCost(EXPENSES_OTHER, _price[PR_STATION_VALUE] >> 2));\n"
+    if not REMOVE_FIXED_COMPANY_FEE:
+        print("economy.cpp: the fixed company fee is kept")
+    elif fee in s:
+        s = s.replace(fee, "\t\t/* The fixed fee of OpenTTD is removed: the central bank interest is the only cost of money. */\n", 1)
+        p.write_text(s, encoding="utf-8")
+        print("economy.cpp: fixed company fee removed")
+    else:
+        print("economy.cpp: fixed company fee already removed (or not found)")
 
     # CmdIncreaseLoan and CmdDecreaseLoan are the only ways into the original loan (GUI, AI, script, console, network): both are refused.
     # A loan that an old savegame still has is moved to the central bank by central_bank.cpp. The file differs between OpenTTD versions.

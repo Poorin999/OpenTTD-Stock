@@ -15,6 +15,7 @@
 #include "command_func.h"
 #include "company_base.h"
 #include "company_func.h"
+#include "core/backup_type.hpp"
 #include "window_func.h"
 #include "timer/timer.h"
 #include "timer/timer_game_economy.h"
@@ -282,8 +283,10 @@ void CentralBank::UpdateDaily(int64_t day)
 		const BankDayResult r = BankSettleDay(a, static_cast<int64_t>(c->money), GetCentralBankEquity(company), day);
 
 		if (r.paid_from_cash > 0) {
-			/* The money leaves the cash and is an expense of the company (loan interest in the finances window). */
-			SubtractMoneyFromCompanyFract(company, CommandCost(EXPENSES_LOAN_INTEREST, Money(r.paid_from_cash)));
+			/* The money leaves the cash and is an expense of the company (loan interest in the finances window).
+			 * Not SubtractMoneyFromCompanyFract: that one counts its cost in 1/256 of a money unit, and would take almost nothing. */
+			AutoRestoreBackup cur_company(_current_company, company);
+			SubtractMoneyFromCompany(CommandCost(EXPENSES_LOAN_INTEREST, Money(r.paid_from_cash)));
 		}
 		/* The ledger shows all the interest of the day: the part that was paid and the part that was added to the debt. */
 		RecordLedger(company, LedgerItem::BankInterest, -r.interest_due);
