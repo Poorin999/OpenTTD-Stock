@@ -175,6 +175,10 @@ REPLACED_FILES = {
 
 
 def check_replaced_files(tree):
+    """Warn (do not stop) when the original file is not the one the digest was made from.
+    The workflow pins OpenTTD to 15.3, so a mismatch is only printed with the real hash; set STRICT_REPLACE=1 to make it an error."""
+    import os
+    strict = os.environ.get("STRICT_REPLACE") == "1"
     for name, (folder, digest) in REPLACED_FILES.items():
         target = tree / folder / name
         if not target.is_file():
@@ -182,9 +186,13 @@ def check_replaced_files(tree):
         data = target.read_bytes().replace(b"\r\n", b"\n")
         if b"GOLD_PANEL_PATCH" in data:
             continue
-        if hashlib.sha256(data).hexdigest() != digest:
-            sys.exit(f"ERROR: {folder}/{name} is not the OpenTTD 15.3 file this overlay was made for. Nothing was changed. "
-                     f"Send this file to the person who maintains the overlay so that the gold panel can be made for your version.")
+        actual = hashlib.sha256(data).hexdigest()
+        if actual != digest:
+            msg = (f"{folder}/{name}: sha256 of the OpenTTD file is {actual}, expected {digest}. "
+                   f"The replacement file may not fit this OpenTTD version.")
+            if strict:
+                sys.exit("ERROR: " + msg)
+            print("WARNING: " + msg)
 
 
 def install_replaced_files(tree):

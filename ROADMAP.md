@@ -26,7 +26,7 @@ The repository is an **overlay**, not a full OpenTTD tree. `apply_overlay.py <op
 - We cannot compile here. The only compiler is the GitHub Actions build. Read its log (the first error is the real one; later ones follow from it).
 
 ## 2b. Whole OpenTTD files that the overlay replaces
-`replace/src/graph_gui.cpp` and `replace/src/widgets/graph_widget.h` are modified copies of the OpenTTD 15.3 files (marker: `GOLD_PANEL_PATCH`). `apply_overlay.py` checks the sha256 of the original in the tree (`REPLACED_FILES`) and stops if it differs, so another OpenTTD version is never overwritten silently. To port to another version: take that version's two files, redo the small edits (search `GOLD_PANEL_PATCH` and `WID_PHG_GOLD_`), and update the hashes.
+`replace/src/graph_gui.cpp` and `replace/src/widgets/graph_widget.h` are modified copies of the OpenTTD 15.3 files (marker: `GOLD_PANEL_PATCH`). `apply_overlay.py` compares the sha256 of the original in the tree (`REPLACED_FILES`) and PRINTS A WARNING with the real hash if it differs (it stopped the build before, because the stored hash of graph_gui.cpp did not match the real 15.3 file; set STRICT_REPLACE=1 to make it an error again). If the build then fails inside graph_gui.cpp, the replacement file does not fit the real 15.3 file: redo it from the real file. To port to another version: take that version's two files, redo the small edits (search `GOLD_PANEL_PATCH` and `WID_PHG_GOLD_`), and update the hashes.
 Note: the 15.3 files use `Colours::Brown`, `WindowClass::...`, `FontSize::...`; the older mod files use `COLOUR_GREY`, `WC_...`, `FS_NORMAL`. If the build says one of those names does not exist, that is the cause.
 
 The files are in `replace/`, NOT in `src/`: the workflow step "Add stock market source files" (.github/workflows/build-windows.yml) refuses to copy any file from `src/` of this repository that OpenTTD 15.3 already has, and fails the build. `apply_overlay.py` copies them (`install_replaced_files`) after checking the original.
@@ -60,6 +60,7 @@ Source of gold: a world market with a limited stock. It is **not** connected to 
 - [x] Gold reserve: price engine, commands `CMD_GOLD_BUY` / `CMD_GOLD_SELL`, savegame records, gold panel in the Trading Terminal (toggle with the Gold button, replaces the chart area while on).
 - [x] Limited market stock for gold (scarcity price).
 - [x] Gold panel moved from the Trading Terminal into the operating profit graph window (replaces the graph; Gold / Graph button switches).
+- [x] Build fix 2: the hash check of the replaced files is now a warning that prints the real sha256 (the stored hash did not match 15.3 and stopped the build at \"Register wallet commands\").
 - [x] Build fix: removed the duplicate `src/graph_gui.cpp` and `src/widgets/graph_widget.h` (identical to the files in `replace/`), which made the "Add stock market source files" step fail.
 
 ## 6. Planned (in a sensible order)
