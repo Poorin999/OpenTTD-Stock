@@ -37,6 +37,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "central_bank.h": "src", "central_bank.cpp": "src",
     "central_bank_gui.h": "src", "central_bank_gui.cpp": "src",
     "central_bank_widget.h": "src/widgets",
+    "RetailMath.h": "src", "RetailMarketManager.h": "src", "RetailMarketManager.cpp": "src",
     "game_time_manager.h": "src/game_time", "game_time_manager.cpp": "src/game_time", "game_time_driver.cpp": "src/game_time",
     "game_time_aggregator.h": "src/game_time",
     "stock_sl.cpp": "src/saveload",
@@ -54,6 +55,7 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
 ]
 NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
+               "RetailMath.h", "RetailMarketManager.h", "RetailMarketManager.cpp",
                "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]
 REPLACE_KEYS = {"STR_STOCK_TIP_TOOLBOX", "STR_STOCK_TIP_SUMMARY", "STR_STOCK_ORDER_INFO", "STR_STOCK_TIP_DEPOSIT", "STR_STOCK_TIP_WITHDRAW"}
 STRING_FILES = ["english_stock_strings.txt", "english_wallet_strings.txt", "english_round8_strings.txt", "english_timeframe_strings.txt", "english_central_bank_strings.txt"]

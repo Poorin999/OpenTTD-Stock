@@ -12,6 +12,7 @@
 #include "stock_base.h"
 #include "stock_gui.h"
 #include "central_bank.h"
+#include "RetailMarketManager.h"
 #include "game_time/game_time_manager.h"
 #include "command_type.h"
 #include "company_base.h"
@@ -46,6 +47,7 @@ void StockMarket::Reset()
 	this->valuation.fill({});
 	_wallets.Reset();
 	_central_bank.Reset();
+	RetailMarketManager::Get().Reset(); // The retail investors start again with every new game and every load.
 	GameTimeManager::Get().Reset();
 	for (auto &list : this->daily) list.clear();
 	this->daily_current.fill({});
