@@ -17,6 +17,10 @@
 #include "town.h"
 #include "openttd.h"
 #include "game_time/game_time_manager.h"
+#include "stock_cmd.h"
+#include "command_func.h"
+#include "core/backup_type.hpp"
+#include <utility>
 
 #include "safeguards.h"
 
@@ -494,3 +498,170 @@ static const GameTimeSubscription _retail_game_hour(GameTimeEvent::Hour, [](cons
 {
 	RetailMarketManager::Get().OnNewGameHour(now);
 });
+
+/*
+ * ---- The computer players (AI companies) as traders --------------------------------------------------------------------------------------
+ *
+ * Every AI company looks at the market once per game day, in its own hour (the companies are spread over the day, like real traders who do not all
+ * act at the same moment). It uses the same commands as a human player (CMD_STOCK_OPEN, CMD_STOCK_CLOSE, CMD_WALLET_TRANSFER), so every rule of the
+ * terminal (margin, commission, order limit, strict trading capital) applies to it too. Only integer arithmetic and no random numbers: every client
+ * calculates the same.
+ *
+ * Strategy ("value with risk control"):
+ *   - Score of a company = how far the price is below the valuation (the book + earnings value), plus a little of the trend of the last month.
+ *   - Buy the best undervalued company, sell short the most overvalued one; never a company with heavy debt or in default on the long side.
+ *   - Never more than a small part of the free margin in one position, never more than BOT_MAX_POSITIONS positions, only one new position per day.
+ *   - Every position has a Stop Loss and a Take Profit; it is also closed when the reason to hold it is gone or after BOT_MAX_HOLD_MONTHS months.
+ *   - The bot only feeds its trading wallet with a small part of its cash, and only when the company has a lot of money: it must keep building transport.
+ */
+namespace {
+
+constexpr int BOT_MAX_POSITIONS = 4;             ///< Open positions per AI company.
+constexpr int BOT_MAX_HOLD_MONTHS = 3;           ///< A position is closed after this many game months.
+constexpr int64_t BOT_MIN_CASH = 300'000;        ///< The company must have more cash than this before it puts money in its trading wallet.
+constexpr int64_t BOT_WALLET_PERCENT = 10;       ///< Share of the company cash that is put in the trading wallet at a time.
+constexpr int64_t BOT_WALLET_TARGET_PERCENT = 6; ///< The wallet is filled up when it holds less than this share of the company cash.
+constexpr int64_t BOT_RISK_PERCENT = 25;         ///< Part of the free margin that one position may use.
+constexpr uint32_t BOT_MAX_VOLUME = 2000;        ///< Largest position in shares (2% of a company): the bot does not push the price around.
+constexpr int64_t BOT_BUY_SCORE_PPM = 60'000;    ///< A company is bought when it is at least 6% undervalued (with the trend).
+constexpr int64_t BOT_SHORT_SCORE_PPM = 100'000; ///< A company is sold short when it is at least 10% overvalued.
+constexpr int64_t BOT_STOP_LOSS_PPM = 50'000;    ///< Stop Loss: 5% from the entry price.
+constexpr int64_t BOT_TAKE_PROFIT_PPM = 90'000;  ///< Take Profit: 9% from the entry price.
+constexpr int64_t BOT_MAX_DE_PPM = 2 * retail::RATIO_ONE; ///< No long position in a company with more debt than twice its equity.
+
+/** The opinion of a bot about a company: positive = cheap, negative = expensive; PPM units.. */
+struct BotView {
+	bool valid = false;
+	bool can_long = true;
+	int64_t score = 0;
+};
+
+BotView BotOpinion(CompanyID self, CompanyID target)
+{
+	BotView v;
+	if (self == target || !Company::IsValidID(target)) return v;
+	const size_t t = target.base();
+	const int64_t price_fp = _stock_market.price_fp[t];
+	const int64_t base_fp = _stock_market.base_fp[t];
+	if (price_fp <= 0 || base_fp <= 0) return v;
+
+	/* Value: the valuation against the price. */
+	int64_t score = std::clamp<int64_t>((base_fp - price_fp) * retail::PPM / price_fp, -retail::PPM / 2, retail::PPM / 2);
+
+	/* Trend: a third of the change since the last monthly close; the market keeps going the same way for a while. */
+	const auto &candles = _stock_market.candles[t];
+	if (!candles.empty() && candles.back().close > 0) {
+		const int64_t last_close = candles.back().close;
+		const int64_t now = StockFixedToPrice(price_fp);
+		score += std::clamp<int64_t>((now - last_close) * retail::PPM / last_close, -retail::PPM / 2, retail::PPM / 2) / 3;
+	}
+
+	/* Quality: no long position in a company that may fail. */
+	const StockValuation &val = _stock_market.valuation[t];
+	const int64_t de = BankDebtToEquityPpm(GetCentralBankDebt(target), val.book);
+	const BankAccount &account = _central_bank.accounts[t];
+	if (account.in_default || de > BOT_MAX_DE_PPM || (val.quarters > 0 && val.earnings < 0)) v.can_long = false;
+	if (account.in_default) score -= retail::PPM / 10; // a company in default is more likely to fall further
+
+	v.valid = true;
+	v.score = score;
+	return v;
+}
+
+/** One game day of one AI company: look after the positions, then maybe open a new one. */
+void BotTrade(CompanyID id)
+{
+	if (!Company::IsValidID(id)) return;
+	Company *c = Company::Get(id);
+	if (!c->is_ai) return;
+
+	_wallets.EnsureDefaults(id);
+	const Wallet *w = _wallets.FindFirst(id, WalletKind::Trading);
+	if (w == nullptr) return;
+	const uint8_t wallet = w->id;
+
+	Backup<CompanyID> cur_company(_current_company);
+	_current_company = id;
+
+	/* 1. Feed the wallet, a little at a time, only from a rich company. */
+	const int64_t cash = static_cast<int64_t>(c->money);
+	if (cash > BOT_MIN_CASH && GetWalletBalance(id, wallet) < cash * BOT_WALLET_TARGET_PERCENT / 100) {
+		const int64_t amount = cash * BOT_WALLET_PERCENT / 100;
+		Command<CMD_WALLET_TRANSFER>::Do(DoCommandFlag::Execute, WALLET_CASH, wallet, Money(amount));
+	}
+
+	/* 2. The open positions. */
+	std::vector<std::pair<uint32_t, uint32_t>> to_close;
+	int open_count = 0;
+	std::array<bool, MAX_COMPANIES> held{};
+	const int32_t now_ym = GetStockCurrentMonth();
+	for (const StockOrder &p : _stock_market.positions) {
+		if (p.owner != id.base() || p.wallet != wallet) continue;
+		open_count++;
+		held[p.target] = true;
+
+		const int64_t value = std::max<int64_t>(1, p.price * static_cast<int64_t>(p.volume));
+		const int64_t pnl_ppm = GetStockProfit(p) * retail::PPM / value;
+		const BotView view = BotOpinion(id, CompanyID{p.target});
+		const bool is_long = IsStockBuy(p.type);
+		bool close = false;
+		if (!view.valid) close = true;                                                  // no opinion any more
+		else if (pnl_ppm >= BOT_TAKE_PROFIT_PPM || pnl_ppm <= -BOT_STOP_LOSS_PPM) close = true; // the levels (a safety net: the market has them too)
+		else if (is_long && (view.score < -BOT_BUY_SCORE_PPM / 2 || !view.can_long)) close = true; // cheap no more, or no longer safe
+		else if (!is_long && view.score > BOT_BUY_SCORE_PPM / 2) close = true;          // expensive no more
+		else if (p.open_ym != 0 && now_ym - p.open_ym >= BOT_MAX_HOLD_MONTHS) close = true;
+		if (close) to_close.emplace_back(p.id, p.volume);
+	}
+	for (const auto &[pid, vol] : to_close) {
+		Command<CMD_STOCK_CLOSE>::Do(DoCommandFlag::Execute, pid, vol);
+		open_count--;
+	}
+
+	/* 3. One new position at most. */
+	if (open_count < BOT_MAX_POSITIONS && _stock_market.CountOrders(id) < STOCK_MAX_ORDERS_PER_COMPANY) {
+		CompanyID best{};
+		int64_t best_score = 0;
+		bool best_long = true;
+		for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
+			const CompanyID t{i};
+			if (held[i]) continue;
+			const BotView v = BotOpinion(id, t);
+			if (!v.valid) continue;
+			if (v.can_long && v.score >= BOT_BUY_SCORE_PPM && v.score > best_score) { best = t; best_score = v.score; best_long = true; }
+			else if (v.score <= -BOT_SHORT_SCORE_PPM && -v.score > best_score) { best = t; best_score = -v.score; best_long = false; }
+		}
+
+		if (best_score > 0) {
+			const int64_t free_margin = GetStockFreeMargin(id, wallet);
+			StockOrder probe;
+			probe.price = best_long ? GetStockAsk(best) : GetStockBid(best);
+			probe.volume = 1000;
+			const int64_t margin_per_1000 = GetStockMargin(probe);
+			if (probe.price > 0 && margin_per_1000 > 0 && free_margin > 0) {
+				const int64_t budget = free_margin * BOT_RISK_PERCENT / 100 * 9 / 10; // 10% stays for the commission
+				const uint32_t volume = static_cast<uint32_t>(std::min<int64_t>(BOT_MAX_VOLUME, budget * 1000 / margin_per_1000));
+				if (volume >= 1) {
+					const int64_t entry = GetStockExecutionPrice(best, best_long, volume);
+					const int64_t sl = best_long ? entry * (retail::PPM - BOT_STOP_LOSS_PPM) / retail::PPM : entry * (retail::PPM + BOT_STOP_LOSS_PPM) / retail::PPM;
+					const int64_t tp = best_long ? entry * (retail::PPM + BOT_TAKE_PROFIT_PPM) / retail::PPM : entry * (retail::PPM - BOT_TAKE_PROFIT_PPM) / retail::PPM;
+					Command<CMD_STOCK_OPEN>::Do(DoCommandFlag::Execute, best, best_long ? StockOrderType::Buy : StockOrderType::Sell, volume, Money(0), Money(sl), Money(tp), 0u, wallet);
+				}
+			}
+		}
+	}
+
+	cur_company.Restore();
+}
+
+/** Every game hour: the AI companies whose hour it is. Company number n acts at hour (n * 5 + 3) % 24, so they are spread over the day. */
+const GameTimeSubscription _bot_game_hour(GameTimeEvent::Hour, [](const GameTimeSnapshot &now)
+{
+	if (_game_mode != GM_NORMAL) return;
+	const int hour = static_cast<int>((now.total_minutes / GameTimeManager::MINUTES_PER_HOUR) % GameTimeManager::HOURS_PER_DAY);
+	for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
+		if ((i * 5 + 3) % GameTimeManager::HOURS_PER_DAY != hour) continue;
+		BotTrade(CompanyID{i});
+	}
+});
+
+} // namespace
