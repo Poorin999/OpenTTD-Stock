@@ -44,18 +44,43 @@ int64_t GetCentralBankDebt(CompanyID company)
 }
 
 /**
- * The most that a company may owe: #CENTRAL_BANK_CREDIT_PERCENT of its net equity. The net equity is the company value
- * (which counts the cash), plus the money in the wallets, minus the debt at the central bank. A loan raises the cash
- * and the debt by the same amount, so borrowing does not make a company able to borrow more.
+ * Net equity of a company: the company value (which counts the cash), plus the money in the wallets, minus the debt at the
+ * central bank. A loan raises the cash and the debt by the same amount, so borrowing does not make the equity bigger.
+ * @param company The company; 0 for a company that does not exist.
+ */
+static int64_t GetCentralBankEquity(CompanyID company)
+{
+	const Company *c = Company::GetIfValid(company);
+	if (c == nullptr) return 0;
+	return static_cast<int64_t>(CalculateCompanyValue(c)) + GetWalletsTotal(company) - GetCentralBankDebt(company);
+}
+
+/**
+ * The most that a company may owe: #CENTRAL_BANK_CREDIT_PERCENT of its net equity, lowered by the penalty level of the
+ * account (100% at level 0, 10% less for each level of default, never below 20%). That is how a default lowers the
+ * credit limit for new loans.
  * @param company The company.
  * @return The credit limit, 0 or more.
  */
 int64_t GetCentralBankCreditLimit(CompanyID company)
 {
-	const Company *c = Company::GetIfValid(company);
-	if (c == nullptr) return 0;
-	const int64_t equity = static_cast<int64_t>(CalculateCompanyValue(c)) + GetWalletsTotal(company) - GetCentralBankDebt(company);
-	return std::max<int64_t>(0, equity) * CENTRAL_BANK_CREDIT_PERCENT / 100;
+	if (!Company::IsValidID(company)) return 0;
+	const int64_t equity = GetCentralBankEquity(company);
+	const int64_t percent = BankCreditPercentForPenalty(_central_bank.accounts[company.base()].penalty_level);
+	return std::max<int64_t>(0, equity) * CENTRAL_BANK_CREDIT_PERCENT / 100 * percent / 100;
+}
+
+/**
+ * The annual rate (in bp, 100 = 1%) that the company would be charged at the next midnight: the penalty rate while the
+ * account is in default, otherwise the risk rate of its debt-to-equity ratio. For the future UI; 0 without debt.
+ */
+int64_t GetCentralBankAnnualRateBp(CompanyID company)
+{
+	if (!Company::IsValidID(company)) return 0;
+	const BankAccount &a = _central_bank.accounts[company.base()];
+	if (a.debt <= 0) return 0;
+	if (a.in_default) return BankPenaltyRateBp(std::max<int>(1, a.penalty_level));
+	return BankAnnualRateBp(BankDebtToEquityPpm(a.debt, GetCentralBankEquity(company)));
 }
 
 /** How much more a company may borrow now. */
@@ -235,29 +260,41 @@ static const IntervalTimer<TimerGameTick> _bank_move_original_loans({TimerGameTi
 });
 
 /**
- * Once per game day the interest is added to every debt. At least one money unit is added to a debt that exists,
- * so a small loan does not stay free of interest because of rounding. A company that is gone has no debt any more.
+ * Once per game day, at 00:00 game time, the interest of the day is taken from the cash of every company that has a debt.
+ * See BankSettleDay() for the rules: risk rate (3.5% .. 12%) from the debt-to-equity ratio; if the cash is not enough, the
+ * penalty rate (15% .. 18%), the cash that exists is taken, the rest is added to the debt, and the penalty level goes up
+ * (which lowers the credit limit). Interest is charged on the loan only: the interest that was paid is not added to the debt.
+ * A company that is gone has no debt any more.
+ * @param day Number of the game day that starts now (game minutes / 1440); a day is never charged twice.
  */
-void CentralBank::UpdateDaily()
+void CentralBank::UpdateDaily(int64_t day)
 {
 	for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
+		const CompanyID company{i};
 		BankAccount &a = this->accounts[i];
-		if (!Company::IsValidID(CompanyID{i})) {
+		Company *c = Company::GetIfValid(company);
+		if (c == nullptr) {
 			a = {};
 			_ledger.years[i].clear();
 			continue;
 		}
-		if (a.debt <= 0) continue;
-		const int64_t interest = std::max<int64_t>(1, a.debt * CENTRAL_BANK_RATE_PPM_PER_DAY / STOCK_PPM);
-		a.debt += interest;
-		a.interest_paid += interest;
-		RecordLedger(CompanyID{i}, LedgerItem::BankInterest, -interest);
+
+		const BankDayResult r = BankSettleDay(a, static_cast<int64_t>(c->money), GetCentralBankEquity(company), day);
+
+		if (r.paid_from_cash > 0) {
+			/* The money leaves the cash and is an expense of the company (loan interest in the finances window). */
+			SubtractMoneyFromCompanyFract(company, CommandCost(EXPENSES_LOAN_INTEREST, Money(r.paid_from_cash)));
+		}
+		/* The ledger shows all the interest of the day: the part that was paid and the part that was added to the debt. */
+		RecordLedger(company, LedgerItem::BankInterest, -r.interest_due);
+
 	}
 	InvalidateWindowData(WC_STOCK_MARKET, 0);
+	InvalidateWindowData(WC_CENTRAL_BANK, 0);
 }
 
-/** Add the interest of the central bank once per game day of the HH:MM clock (at 00:00, when the date of the game changes). */
-static const GameTimeSubscription _bank_daily(GameTimeEvent::Day, [](const GameTimeSnapshot &)
+/** Charge the interest of the central bank once per game day of the HH:MM clock (at 00:00, when the date of the game changes). */
+static const GameTimeSubscription _bank_daily(GameTimeEvent::Day, [](const GameTimeSnapshot &now)
 {
-	_central_bank.UpdateDaily();
+	_central_bank.UpdateDaily(static_cast<int64_t>(now.total_minutes / GameTimeManager::MINUTES_PER_DAY));
 });
