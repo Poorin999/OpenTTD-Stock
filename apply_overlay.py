@@ -277,7 +277,7 @@ def main(tree):
     else:
         m = re.search(r"^\tWC_STOCK_ORDER,\n", s, re.M)
         if m:
-            add = "\n\t/**\n\t * Central Bank window; replaces the company finances window. %Window numbers:\n\t *   - 0 = #CentralBankWidgets\n\t */\n\tWC_CENTRAL_BANK,\n"
+            add = "\n\t/**\n\t * Central Bank window; replaces the company finances window. %Window numbers:\n\t *   - 0 = the bank window (#CentralBankWidgets)\n\t *   - 1 = the account statement window\n\t */\n\tWC_CENTRAL_BANK,\n"
             s = s[:m.end()] + add + s[m.end():]
             p.write_text(s, encoding="utf-8")
             print("window_type.h: WC_CENTRAL_BANK added")

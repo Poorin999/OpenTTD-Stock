@@ -10,14 +10,17 @@
 #ifndef WIDGETS_CENTRAL_BANK_WIDGET_H
 #define WIDGETS_CENTRAL_BANK_WIDGET_H
 
-/** Widgets of the #CentralBankWindow class. */
+/** Widgets of the #CentralBankWindow class (window number 0) and of the #CentralBankStatementWindow class (window number 1). */
 enum CentralBankWidgets : WidgetID {
-	WID_CB_CAPTION,    ///< Caption of the window.
-	WID_CB_SUMMARY,    ///< Panel with the cash, the debt, the credit limit and the money that may be traded.
-	WID_CB_BORROW,     ///< Button: borrow from the central bank into the company cash.
-	WID_CB_REPAY,      ///< Button: repay a part of the debt from the company cash.
-	WID_CB_REPAY_ALL,  ///< Button: repay as much of the debt as the company cash allows.
-	WID_CB_STATEMENT,  ///< Toggle: show the account statement instead of the summary.
+	WID_CB_CAPTION,         ///< Caption of the bank window.
+	WID_CB_SUMMARY,         ///< Left panel: cash, deposits, debt, credit limit, interest rate, credit rating.
+	WID_CB_LOG,             ///< Right panel: the account log with the latest bookings.
+	WID_CB_BORROW,          ///< Button: borrow from the central bank into the company cash.
+	WID_CB_REPAY,           ///< Button: repay a part of the debt from the company cash.
+	WID_CB_REPAY_ALL,       ///< Button: repay as much of the debt as the company cash allows.
+	WID_CB_OPEN_STATEMENT,  ///< Button: open the account statement in its own window.
+	WID_CBS_CAPTION,        ///< Caption of the account statement window.
+	WID_CBS_PANEL,          ///< Panel with the account statement.
 };
 
 #endif /* WIDGETS_CENTRAL_BANK_WIDGET_H */

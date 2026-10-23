@@ -30,11 +30,13 @@
 
 CentralBank _central_bank;
 Ledger _ledger;
+std::array<std::deque<BankLogEntry>, MAX_COMPANIES> _bank_log;
 
 /** Forget all loans, e.g. when a new game is started or a savegame is loaded. */
 void CentralBank::Reset()
 {
 	_ledger.Reset(); // The ledger is saved and loaded together with the loans.
+	for (auto &log : _bank_log) log.clear(); // The account log is only for the display.
 	this->accounts.fill({});
 }
 
@@ -145,6 +147,11 @@ void RecordLedger(CompanyID company, LedgerItem item, int64_t amount)
 
 	/* Keep this year and the two before it. */
 	years.erase(years.begin(), years.lower_bound(year - 2));
+
+	/* The latest lines for the account log of the Central Bank window (newest in front). */
+	auto &log = _bank_log[company.base()];
+	log.push_front({GameTimeManager::Get().GetCurrentGameDay(), item, amount});
+	while (log.size() > BANK_LOG_MAX) log.pop_back();
 }
 
 /**
@@ -277,6 +284,7 @@ void CentralBank::UpdateDaily(int64_t day)
 		if (c == nullptr) {
 			a = {};
 			_ledger.years[i].clear();
+			_bank_log[i].clear();
 			continue;
 		}
 

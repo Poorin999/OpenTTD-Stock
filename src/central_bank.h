@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <deque>
 #include <map>
 
 /** OLD flat rate (about 10% a year). No longer used by the interest; kept only because central_bank_gui.cpp still shows an estimate with it. */
@@ -258,6 +259,19 @@ struct Ledger {
 };
 
 extern Ledger _ledger;
+
+/** One line of the account log that the Central Bank window shows: what was booked, on which game day, and how much. */
+struct BankLogEntry {
+	int32_t day = 0;                       ///< Day of the game year (1..365) when it was booked.
+	LedgerItem item = LedgerItem::End;     ///< What was booked.
+	int64_t amount = 0;                    ///< Money in (positive) or out (negative).
+};
+
+/** How many of the latest lines are kept per company. Only for the display: it is not saved, and it starts empty after a load. */
+static constexpr size_t BANK_LOG_MAX = 16;
+
+/** The latest lines of the account log per company, the newest in front. */
+extern std::array<std::deque<BankLogEntry>, MAX_COMPANIES> _bank_log;
 
 void RecordLedger(CompanyID company, LedgerItem item, int64_t amount);
 LedgerEntry GetLedgerEntry(CompanyID company, LedgerItem item, int32_t year);
