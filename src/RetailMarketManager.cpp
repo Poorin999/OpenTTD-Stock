@@ -41,8 +41,8 @@ int64_t TownCoveragePpm(const Town *t)
 	uint64_t produced = 0;
 	uint64_t transported = 0;
 	for (const auto &stat : t->supplied) {
-		produced += stat.old_max;
-		transported += stat.old_act;
+		produced += stat.history[LAST_MONTH].production;
+		transported += stat.history[LAST_MONTH].transported;
 	}
 	if (produced == 0) return 0;
 	return static_cast<int64_t>(std::min<uint64_t>(retail::PPM, transported * retail::PPM / produced));
