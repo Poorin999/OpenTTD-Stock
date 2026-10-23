@@ -39,7 +39,8 @@ The CI order is: checkout OpenTTD 15.3, `git apply stock-market.patch`, copy `sr
 4. Drawing: keep every `DrawString` inside `[left, right]` and skip lines that do not fit above `bottom` (see `DrawGoldLine`). Never draw outside the widget rectangle.
 5. Fund isolation: nothing may be bought with borrowed money. Use `GetUnborrowedLiquidCash(company)` (central_bank.h).
 6. Thai text is allowed in `.cpp` files (see `CbText("ไทย", "English")` in `central_bank_gui.cpp`), not in widget headers.
-7. Do not mention or rely on window numbers twice: `WC_CENTRAL_BANK` uses number 0 (bank), 1 (statement), 2 (past statements).
+7. **Never put a copy of an OpenTTD file in `src/` or `src/widgets/` of this repository.** The build step "Add stock market source files" fails with `src/<file> already exists in OpenTTD 15.3 ... refusing to overwrite it` (happened with `graph_gui.cpp` and `widgets/graph_widget.h`, which were duplicated in `src/` and `replace/src/`). Modified copies of OpenTTD files go ONLY in `replace/` and are listed in `REPLACED_FILES` of `apply_overlay.py`.
+8. Do not mention or rely on window numbers twice: `WC_CENTRAL_BANK` uses number 0 (bank), 1 (statement), 2 (past statements).
 
 ## 4. Gold system (current design)
 Price per ounce, updated once per game day, moves 5% of the way to a target. Target = base price (2000) x:
@@ -59,6 +60,7 @@ Source of gold: a world market with a limited stock. It is **not** connected to 
 - [x] Gold reserve: price engine, commands `CMD_GOLD_BUY` / `CMD_GOLD_SELL`, savegame records, gold panel in the Trading Terminal (toggle with the Gold button, replaces the chart area while on).
 - [x] Limited market stock for gold (scarcity price).
 - [x] Gold panel moved from the Trading Terminal into the operating profit graph window (replaces the graph; Gold / Graph button switches).
+- [x] Build fix: removed the duplicate `src/graph_gui.cpp` and `src/widgets/graph_widget.h` (identical to the files in `replace/`), which made the "Add stock market source files" step fail.
 
 ## 6. Planned (in a sensible order)
 1. **Gold in the account statement**: add `LedgerItem` lines for gold purchases and sales, and a section in both statement windows. Realised profit of gold belongs in "Capital Gains / Realized Profit".
