@@ -18,7 +18,7 @@ The repository is an **overlay**, not a full OpenTTD tree. `apply_overlay.py <op
 
 ## 2. How to work in this repository
 - Files live in the folder named in `FILES` of `apply_overlay.py` (for example `src/saveload/stock_sl.cpp`, `src/widgets/stock_widget.h`). **Edit those.**
-  `src/stock_sl.cpp` and `src/stock_widget.h` are old copies and are NOT used. Do not edit them (they can be deleted).
+  The old copies `src/stock_sl.cpp` and `src/stock_widget.h` were deleted; do not recreate them.
 - A new source file needs entries in: `FILES`, `NEW_SOURCES` (CMake), and `STRING_FILES` if it has strings, all in `apply_overlay.py`.
 - A new command needs: the name in `NEW_COMMANDS` (apply_overlay.py), a `DEF_CMD_TRAIT` in a header that `wallet_cmd.h` includes, and the function.
   Commands run on every client of a multiplayer game, so they must give the same result everywhere.
@@ -55,6 +55,8 @@ Buy is paid from unborrowed liquid cash only. No spread, no commission yet. Gold
 Source of gold: a world market with a limited stock. It is **not** connected to mines or cargo yet.
 
 ## 5. Done
+- [x] Cleanup: deleted duplicate/stale files (`src/stock_sl.cpp`, `src/stock_widget.h`, `saveload_and_overlay.patch`, `apply_wallet_fix.py`, root `CMakeLists.txt`, `build/`), added `.gitignore`.
+- [x] Build fix 5: `replace/src/graph_gui.cpp` line 24 was an empty `#include` (C2006/C1083 at graph_gui.cpp(24)); now `#include "currency.h"`. Rule: never write `<...>` includes in chat-copied text without checking the line is not empty.
 - [x] Central bank, loans, interest, account log, ledger and account statement.
 - [x] Past statements window (10 years). Yearly expenses of the game (3 years only) are copied into the ledger every day so 10 years exist from now on; older years show n/a.
 - [x] Gold reserve: price engine, commands `CMD_GOLD_BUY` / `CMD_GOLD_SELL`, savegame records, gold panel in the Trading Terminal (toggle with the Gold button, replaces the chart area while on).
