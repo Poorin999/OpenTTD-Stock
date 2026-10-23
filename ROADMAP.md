@@ -26,8 +26,11 @@ The repository is an **overlay**, not a full OpenTTD tree. `apply_overlay.py <op
 - We cannot compile here. The only compiler is the GitHub Actions build. Read its log (the first error is the real one; later ones follow from it).
 
 ## 2b. Whole OpenTTD files that the overlay replaces
-`src/graph_gui.cpp` and `src/widgets/graph_widget.h` are modified copies of the OpenTTD 15.3 files (marker: `GOLD_PANEL_PATCH`). `apply_overlay.py` checks the sha256 of the original in the tree (`REPLACED_FILES`) and stops if it differs, so another OpenTTD version is never overwritten silently. To port to another version: take that version's two files, redo the small edits (search `GOLD_PANEL_PATCH` and `WID_PHG_GOLD_`), and update the hashes.
+`replace/src/graph_gui.cpp` and `replace/src/widgets/graph_widget.h` are modified copies of the OpenTTD 15.3 files (marker: `GOLD_PANEL_PATCH`). `apply_overlay.py` checks the sha256 of the original in the tree (`REPLACED_FILES`) and stops if it differs, so another OpenTTD version is never overwritten silently. To port to another version: take that version's two files, redo the small edits (search `GOLD_PANEL_PATCH` and `WID_PHG_GOLD_`), and update the hashes.
 Note: the 15.3 files use `Colours::Brown`, `WindowClass::...`, `FontSize::...`; the older mod files use `COLOUR_GREY`, `WC_...`, `FS_NORMAL`. If the build says one of those names does not exist, that is the cause.
+
+The files are in `replace/`, NOT in `src/`: the workflow step "Add stock market source files" (.github/workflows/build-windows.yml) refuses to copy any file from `src/` of this repository that OpenTTD 15.3 already has, and fails the build. `apply_overlay.py` copies them (`install_replaced_files`) after checking the original.
+The CI order is: checkout OpenTTD 15.3, `git apply stock-market.patch`, copy `src/` (no clashes allowed), `python3 mod/apply_overlay.py openttd`, build.
 
 ## 3. Rules that already cost a failed build
 1. **Comments after `///<` in `src/widgets/*_widget.h` must be plain ASCII with no double quotes.** The script API generator copies them into `script_window.hpp` as strings. A quote or Thai text there gives `C2001 newline in constant` followed by dozens of `enum type redefinition` errors.

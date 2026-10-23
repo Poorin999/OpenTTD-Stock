@@ -39,7 +39,6 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "central_bank.h": "src", "central_bank.cpp": "src",
     "gold_reserve.h": "src", "gold_reserve.cpp": "src",
     "gold_panel.h": "src", "gold_panel.cpp": "src",
-    "graph_gui.cpp": "src", "graph_widget.h": "src/widgets",
     "central_bank_gui.h": "src", "central_bank_gui.cpp": "src",
     "central_bank_widget.h": "src/widgets",
     "RetailMath.h": "src", "RetailMarketManager.h": "src", "RetailMarketManager.cpp": "src",
@@ -188,8 +187,20 @@ def check_replaced_files(tree):
                      f"Send this file to the person who maintains the overlay so that the gold panel can be made for your version.")
 
 
+def install_replaced_files(tree):
+    """Copy the replaced files from replace/ of this repository over the OpenTTD files (the check above has accepted them).
+    They are NOT in src/ of this repository: the workflow refuses to copy anything from src/ that OpenTTD already has."""
+    for name, (folder, digest) in REPLACED_FILES.items():
+        src = HERE / "replace" / folder / name
+        if not src.is_file():
+            sys.exit(f"ERROR: {src} is missing")
+        (tree / folder / name).write_bytes(src.read_bytes())
+        print(f"replace {src.relative_to(HERE)} -> {folder}/{name}")
+
+
 def main(tree):
     check_replaced_files(tree)
+    install_replaced_files(tree)
     for name, folder in FILES.items():
         src = find(name, folder)
         dst = tree / folder / name
