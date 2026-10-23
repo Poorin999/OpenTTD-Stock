@@ -265,6 +265,7 @@ struct StockMarket {
 	void AddHistory(const StockOrder &position, int64_t close_price, int64_t profit, StockCloseReason reason);
 	int64_t ClosePosition(size_t index, uint32_t volume, int64_t close_price, StockCloseReason reason);
 	void ApplyImpact(CompanyID target, bool buy, uint32_t volume);
+	void AddTradedVolume(CompanyID target, uint32_t volume);
 	void RecordStats(const StockClosedTrade &trade);
 	void RebuildStats();
 

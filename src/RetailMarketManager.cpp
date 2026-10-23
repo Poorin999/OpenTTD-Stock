@@ -85,6 +85,8 @@ void RetailMarketManager::Reset()
 	this->last_dividend_day = 0;
 	this->towns.clear();
 	this->initialized = false;
+	this->day_plan.fill({});
+	this->plan_active = false;
 }
 
 /** Money that the retail investors have not invested. */
@@ -314,20 +316,49 @@ void RetailMarketManager::TradeDay()
 		}
 	}
 
-	/* Pass 3: matching, settlement and injection. */
+	/* Pass 3: keep the day's orders. They are carried out in 24 parts, one per game hour (see #ExecuteSlice), like a real market
+	 * where the orders arrive during the whole day. The first part is carried out at once. */
 	for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
-		if (!plan[i].valid) continue;
-		CompanyRecord &rec = this->companies[i];
-		const int64_t price = plan[i].price;
+		this->day_plan[i].valid = plan[i].valid;
+		this->day_plan[i].buy = plan[i].buy;
+		this->day_plan[i].sell = plan[i].sell;
+	}
+	this->plan_active = true;
+	this->ExecuteSlice(0);
+}
 
+/**
+ * Carry out one hour's part of the day's orders: the part of hour h is plan * (h + 1) / 24 - plan * h / 24, so the 24 parts add up to the whole order.
+ * The buyers and sellers of this hour meet at the price of this hour. The matched shares are volume without effect on the price;
+ * the difference goes to the terminal (StockMarket::ApplyImpact), which moves the price and adds that volume too.
+ * @param hour Game hour of the day, 0 .. 23.
+ */
+void RetailMarketManager::ExecuteSlice(int hour)
+{
+	using namespace retail;
+	if (!this->plan_active || hour < 0 || hour >= GameTimeManager::HOURS_PER_DAY) return;
+	const int64_t H = GameTimeManager::HOURS_PER_DAY;
+
+	auto part = [&](int64_t whole) { return whole * (hour + 1) / H - whole * hour / H; };
+
+	for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
+		if (!this->day_plan[i].valid || !Company::IsValidID(CompanyID{i}) || _stock_market.price_fp[i] <= 0) continue;
+		CompanyRecord &rec = this->companies[i];
+		const int64_t price = GetStockPrice(CompanyID{i});
+		if (price <= 0) continue;
+
+		std::array<int64_t, COHORT_COUNT> want_buy{};
+		std::array<int64_t, COHORT_COUNT> want_sell{};
 		RetailOrder order;
 		for (int k = 0; k < COHORT_COUNT; k++) {
-			order.buy_shares += plan[i].buy[k];
-			order.sell_shares += plan[i].sell[k];
+			want_buy[k] = part(this->day_plan[i].buy[k]);
+			want_sell[k] = std::min(rec.held[k], part(this->day_plan[i].sell[k]));
+			order.buy_shares += want_buy[k];
+			order.sell_shares += want_sell[k];
 		}
 		if (order.buy_shares == 0 && order.sell_shares == 0) continue;
 
-		const MatchResult match = MatchOrders(order, STOCK_SHARES_PER_COMPANY);
+		const MatchResult match = MatchOrders(order, STOCK_SHARES_PER_COMPANY, static_cast<int>(H));
 		const int64_t filled_buy = match.matched + match.net_buy;   // What could be done of the buy orders; the rest of the orders is dropped.
 		const int64_t filled_sell = match.matched + match.net_sell;
 
@@ -335,7 +366,7 @@ void RetailMarketManager::TradeDay()
 		int64_t sold = 0;
 		for (int k = 0; k < COHORT_COUNT; k++) {
 			/* Sells first: the proceeds and the gain. A part of every gain is spent in the towns, the rest stays in the cash of the group. */
-			const int64_t s = std::min(rec.held[k], ProRata(plan[i].sell[k], order.sell_shares, filled_sell));
+			const int64_t s = std::min(rec.held[k], ProRata(want_sell[k], order.sell_shares, filled_sell));
 			if (s > 0) {
 				const int64_t proceeds = s * price;
 				const int64_t cost = CostOfShares(rec.basis[k], rec.held[k], s);
@@ -348,7 +379,7 @@ void RetailMarketManager::TradeDay()
 			}
 
 			/* Then the buys, paid from the cash of the group. */
-			int64_t b = ProRata(plan[i].buy[k], order.buy_shares, filled_buy);
+			int64_t b = ProRata(want_buy[k], order.buy_shares, filled_buy);
 			b = std::min(b, this->cash[k] / price);
 			if (b > 0) {
 				rec.held[k] += b;
@@ -358,13 +389,17 @@ void RetailMarketManager::TradeDay()
 			}
 		}
 
-		rec.report.bought = bought;
-		rec.report.sold = sold;
-		rec.report.matched = match.matched;
-		rec.report.net_pressure = match.net_buy - match.net_sell;
+		if (hour == 0) rec.report.bought = rec.report.sold = rec.report.matched = rec.report.net_pressure = 0;
+		rec.report.bought += bought;
+		rec.report.sold += sold;
+		rec.report.matched += match.matched;
+		rec.report.net_pressure += match.net_buy - match.net_sell;
 		rec.report.held_shares = this->GetHeldShares(CompanyID{i});
 
-		/* The injection: the terminal moves the price by the imbalance. */
+		/* Volume without effect on the price: the shares that the two groups traded between themselves. */
+		_stock_market.AddTradedVolume(CompanyID{i}, static_cast<uint32_t>(std::min<int64_t>(match.matched, UINT32_MAX)));
+
+		/* The injection: the terminal moves the price by the imbalance (and adds that volume). */
 		if (match.net_buy > 0) _stock_market.ApplyImpact(CompanyID{i}, true, static_cast<uint32_t>(match.net_buy));
 		if (match.net_sell > 0) _stock_market.ApplyImpact(CompanyID{i}, false, static_cast<uint32_t>(match.net_sell));
 	}
@@ -439,8 +474,23 @@ void RetailMarketManager::OnNewGameDay(const GameTimeSnapshot &now)
 	this->ApplyMacroFeedback();
 }
 
-/** The retail investors trade at the start of every game day (00:00), together with the daily swap and the interest of the central bank. */
+/** Hours 1 .. 23: the investors carry out the next part of the day's orders. (Hour 0 is done by OnNewGameDay, together with the new plan.) */
+void RetailMarketManager::OnNewGameHour(const GameTimeSnapshot &now)
+{
+	if (_game_mode != GM_NORMAL) return;
+	const int hour = static_cast<int>((now.total_minutes / GameTimeManager::MINUTES_PER_HOUR) % GameTimeManager::HOURS_PER_DAY);
+	if (hour == 0) return;
+	this->ExecuteSlice(hour);
+}
+
+/** The retail investors decide at the start of every game day (00:00), together with the daily swap and the interest of the central bank. */
 static const GameTimeSubscription _retail_game_day(GameTimeEvent::Day, [](const GameTimeSnapshot &now)
 {
 	RetailMarketManager::Get().OnNewGameDay(now);
+});
+
+/** ... and trade a part of it every game hour. */
+static const GameTimeSubscription _retail_game_hour(GameTimeEvent::Hour, [](const GameTimeSnapshot &now)
+{
+	RetailMarketManager::Get().OnNewGameHour(now);
 });

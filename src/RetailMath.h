@@ -284,11 +284,11 @@ struct MatchResult {
  * Order matching: buy orders and sell orders of the retail investors are matched at the mid price. Only the difference
  * (the imbalance) is sent to the trading terminal, as pressure on the price, and it is limited per day.
  */
-inline MatchResult MatchOrders(const RetailOrder &o, int64_t total_shares)
+inline MatchResult MatchOrders(const RetailOrder &o, int64_t total_shares, int rounds_per_day = 1)
 {
 	MatchResult r;
 	r.matched = std::min(o.buy_shares, o.sell_shares);
-	const int64_t cap = std::max<int64_t>(1, total_shares * MAX_DAILY_FLOW_PERCENT / 100);
+	const int64_t cap = std::max<int64_t>(1, total_shares * MAX_DAILY_FLOW_PERCENT / 100 / std::max(1, rounds_per_day));
 	r.net_buy = std::min(cap, o.buy_shares - r.matched);
 	r.net_sell = std::min(cap, o.sell_shares - r.matched);
 	return r;

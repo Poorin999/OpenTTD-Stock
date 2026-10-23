@@ -12,6 +12,7 @@
 #include "stock_base.h"
 #include "stock_gui.h"
 #include "central_bank.h"
+#include "RetailMarketManager.h"
 #include "game_time/game_time_manager.h"
 #include "command_type.h"
 #include "company_base.h"
@@ -46,6 +47,7 @@ void StockMarket::Reset()
 	this->valuation.fill({});
 	_wallets.Reset();
 	_central_bank.Reset();
+	RetailMarketManager::Get().Reset(); // The retail investors start again with every new game and every load.
 	GameTimeManager::Get().Reset();
 	for (auto &list : this->daily) list.clear();
 	this->daily_current.fill({});
@@ -417,6 +419,21 @@ size_t StockMarket::CountWalletOrders(CompanyID owner, uint8_t wallet) const
 }
 
 /**
+ * Shares that changed hands without moving the price (for example orders that the retail investors matched between themselves).
+ * Real volume: it goes into the running candles, where the chart shows it as bars.
+ * @param target Company whose shares were traded.
+ * @param volume Number of shares.
+ */
+void StockMarket::AddTradedVolume(CompanyID target, uint32_t volume)
+{
+	if (!Company::IsValidID(target) || volume == 0) return;
+	const size_t i = target.base();
+	if (this->has_current[i]) this->current[i].volume += volume;
+	if (this->record_daily && this->has_daily_current[i]) this->daily_current[i].volume += volume;
+	this->frames[i].AddVolume(volume);
+}
+
+/**
  * Market impact: buying moves the mid price up, selling moves it down, in proportion to the volume
  * of the order relative to the number of shares of the company. The shift is applied to the price at once.
  * It is also remembered in #impact, so the valuation price that the market glides to includes it; the
@@ -432,9 +449,7 @@ void StockMarket::ApplyImpact(CompanyID target, bool buy, uint32_t volume)
 	if (this->price_fp[i] <= 0) return;
 
 	/* Every executed order is traded volume: it goes into the running candles, where the chart shows it as bars. */
-	if (this->has_current[i]) this->current[i].volume += volume;
-	if (this->record_daily && this->has_daily_current[i]) this->daily_current[i].volume += volume;
-	this->frames[i].AddVolume(volume);
+	this->AddTradedVolume(target, volume);
 
 	const int64_t shift = buy ? GetImpactPpm(volume) : -GetImpactPpm(volume);
 	this->impact[i] = std::clamp<int64_t>(this->impact[i] + shift, -STOCK_IMPACT_MAX_PPM, STOCK_IMPACT_MAX_PPM);
@@ -1060,7 +1075,8 @@ void StockMarket::UpdateTick()
 	for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
 		if (!Company::IsValidID(CompanyID{i}) || this->price_fp[i] <= 0) continue;
 
-		this->price_fp[i] += (GetGoalFixed(i) - this->price_fp[i]) / STOCK_GLIDE_DIV;
+		const int64_t glide = (GetGoalFixed(i) - this->price_fp[i]) / STOCK_GLIDE_DIV;
+		this->price_fp[i] += glide;
 
 		/* The candles of game time (1h, 4h, 12h) take every price; they close by themselves when the clock reaches the end of a candle. */
 		this->frames[i].AddSample(this->price_fp[i]);

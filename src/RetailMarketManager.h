@@ -46,6 +46,7 @@ public:
 
 	void Reset();
 	void OnNewGameDay(const GameTimeSnapshot &now);
+	void OnNewGameHour(const GameTimeSnapshot &now);
 
 	/* Read only access, for the trading terminal and for the later UI. */
 	int64_t GetCash() const;
@@ -85,12 +86,21 @@ private:
 	int64_t wealth_pool = 0;                           ///< Money that was spent out of dividends and gains and has not been given to the towns yet.
 	int64_t last_dividend_day = 0;                     ///< Number of the game day of the last dividend payment.
 	std::vector<TownRecord> towns{};                   ///< Per town, indexed by the number of the town.
+	/** The orders that the investors decided on at 00:00; they are carried out in 24 equal parts, one per game hour. Not saved: after a load the rest of the day is skipped. */
+	struct DayPlan {
+		bool valid = false;
+		std::array<int64_t, retail::COHORT_COUNT> buy{};
+		std::array<int64_t, retail::COHORT_COUNT> sell{};
+	};
+	std::array<DayPlan, MAX_COMPANIES> day_plan{};
+	bool plan_active = false;
 	bool initialized = false;                          ///< False until the first day. The companies that exist on the first day are established, not IPOs.
 
 	void UpdateCompanyRecords();
 	void RefreshCapital(const GameTimeSnapshot &now);
 	retail::CompanySignals GatherSignals(CompanyID company) const;
 	void TradeDay();
+	void ExecuteSlice(int hour);
 	void PayDividends(int64_t day);
 	void ApplyMacroFeedback();
 };
