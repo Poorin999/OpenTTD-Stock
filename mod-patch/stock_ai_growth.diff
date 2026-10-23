@@ -1,0 +1,41 @@
+--- /home/claude/b/OpenTTD-Stock-main/src/stock_ai.cpp	2026-10-23 03:22:32.000000000 +0000
++++ stock_ai.cpp	2026-10-23 03:56:03.620289298 +0000
+@@ -64,9 +64,12 @@
+ 
+ /** The smallest cash reserve of a company. */
+ constexpr int64_t STOCK_AI_MIN_RESERVE = 150'000;
++/** Working capital for growth: this share of the credit limit is kept as extra cash (borrowed when needed), so that a transport AI can pay for a new
++ *  line at once instead of waiting for months. It is idle cash only while the account is in good standing, and it costs only the interest on it. */
++constexpr int64_t STOCK_AI_GROWTH_CASH_PERCENT = 40;
+ /** The reserve also covers this many days of interest at the highest penalty rate. */
+ constexpr int64_t STOCK_AI_RESERVE_INTEREST_DAYS = 30;
+-/** Below this share of the minimum reserve the bot borrows. */
++/** Below this share of the whole reserve (minimum, interest and growth cash) the bot borrows. */
+ constexpr int64_t STOCK_AI_BORROW_BELOW_PERCENT = 50;
+ /** The bot borrows at most this share of the credit that is still available. */
+ constexpr int64_t STOCK_AI_BORROW_SAFETY_PERCENT = 80;
+@@ -111,11 +114,13 @@
+ 	return cmd(DoCommandFlags{DoCommandFlag::Execute}).Succeeded();
+ }
+ 
+-/** Cash that the company keeps: a minimum plus a month of interest at the highest penalty rate. */
++/** Cash that the company keeps: a minimum, a month of interest at the highest penalty rate, and the working capital for growth. */
+ static int64_t CashReserve(CompanyID id)
+ {
+ 	const int64_t daily = BankDailyInterest(GetCentralBankDebt(id), BANK_PENALTY_MAX_BP, 0).interest;
+-	return STOCK_AI_MIN_RESERVE + STOCK_AI_RESERVE_INTEREST_DAYS * daily;
++	/* No growth cash for an account in default: then only the minimum counts and the bot does not borrow at all. */
++	const int64_t growth = _central_bank.accounts[id.base()].in_default ? 0 : GetCentralBankCreditLimit(id) * STOCK_AI_GROWTH_CASH_PERCENT / 100;
++	return STOCK_AI_MIN_RESERVE + STOCK_AI_RESERVE_INTEREST_DAYS * daily + growth;
+ }
+ 
+ /** The fair price of a share (the valuation), times #STOCK_PRICE_SCALE. 0 when it is not known yet. */
+@@ -173,7 +178,7 @@
+ 	}
+ 
+ 	/* Then the central bank, only when the cash is really low and the account is in good standing. */
+-	if (money >= STOCK_AI_MIN_RESERVE * STOCK_AI_BORROW_BELOW_PERCENT / 100) return;
++	if (money >= reserve * STOCK_AI_BORROW_BELOW_PERCENT / 100) return;
+ 	if (_central_bank.accounts[id.base()].in_default) return;
+ 	const int64_t amount = std::min(reserve - money, GetCentralBankAvailable(id) * STOCK_AI_BORROW_SAFETY_PERCENT / 100);
+ 	if (amount > 0) TryRun([&](DoCommandFlags f) { return CmdBankBorrow(f, WALLET_CASH, Money(amount)); });
