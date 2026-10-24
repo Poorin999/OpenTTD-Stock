@@ -97,6 +97,61 @@ inline int64_t BankAnnualRateBp(int64_t ratio_ppm)
 	return BANK_RATE_POOR_MAX_BP;
 }
 
+/*
+ * ---- Monetary policy: price index and policy rate ------------------------------------------------------------------
+ * The central bank measures a price index, compares its yearly change with a target, and moves the whole interest curve up
+ * or down by a "policy shift" (in bp). Every number is an integer and the decision is made once per game day inside the
+ * daily clock event, like the interest, so every client of a network game gets exactly the same shift. No AI model and no
+ * random numbers: a fixed rule (a Taylor rule with a dead band and a speed limit).
+ */
+static constexpr int64_t POLICY_PPM = 1'000'000;            ///< 1.0 in the price index.
+static constexpr int64_t POLICY_TARGET_INFLATION_BP = 250;   ///< Target: 2.5% a year.
+static constexpr int64_t POLICY_DEADBAND_BP = 50;            ///< Inside target +-0.5% the bank does not react to inflation.
+static constexpr int64_t POLICY_INFLATION_WEIGHT_PERCENT = 150; ///< The shift wants 1.5 bp for every bp that inflation is above the target.
+static constexpr int64_t POLICY_TREND_GROWTH_BP = 600;       ///< Normal growth of the company values of the map: 6% a year.
+static constexpr int64_t POLICY_GAP_DIVISOR = 8;             ///< Growth above (below) the trend moves the shift by 1/8 of the difference.
+static constexpr int64_t POLICY_GAP_MAX_BP = 200;            ///< The growth term never moves the shift more than 2%.
+static constexpr int64_t POLICY_SHIFT_MIN_BP = -150;         ///< Lowest shift: -1.5%.
+static constexpr int64_t POLICY_SHIFT_MAX_BP = 600;          ///< Highest shift: +6%.
+static constexpr int64_t POLICY_MAX_STEP_BP = 25;            ///< Speed limit: the shift changes by at most 0.25% per decision.
+static constexpr int64_t POLICY_DECISION_DAYS = 90;          ///< One decision per quarter (90 game days).
+static constexpr int64_t POLICY_MONEY_WEIGHT_PERCENT = 30;   ///< How much of the change of the cash in circulation goes into the price index.
+static constexpr int64_t BANK_RATE_FLOOR_BP = 100;           ///< The rate of a loan is never below 1% ...
+static constexpr int64_t BANK_RATE_CEIL_BP = 1400;           ///< ... and never above 14%, so it stays under the penalty rate (15%).
+
+/** The rate of the risk curve moved by the policy shift, kept between the floor and the ceiling. */
+inline int64_t BankShiftedRateBp(int64_t base_bp, int64_t shift_bp)
+{
+	return std::clamp<int64_t>(base_bp + shift_bp, BANK_RATE_FLOOR_BP, BANK_RATE_CEIL_BP);
+}
+
+/**
+ * The shift that the rule wants (the speed limit is applied by the caller).
+ * @param inflation_bp Yearly change of the price index in bp.
+ * @param growth_bp Yearly growth of the company values of the map in bp.
+ */
+inline int64_t PolicyDesiredShiftBp(int64_t inflation_bp, int64_t growth_bp)
+{
+	int64_t err = inflation_bp - POLICY_TARGET_INFLATION_BP;
+	if (err > -POLICY_DEADBAND_BP && err < POLICY_DEADBAND_BP) err = 0;
+	const int64_t gap = std::clamp<int64_t>((growth_bp - POLICY_TREND_GROWTH_BP) / POLICY_GAP_DIVISOR, -POLICY_GAP_MAX_BP, POLICY_GAP_MAX_BP);
+	return std::clamp<int64_t>(err * POLICY_INFLATION_WEIGHT_PERCENT / 100 + gap, POLICY_SHIFT_MIN_BP, POLICY_SHIFT_MAX_BP);
+}
+
+/** State of the monetary policy. Saved in the 'STCK' chunk (SRK_POLICY). */
+struct MonetaryPolicy {
+	int64_t shift_bp = 0;            ///< Shift of the whole interest curve now, in bp. Saved.
+	int64_t prev_index_ppm = 0;      ///< The price index at the last decision (0 = not started). Saved.
+	int64_t last_decision_day = -1;  ///< Game day of the last decision (-1 = not started). Saved.
+	int64_t inflation_bp = 0;        ///< Yearly change of the price index that the last decision measured. Saved.
+	int64_t growth_bp = 0;           ///< Yearly growth of the company values that the last decision measured. Saved.
+	bool measured = false;           ///< True after the first real decision (before it there is nothing to show). Saved.
+	int64_t last_step_bp = 0;        ///< What the last decision changed, for the display. Not saved.
+
+	void Reset() { *this = MonetaryPolicy{}; }
+	bool Update(int64_t day, int64_t index_ppm, int64_t value_now, int64_t value_before);
+};
+
 /** The penalty rate in bp for a penalty level (1 or more): 1500, 1550, ... capped at 1800. */
 inline int64_t BankPenaltyRateBp(int level)
 {
@@ -165,9 +220,10 @@ struct BankDayResult {
  * @param cash Company cash now; a negative cash counts as 0.
  * @param equity Company value plus wallets minus the debt.
  * @param day Number of the game day, to charge once per day.
+ * @param policy_shift_bp Shift of the risk curve by the monetary policy (0 = the plain curve).
  * @return What to book; all 0 when the day was already charged.
  */
-inline BankDayResult BankSettleDay(BankAccount &a, int64_t cash, int64_t equity, int64_t day)
+inline BankDayResult BankSettleDay(BankAccount &a, int64_t cash, int64_t equity, int64_t day, int64_t policy_shift_bp = 0)
 {
 	BankDayResult out;
 	if (day <= a.last_charged_day) return out; // Once per day, whatever the callers do.
@@ -179,7 +235,7 @@ inline BankDayResult BankSettleDay(BankAccount &a, int64_t cash, int64_t equity,
 		a.carry = 0;
 		a.in_default = false;
 	} else {
-		const int64_t risk_bp = BankAnnualRateBp(BankDebtToEquityPpm(a.debt, equity));
+		const int64_t risk_bp = BankShiftedRateBp(BankAnnualRateBp(BankDebtToEquityPpm(a.debt, equity)), policy_shift_bp);
 		out.rate_bp = a.in_default ? BankPenaltyRateBp(std::max<int>(1, a.penalty_level)) : risk_bp;
 		BankInterestResult r = BankDailyInterest(a.debt, out.rate_bp, a.carry);
 
@@ -222,6 +278,7 @@ inline int64_t BankCreditPercentForPenalty(int level)
 /** The central bank: one account per company. Saved in the 'STCK' chunk together with the wallets. */
 struct CentralBank {
 	std::array<BankAccount, MAX_COMPANIES> accounts{};
+	MonetaryPolicy policy;             ///< Price index and the shift of the interest curve (monetary policy).
 	int64_t trading_revenue_cents = 0; ///< The budget of the bank from trading: commission and spread of the gold trades, in 1/100 of a money unit. Saved (SRK_BANK_BUDGET).
 
 	void Reset();
@@ -229,6 +286,9 @@ struct CentralBank {
 };
 
 extern CentralBank _central_bank;
+
+/** The price index in ppm (1,000,000 = 1.0 at the start): the inflation of the game, moved by the change of the cash in circulation. */
+int64_t GetPriceIndexPpm();
 
 /**
  * The lines of the account statement that the game books itself. The costs of vehicles, tracks and stations are read from

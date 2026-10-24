@@ -40,6 +40,7 @@ enum StockRecordKind : uint8_t {
 	SRK_TIMEFRAME_VOL = 21, ///< Traded volume of the SRK_TIMEFRAME row just before it: a = company, v1 = volume. Only written when it is not 0.
 	SRK_LEDGER = 22,  ///< Line of the account statement: a = company, b = line (LedgerItem), ym = economy year, v1 = income, v2 = expense.
 	SRK_GOLD = 24,    ///< Gold market: v1 = price in 1/100 money units, v2 = baseline cash supply, v3 = ounces of the central bank, v4 = demand pressure in ppm, v5 = ounces for sale in the market plus 1 (0 = savegame from before the stock).
+	SRK_POLICY = 28,  ///< Monetary policy: ym = 1 when a decision was measured, v1 = shift in bp, v2 = price index at the last decision in ppm, v3 = game day of the last decision plus 1 (0 = none), v4 = measured inflation in bp, v5 = measured growth in bp.
 	SRK_BANK_BUDGET = 26, ///< Budget of the central bank from trading: v1 = commission and spread of the gold trades in 1/100 money units.
 	SRK_GOLD_HISTORY = 27, ///< Five daily gold prices for the chart: ym = number of the record (0, 1, 2 ...), v1..v5 = prices in 1/100 money units, oldest first (0 = no price).
 	SRK_GOLD_HOLD = 25, ///< Gold of a company: a = company, v1 = ounces, v2 = what the gold cost (0 = unknown).
@@ -237,6 +238,19 @@ struct STCKChunkHandler : ChunkHandler {
 			r.v2 = b.carry;
 			r.v3 = b.rate_bp;
 			r.v4 = b.last_charged_day;
+			write(r);
+		}
+
+		if (_central_bank.policy.last_decision_day >= 0) {
+			const MonetaryPolicy &p = _central_bank.policy;
+			StockRecord r;
+			r.kind = SRK_POLICY;
+			r.ym = p.measured ? 1 : 0;
+			r.v1 = p.shift_bp;
+			r.v2 = p.prev_index_ppm;
+			r.v3 = p.last_decision_day + 1;
+			r.v4 = p.inflation_bp;
+			r.v5 = p.growth_bp;
 			write(r);
 		}
 
@@ -533,6 +547,17 @@ struct STCKChunkHandler : ChunkHandler {
 					b.carry = std::clamp<int64_t>(r.v2, 0, BANK_INTEREST_DIVISOR - 1);
 					b.rate_bp = std::clamp<int64_t>(r.v3, 0, BANK_PENALTY_MAX_BP);
 					b.last_charged_day = std::max<int64_t>(r.v4, -1);
+					break;
+				}
+
+				case SRK_POLICY: {
+					MonetaryPolicy &p = _central_bank.policy;
+					p.shift_bp = std::clamp<int64_t>(r.v1, POLICY_SHIFT_MIN_BP, POLICY_SHIFT_MAX_BP);
+					p.prev_index_ppm = std::max<int64_t>(r.v2, 0);
+					p.last_decision_day = std::max<int64_t>(r.v3 - 1, -1);
+					p.inflation_bp = std::clamp<int64_t>(r.v4, -2000, 5000);
+					p.growth_bp = std::clamp<int64_t>(r.v5, -10'000, 400'000);
+					p.measured = r.ym == 1;
 					break;
 				}
 

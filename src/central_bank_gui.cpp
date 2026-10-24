@@ -368,8 +368,8 @@ struct CentralBankWindow : Window {
 		Repay,
 	};
 
-	static constexpr int SUMMARY_ROWS = 11; ///< Rows of the left panel, with room for the two penalty lines.
-	static constexpr int SEPARATORS = 4;    ///< Lines between the groups of the left panel.
+	static constexpr int SUMMARY_ROWS = 15; ///< Rows of the left panel, with room for the two penalty lines.
+	static constexpr int SEPARATORS = 5;    ///< Lines between the groups of the left panel.
 	static constexpr int LOG_ROWS = 8;      ///< Lines of the account log that are shown.
 
 	QueryKind query_kind = QueryKind::None; ///< What the open query window is for.
@@ -493,6 +493,29 @@ struct CentralBankWindow : Window {
 		row(CbText("อัตราดอกเบี้ย", "Interest rate"), fmt::format("{}.{:02}% / {}", rate_bp / 100, rate_bp % 100, CbText("ปี", "year")), a.in_default ? TC_RED : TC_WHITE);
 		row(CbText("ดอกเบี้ย / วัน", "Interest / day"), money(per_day), TC_ORANGE);
 		separator();
+
+		/* Group 4b: the monetary policy of the bank: price index, yearly change against the target, shift of the rates, next decision. */
+		{
+			const MonetaryPolicy &p = _central_bank.policy;
+			const int64_t idx = GetPriceIndexPpm();
+			row(CbText("ดัชนีราคา", "Price index"), fmt::format("{}.{:03}", idx / 1'000'000, (idx % 1'000'000) / 1000));
+			if (p.measured) {
+				const int64_t infl = p.inflation_bp;
+				const int64_t aerr = infl > POLICY_TARGET_INFLATION_BP ? infl - POLICY_TARGET_INFLATION_BP : POLICY_TARGET_INFLATION_BP - infl;
+				const std::string sign = infl < 0 ? "-" : "";
+				const int64_t ai = infl < 0 ? -infl : infl;
+				row(CbText("เงินเฟ้อ (ต่อปี)", "Inflation (yearly)"), fmt::format("{}{}.{:02}%  ({} {}.{:02}%)", sign, ai / 100, ai % 100, CbText("เป้า", "target"), POLICY_TARGET_INFLATION_BP / 100, POLICY_TARGET_INFLATION_BP % 100),
+					aerr <= POLICY_DEADBAND_BP ? TC_GREEN : (aerr <= 3 * POLICY_DEADBAND_BP ? TC_ORANGE : TC_RED));
+			} else {
+				row(CbText("เงินเฟ้อ (ต่อปี)", "Inflation (yearly)"), CbText("กำลังวัด...", "measuring..."), TC_GREY);
+			}
+			const int64_t sh = p.shift_bp < 0 ? -p.shift_bp : p.shift_bp;
+			row(CbText("นโยบายดอกเบี้ย", "Policy rate shift"), fmt::format("{}{}.{:02}%", p.shift_bp < 0 ? "-" : "+", sh / 100, sh % 100), p.shift_bp > 0 ? TC_ORANGE : (p.shift_bp < 0 ? TC_GREEN : TC_WHITE));
+			const int64_t today = static_cast<int64_t>(GameTimeManager::Get().GetCurrentGameDay());
+			const int64_t left_days = p.last_decision_day < 0 ? POLICY_DECISION_DAYS : std::clamp<int64_t>(POLICY_DECISION_DAYS - (today - p.last_decision_day), 0, POLICY_DECISION_DAYS);
+			row(CbText("ทบทวนครั้งต่อไป", "Next review"), fmt::format("{} {}", left_days, CbText("วัน", "days")), TC_GREY);
+			separator();
+		}
 
 		/* Group 5: the status and the credit rating. */
 		{

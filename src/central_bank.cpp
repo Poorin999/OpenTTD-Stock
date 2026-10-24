@@ -10,6 +10,8 @@
 #include "stdafx.h"
 #include "game_time/game_time_manager.h"
 #include "central_bank.h"
+#include "gold_reserve.h"
+#include "economy_func.h"
 #include "wallet_base.h"
 #include "stock_base.h"
 #include "command_func.h"
@@ -38,7 +40,65 @@ void CentralBank::Reset()
 	_ledger.Reset(); // The ledger is saved and loaded together with the loans.
 	for (auto &log : _bank_log) log.clear(); // The account log is only for the display.
 	this->accounts.fill({});
+	this->policy.Reset();
 	this->trading_revenue_cents = 0;
+}
+
+/**
+ * The price index of the central bank, in ppm (1,000,000 = 1.0). It is the inflation of the game (_economy.inflation_prices,
+ * 1.0 = 1 << 16), moved by POLICY_MONEY_WEIGHT_PERCENT of the change of the cash in circulation against the start of the
+ * gold market. Loans make the cash bigger, so borrowing a lot pushes the index up and the bank answers with a higher rate.
+ * Integer only. Until the gold market has started (no baseline of the cash) only the inflation of the game counts.
+ */
+int64_t GetPriceIndexPpm()
+{
+	const int64_t game = std::clamp<int64_t>((static_cast<int64_t>(_economy.inflation_prices) * POLICY_PPM) >> 16, POLICY_PPM / 2, 20 * POLICY_PPM);
+	int64_t money_factor = POLICY_PPM;
+	const int64_t baseline = _gold_reserve.baseline_supply;
+	if (baseline > 0) {
+		const int64_t supply = _gold_reserve.GetCirculatingCash();
+		money_factor = std::clamp<int64_t>(POLICY_PPM + (supply - baseline) * POLICY_PPM / baseline * POLICY_MONEY_WEIGHT_PERCENT / 100, POLICY_PPM / 2, 3 * POLICY_PPM);
+	}
+	return game * money_factor / POLICY_PPM;
+}
+
+/**
+ * One day of the monetary policy. Once every POLICY_DECISION_DAYS days: measure the yearly change of the price index and the
+ * yearly growth of the company values, ask the rule for the shift (PolicyDesiredShiftBp) and move the shift towards it by at
+ * most POLICY_MAX_STEP_BP.
+ * @param day Number of the game day.
+ * @param index_ppm The price index now (GetPriceIndexPpm).
+ * @param value_now Sum of the company values of the last finished quarter.
+ * @param value_before Sum of the company values of the quarter before it.
+ * @return True when a decision was made today.
+ */
+bool MonetaryPolicy::Update(int64_t day, int64_t index_ppm, int64_t value_now, int64_t value_before)
+{
+	if (index_ppm <= 0) return false;
+	const int64_t elapsed = day - this->last_decision_day;
+	if (this->last_decision_day < 0 || this->prev_index_ppm <= 0 || elapsed < 0) {
+		/* First day (new game, or a savegame from before the policy): only note the starting point. */
+		this->prev_index_ppm = index_ppm;
+		this->last_decision_day = day;
+		return false;
+	}
+	if (elapsed < POLICY_DECISION_DAYS) return false;
+
+	this->inflation_bp = std::clamp<int64_t>((index_ppm - this->prev_index_ppm) * 10'000 * BANK_DAYS_PER_YEAR / (this->prev_index_ppm * elapsed), -2000, 5000);
+
+	int64_t growth_period_bp = 0;
+	while (value_before > 10'000'000'000'000 ) { value_before /= 1000; value_now /= 1000; } // Only for absurd values: keeps the multiplication below small.
+	if (value_before > 0) growth_period_bp = std::clamp<int64_t>((value_now - value_before) * 10'000 / value_before, -10'000, 100'000);
+	this->growth_bp = growth_period_bp * BANK_DAYS_PER_YEAR / POLICY_DECISION_DAYS;
+
+	const int64_t wanted = PolicyDesiredShiftBp(this->inflation_bp, this->growth_bp);
+	const int64_t step = std::clamp<int64_t>(wanted - this->shift_bp, -POLICY_MAX_STEP_BP, POLICY_MAX_STEP_BP);
+	this->shift_bp = std::clamp<int64_t>(this->shift_bp + step, POLICY_SHIFT_MIN_BP, POLICY_SHIFT_MAX_BP);
+	this->last_step_bp = step;
+	this->prev_index_ppm = index_ppm;
+	this->last_decision_day = day;
+	this->measured = true;
+	return true;
 }
 
 /** Money that a company owes to the central bank; 0 for a company that does not exist. */
@@ -84,7 +144,7 @@ int64_t GetCentralBankAnnualRateBp(CompanyID company)
 	const BankAccount &a = _central_bank.accounts[company.base()];
 	if (a.debt <= 0) return 0;
 	if (a.in_default) return BankPenaltyRateBp(std::max<int>(1, a.penalty_level));
-	return BankAnnualRateBp(BankDebtToEquityPpm(a.debt, GetCentralBankEquity(company)));
+	return BankShiftedRateBp(BankAnnualRateBp(BankDebtToEquityPpm(a.debt, GetCentralBankEquity(company))), _central_bank.policy.shift_bp);
 }
 
 /** How much more a company may borrow now. */
@@ -324,7 +384,7 @@ void CentralBank::UpdateDaily(int64_t day)
 			continue;
 		}
 
-		const BankDayResult r = BankSettleDay(a, static_cast<int64_t>(c->money), GetCentralBankEquity(company), day);
+		const BankDayResult r = BankSettleDay(a, static_cast<int64_t>(c->money), GetCentralBankEquity(company), day, this->policy.shift_bp);
 
 		if (r.paid_from_cash > 0) {
 			/* The money leaves the cash and is an expense of the company (loan interest in the finances window).
@@ -336,6 +396,15 @@ void CentralBank::UpdateDaily(int64_t day)
 		RecordLedger(company, LedgerItem::BankInterest, -r.interest_due);
 
 	}
+
+	/* The monetary policy: the sum of the company values of the last two finished quarters is the measure of growth (as in the gold market). */
+	int64_t value_now = 0, value_before = 0;
+	for (const Company *c : Company::Iterate()) {
+		value_now += static_cast<int64_t>(c->old_economy[0].company_value);
+		value_before += static_cast<int64_t>(c->old_economy[1].company_value);
+	}
+	this->policy.Update(day, GetPriceIndexPpm(), value_now, value_before);
+
 	SnapshotYearlyExpenses();
 	InvalidateWindowData(WC_STOCK_MARKET, 0);
 	InvalidateWindowData(WC_CENTRAL_BANK, 0);

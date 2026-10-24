@@ -1145,8 +1145,9 @@ struct StockWindow : Window {
 
 		/* When there is enough room, the chart has three panes: the price on top, the volume bars under it and the RSI at the bottom. */
 		const bool panes = (full_bottom - top) >= ScaleGUITrad(150);
-		const int rsi_height = panes ? (full_bottom - top) / 4 : 0;
-		const int vol_height = panes ? (full_bottom - top) / 6 : 0;
+		/* The volume and RSI panes are low (1/10 and 1/8 of the chart, was 1/6 and 1/4) so the price pane gets the room; the minimums keep the "Vol" and 30/70 labels readable. */
+		const int rsi_height = panes ? std::max<int>(ScaleGUITrad(36), (full_bottom - top) / 8) : 0;
+		const int vol_height = panes ? std::max<int>(ScaleGUITrad(28), (full_bottom - top) / 10) : 0;
 		const int gap = panes ? ScaleGUITrad(4) : 0;
 		const int bottom = full_bottom - rsi_height - vol_height - 2 * gap;
 		if (bottom - top < 20) return;
@@ -1171,7 +1172,13 @@ struct StockWindow : Window {
 		}
 
 		const int slot = this->ChartSlot();
-		const int body_half = std::max(0, slot * 3 / 10);
+		const int body_half = std::max(0, slot * 3 / 10); // Half width of the volume bars (unchanged).
+		/* Candle body like in TradingView: about 70% of the slot, always an odd number of pixels so the 1 pixel wick is exactly in the
+		 * middle, and a gap of at least one pixel to the next candle. Zoomed far out the body becomes the 1 pixel wick. */
+		int candle_width = std::max(1, slot * 7 / 10);
+		if (slot >= 3) candle_width = std::min(candle_width, slot - 1);
+		if (candle_width % 2 == 0) candle_width--;
+		const int candle_half = (candle_width - 1) / 2;
 		const size_t max_visible = static_cast<size_t>(std::max(1, (right - left) / slot));
 
 		/* The visible candles are [first, last). Scrolled back by chart_scroll_offset candles, but never past the oldest candle.
@@ -1313,8 +1320,8 @@ struct StockWindow : Window {
 
 			const int body_top = to_y(std::max(c.open, c.close));
 			int body_bottom = to_y(std::min(c.open, c.close));
-			if (body_bottom <= body_top) body_bottom = body_top + 1;
-			if (body_bottom >= top && body_top <= bottom) GfxFillRect(cx - body_half, std::clamp(body_top, top, bottom), cx + body_half, std::clamp(body_bottom, top, bottom), colour);
+			if (body_bottom < body_top) body_bottom = body_top; // Open equal to close (doji): the body is a line of 1 pixel, it never disappears.
+			if (body_bottom >= top && body_top <= bottom) GfxFillRect(cx - candle_half, std::clamp(body_top, top, bottom), cx + candle_half, std::clamp(body_bottom, top, bottom), colour);
 
 			/* One small tick for every candle. */
 			GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(2), GREY_SCALE(StockTheme::TICK));
