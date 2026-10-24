@@ -132,6 +132,7 @@ static std::string StockMonthToString(int32_t ym)
 static GameTimeframe FrameOfWidget(WidgetID widget)
 {
 	switch (widget) {
+		case WID_ST_TF_M5:    return GameTimeframe::M5;
 		case WID_ST_TF_MONTH: return GameTimeframe::H4;
 		case WID_ST_TF_YEAR:  return GameTimeframe::H12;
 		case WID_ST_TF_D1:    return GameTimeframe::D1;
@@ -231,6 +232,8 @@ static constexpr int CHART_ZOOM_DEFAULT = 4; ///< Index of the default width (10
 static constexpr int CHART_ZOOM_MAX = static_cast<int>(std::size(CHART_SLOT_WIDTHS)) - 1;
 static constexpr double CHART_VZOOM_MIN = 0.05; ///< Most zoomed in price range.
 static constexpr double CHART_VZOOM_MAX = 8.0;  ///< Most zoomed out price range.
+static constexpr int CHART_WIDTH_PX = 1530;     ///< Width in unscaled pixels of the chart panel (the smallest size of the panel, and so its size when the window opens).
+static constexpr int CHART_HEIGHT_PX = 700;     ///< Height in unscaled pixels of the chart panel.
 
 struct StockWindow : Window {
 	static constexpr size_t PORTFOLIO_FIXED_ROWS = 3; ///< Lines of the portfolio that do not scroll: two summary lines and the table header.
@@ -264,7 +267,7 @@ struct StockWindow : Window {
 	uint32_t query_id = 0;              ///< Number of the position that the query window is about.
 	bool is_dragging_chart = false;     ///< Whether the mouse button is held down on the chart.
 	int drag_start_x = 0;               ///< X position (in the window) where the drag started, or where the last candle step was made.
-	int chart_scroll_offset = 0;        ///< Number of candles the chart is scrolled back into the past; 0 shows the newest candles at the right edge.
+	int chart_scroll_offset = 0;        ///< Number of candles the chart is scrolled back into the past; 0 shows the newest candle at the right edge; below 0 the chart is scrolled into the future: that many empty candle slots (whitespace) are shown at the right of the newest candle.
 	int drag_start_y = 0;               ///< Y position (in the window) where the last vertical drag step was made.
 	int chart_zoom = CHART_ZOOM_DEFAULT; ///< Index in #CHART_SLOT_WIDTHS: the width of one candle. Mouse wheel on the chart.
 	double chart_vzoom = 1.0;           ///< Height of the visible price range, 1.0 = fit all visible candles; smaller is zoomed in. Ctrl + mouse wheel.
@@ -276,7 +279,7 @@ struct StockWindow : Window {
 	double chart_vshift = 0.0;          ///< Vertical scroll of the price range as a part of the fitted range; positive shows higher prices. Drag up/down.
 	int hover_x = -1;                   ///< Mouse X (in the window) while it is over the chart, otherwise -1. Used by the crosshair.
 	int hover_y = -1;                   ///< Mouse Y (in the window) while it is over the chart, otherwise -1.
-	GameTimeframe frame = GameTimeframe::H1; ///< Timeframe of the chart: one candle per 1h, 4h, 12h, game day, game week, game month (30 days) or game year (365 days).
+	GameTimeframe frame = GameTimeframe::H1; ///< Timeframe of the chart: one candle per 5 game minutes, 1h, 4h, 12h, game day, game week, game month (30 days) or game year (365 days).
 
 	StockWindow(WindowDesc &desc) : Window(desc)
 	{
@@ -292,6 +295,7 @@ struct StockWindow : Window {
 	/** Show which timeframe button is active. */
 	void UpdateTimeframeButtons()
 	{
+		this->SetWidgetLoweredState(WID_ST_TF_M5, this->frame == GameTimeframe::M5);
 		this->SetWidgetLoweredState(WID_ST_TF_DAY, this->frame == GameTimeframe::H1);   // The first three widgets keep their old names: they are the 1h, 4h and 12h buttons now.
 		this->SetWidgetLoweredState(WID_ST_TF_MONTH, this->frame == GameTimeframe::H4);
 		this->SetWidgetLoweredState(WID_ST_TF_YEAR, this->frame == GameTimeframe::H12);
@@ -321,8 +325,8 @@ struct StockWindow : Window {
 
 	/**
 	 * The candles of the selected symbol in the active timeframe of game time, the oldest first: the closed candles and
-	 * the running one. ym holds the number of the candle (game hours since the start, divided by the length of the candle:
-	 * 1, 4, 12, 24, 168, 720 or 8,760 hours); the prices are converted to whole money units, like the other candles.
+	 * the running one. ym holds the number of the candle (game minutes since the start, divided by the length of the candle:
+	 * 5 minutes, or 1, 4, 12, 24, 168, 720 or 8,760 hours); the prices are converted to whole money units, like the other candles.
 	 */
 	std::vector<StockCandle> GetChartCandles() const
 	{
@@ -362,7 +366,26 @@ struct StockWindow : Window {
 	void ClampChartScroll()
 	{
 		const int count = static_cast<int>(this->GetChartCandles().size());
-		this->chart_scroll_offset = std::clamp(this->chart_scroll_offset, 0, std::max(0, count - 1));
+		this->chart_scroll_offset = std::clamp(this->chart_scroll_offset, -this->ChartMaxFuture(), std::max(0, count - 1));
+	}
+
+	/** Width in pixels of the area of the chart where candles are drawn (without the price axis); must follow the layout of DrawChart. */
+	int ChartPlotWidth() const
+	{
+		const NWidgetBase *nw = this->GetWidget<NWidgetBase>(WID_ST_CHART);
+		return static_cast<int>(nw->current_x) - 1 - ScaleGUITrad(6) - ScaleGUITrad(64);
+	}
+
+	/** Number of candle slots that fit in the chart at the current zoom. */
+	int ChartMaxVisible() const
+	{
+		return std::max(1, this->ChartPlotWidth() / this->ChartSlot());
+	}
+
+	/** Most empty slots (whitespace) that the chart can be scrolled into the future: all but one slot, so the newest candle stays on the screen. */
+	int ChartMaxFuture() const
+	{
+		return this->ChartMaxVisible() - 1;
 	}
 
 	/** Width of one candle in pixels, from the zoom of the chart. */
@@ -648,7 +671,11 @@ struct StockWindow : Window {
 		if (old_x != this->hover_x || old_y != this->hover_y) this->SetWidgetDirty(WID_ST_CHART);
 	}
 
-	/** While the mouse button is held down on the chart, scroll the chart one candle for every candle width of mouse movement. */
+	/**
+	 * While the mouse button is held down on the chart, scroll the chart one candle for every candle width of mouse movement.
+	 * Dragging to the right goes back in time. Dragging to the left comes back to the newest candle and then goes on into the
+	 * future, where the chart is empty (whitespace), like in TradingView.
+	 */
 	void OnMouseLoop() override
 	{
 		if (!this->is_dragging_chart) return;
@@ -676,10 +703,10 @@ struct StockWindow : Window {
 			/* Keep the rest of the movement, so a slow drag does not lose pixels. */
 			this->drag_start_x += steps * slot;
 
-			/* Dragging to the right goes back in time, dragging to the left comes back to the newest candles. */
+			/* Dragging to the right goes back in time, dragging to the left comes back to the newest candles and then into the free space after them. */
 			const size_t count = this->GetChartCandles().size();
 			const int max_offset = count > 0 ? static_cast<int>(count) - 1 : 0; // At least one candle stays visible.
-			this->chart_scroll_offset = std::clamp(this->chart_scroll_offset + steps, 0, max_offset);
+			this->chart_scroll_offset = std::clamp(this->chart_scroll_offset + steps, -this->ChartMaxFuture(), max_offset);
 			changed = true;
 		}
 		if (changed) this->SetDirty();
@@ -752,6 +779,7 @@ struct StockWindow : Window {
 				break;
 			}
 
+			case WID_ST_TF_M5:
 			case WID_ST_TF_DAY:
 			case WID_ST_TF_MONTH:
 			case WID_ST_TF_YEAR:
@@ -1099,10 +1127,14 @@ struct StockWindow : Window {
 		const int body_half = std::max(0, slot * 3 / 10);
 		const size_t max_visible = static_cast<size_t>(std::max(1, (right - left) / slot));
 
-		/* The visible candles are [first, last). Scrolled back by chart_scroll_offset candles, but never past the oldest candle. */
+		/* The visible candles are [first, last). Scrolled back by chart_scroll_offset candles, but never past the oldest candle.
+		 * A negative chart_scroll_offset scrolls into the future instead: the newest candle moves to the left and the slots
+		 * after it stay empty (whitespace), like in TradingView. At least one candle stays visible. */
+		const size_t future = static_cast<size_t>(std::clamp(-this->chart_scroll_offset, 0, static_cast<int>(max_visible) - 1));
 		const size_t offset = std::min(static_cast<size_t>(std::max(0, this->chart_scroll_offset)), candles.size() - 1);
 		const size_t last = candles.size() - offset;
-		const size_t first = last > max_visible ? last - max_visible : 0;
+		const size_t candle_slots = max_visible - future;
+		const size_t first = last > candle_slots ? last - candle_slots : 0;
 
 		int64_t lo = INT64_MAX;
 		int64_t hi = INT64_MIN;
@@ -1157,10 +1189,74 @@ struct StockWindow : Window {
 			DrawString(right + ScaleGUITrad(6), r.right - 2, y - small_height / 2, GetString(STR_JUST_CURRENCY_SHORT, value), TC_WHITE, SA_LEFT, false, FS_SMALL);
 		}
 
-		/* Candles, the newest at the right edge. */
+		/* Texts under the chart for the candle with the number ym (the candles of the future have numbers too: they go on counting). */
+		auto candle_label = [&](int64_t ym) {
+			std::string label;
+			const uint64_t start_min = static_cast<uint64_t>(ym) * static_cast<uint64_t>(GameTimeframeMinutes(this->frame));
+			switch (this->frame) {
+				case GameTimeframe::M5:
+					if (start_min % 30 == 0) {
+						label = start_min % (24 * 60) == 0 ? fmt::format("D{}", start_min / (24 * 60) + 1) : fmt::format("{:02}:{:02}", (start_min / 60) % 24, start_min % 60);
+					}
+					break;
+				case GameTimeframe::H1:
+				case GameTimeframe::H4:
+				case GameTimeframe::H12: {
+					const uint64_t start_hour = start_min / 60;
+					const uint64_t label_every = this->frame == GameTimeframe::H1 ? 6 : this->frame == GameTimeframe::H4 ? 24 : 96;
+					if (start_hour % label_every == 0) {
+						label = (this->frame == GameTimeframe::H1 && start_hour % 24 != 0) ?
+								fmt::format("{:02}:00", start_hour % 24) : fmt::format("D{}", start_hour / 24 + 1);
+					}
+					break;
+				}
+				case GameTimeframe::D1:
+					if (ym % 7 == 0) label = fmt::format("D{}", ym + 1);
+					break;
+				case GameTimeframe::W1:
+					if (ym % 4 == 0) label = fmt::format("W{}", ym + 1);
+					break;
+				case GameTimeframe::MN:
+					if (ym % 6 == 0) label = fmt::format("M{}", ym + 1);
+					break;
+				case GameTimeframe::Y1:
+					if (ym % 3 == 0) label = fmt::format("{}", GameTimeManager::Get().GetSaveState().start_year + ym);
+					break;
+				default:
+					break;
+			}
+			return label;
+		};
+		auto candle_tag = [&](int64_t ym) {
+			std::string tag;
+			const uint64_t start_min = static_cast<uint64_t>(ym) * static_cast<uint64_t>(GameTimeframeMinutes(this->frame));
+			switch (this->frame) {
+				case GameTimeframe::M5:
+				case GameTimeframe::H1:
+				case GameTimeframe::H4:
+				case GameTimeframe::H12:
+					tag = fmt::format("D{} {:02}:{:02}", start_min / (24 * 60) + 1, (start_min / 60) % 24, start_min % 60);
+					break;
+				case GameTimeframe::D1: tag = fmt::format("D{}", ym + 1); break;
+				case GameTimeframe::W1: tag = fmt::format("W{}", ym + 1); break;
+				case GameTimeframe::MN: tag = fmt::format("M{}", ym + 1); break;
+				case GameTimeframe::Y1: tag = fmt::format("{}", GameTimeManager::Get().GetSaveState().start_year + ym); break;
+				default: break;
+			}
+			return tag;
+		};
+
+		/* Candles, the newest at the right edge, or when the chart is scrolled into the future, followed by empty slots. */
 		const int count = static_cast<int>(last - first);
-		const int x0 = right - count * slot;
+		const int x0 = right - (count + static_cast<int>(future)) * slot;
 		int last_label_x = INT32_MIN / 2; // X of the last label that was drawn.
+		/* A label is about 40 pixels wide: when the candles are narrow (zoomed out), only labels that have room are drawn. */
+		auto draw_label = [&](int cx, const std::string &label) {
+			if (label.empty() || cx - last_label_x < ScaleGUITrad(44)) return;
+			last_label_x = cx;
+			GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(3), PC_WHITE);
+			DrawString(cx - ScaleGUITrad(20), cx + ScaleGUITrad(20), full_bottom + ScaleGUITrad(3), label, TC_WHITE, SA_HOR_CENTER, false, FS_SMALL);
+		};
 		for (int i = 0; i < count; i++) {
 			const StockCandle &c = candles[first + i];
 			const int cx = x0 + i * slot + slot / 2;
@@ -1176,42 +1272,19 @@ struct StockWindow : Window {
 			/* One small tick for every candle. */
 			GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(2), PC_WHITE);
 
-			/* Labels in game time. Each label is wider than one candle, so only some candles get one: every 6 hours on the 1h
-			 * chart (the time, or the day at midnight), every day on the 4h chart, every 4 days on the 12h chart, every 7 days on
-			 * the day chart, every 4 weeks on the week chart, every 6 months on the month chart and every 3 years on the year chart. */
-			std::string label;
-			switch (this->frame) {
-				case GameTimeframe::H1:
-				case GameTimeframe::H4:
-				case GameTimeframe::H12: {
-					const uint64_t start_hour = static_cast<uint64_t>(c.ym) * static_cast<uint64_t>(GameTimeframeHours(this->frame));
-					const uint64_t label_every = this->frame == GameTimeframe::H1 ? 6 : this->frame == GameTimeframe::H4 ? 24 : 96;
-					if (start_hour % label_every == 0) {
-						label = (this->frame == GameTimeframe::H1 && start_hour % 24 != 0) ?
-								fmt::format("{:02}:00", start_hour % 24) : fmt::format("D{}", start_hour / 24 + 1);
-					}
-					break;
-				}
-				case GameTimeframe::D1:
-					if (c.ym % 7 == 0) label = fmt::format("D{}", c.ym + 1);
-					break;
-				case GameTimeframe::W1:
-					if (c.ym % 4 == 0) label = fmt::format("W{}", c.ym + 1);
-					break;
-				case GameTimeframe::MN:
-					if (c.ym % 6 == 0) label = fmt::format("M{}", c.ym + 1);
-					break;
-				case GameTimeframe::Y1:
-					if (c.ym % 3 == 0) label = fmt::format("{}", GameTimeManager::Get().GetSaveState().start_year + c.ym);
-					break;
-				default:
-					break;
-			}
-			/* A label is about 40 pixels wide: when the candles are narrow (zoomed out), only labels that have room are drawn. */
-			if (!label.empty() && cx - last_label_x >= ScaleGUITrad(44)) {
-				last_label_x = cx;
-				GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(3), PC_WHITE);
-				DrawString(cx - ScaleGUITrad(20), cx + ScaleGUITrad(20), full_bottom + ScaleGUITrad(3), label, TC_WHITE, SA_HOR_CENTER, false, FS_SMALL);
+			/* Labels in game time. Each label is wider than one candle, so only some candles get one: every 30 minutes on the 5m chart,
+			 * every 6 hours on the 1h chart (the time, or the day at midnight), every day on the 4h chart, every 4 days on the 12h chart,
+			 * every 7 days on the day chart, every 4 weeks on the week chart, every 6 months on the month chart and every 3 years on the year chart. */
+			draw_label(cx, candle_label(c.ym));
+		}
+
+		/* The free space after the newest candle (only when the chart is scrolled into the future): a tick and a label for the times to come. */
+		if (future > 0) {
+			const int64_t newest_ym = candles[last - 1].ym;
+			for (int k = 0; k < static_cast<int>(future); k++) {
+				const int cx = x0 + (count + k) * slot + slot / 2;
+				GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(2), PC_WHITE);
+				draw_label(cx, candle_label(newest_ym + 1 + k));
 			}
 		}
 
@@ -1350,9 +1423,11 @@ struct StockWindow : Window {
 		/* Crosshair: dashed lines through the mouse position, with the price on the axis and the time under the chart. The vertical
 		 * line snaps to the middle of the candle under the mouse. */
 		if (this->hover_x >= left && this->hover_x <= right && this->hover_y >= top && this->hover_y <= full_bottom) {
-			const int idx = std::clamp((this->hover_x - x0) / slot, 0, count - 1);
+			/* The slots of the free space after the newest candle count too: the crosshair can be there, and shows the time to come. */
+			const int total_slots = count + static_cast<int>(future);
+			const int idx = std::clamp((this->hover_x - x0) / slot, 0, total_slots - 1);
 			if (this->hover_x >= x0) {
-				const StockCandle &hc = candles[first + static_cast<size_t>(idx)];
+				const int64_t hover_ym = idx >= count ? static_cast<int64_t>(candles[last - 1].ym) + 1 + (idx - count) : static_cast<int64_t>(candles[first + static_cast<size_t>(idx)].ym);
 				const int hx = x0 + idx * slot + slot / 2;
 				const int dash = std::max(1, ScaleGUITrad(3));
 				for (int y = top; y < full_bottom; y += 2 * dash) GfxDrawLine(hx, y, hx, std::min(y + dash - 1, full_bottom), GREY_SCALE(10));
@@ -1366,21 +1441,7 @@ struct StockWindow : Window {
 				}
 
 				/* Time tag under the chart, in game time. */
-				std::string tag;
-				switch (this->frame) {
-					case GameTimeframe::H1:
-					case GameTimeframe::H4:
-					case GameTimeframe::H12: {
-						const uint64_t start_hour = static_cast<uint64_t>(hc.ym) * static_cast<uint64_t>(GameTimeframeHours(this->frame));
-						tag = fmt::format("D{} {:02}:00", start_hour / 24 + 1, start_hour % 24);
-						break;
-					}
-					case GameTimeframe::D1: tag = fmt::format("D{}", hc.ym + 1); break;
-					case GameTimeframe::W1: tag = fmt::format("W{}", hc.ym + 1); break;
-					case GameTimeframe::MN: tag = fmt::format("M{}", hc.ym + 1); break;
-					case GameTimeframe::Y1: tag = fmt::format("{}", GameTimeManager::Get().GetSaveState().start_year + hc.ym); break;
-					default: break;
-				}
+				const std::string tag = candle_tag(hover_ym);
 				if (!tag.empty()) {
 					const int half_w = ScaleGUITrad(34);
 					GfxFillRect(hx - half_w, full_bottom + 1, hx + half_w, r.bottom - 1, GREY_SCALE(6));
@@ -1691,6 +1752,7 @@ static constexpr std::initializer_list<NWidgetPart> _nested_stock_widgets = {
 			NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_SUMMARY), SetMinimalSize(400, 16), SetResize(1, 0), SetFill(1, 0), SetToolTip(STR_STOCK_TIP_SUMMARY),
 			EndContainer(),
 			NWidget(NWID_HORIZONTAL),
+				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_M5), SetMinimalSize(50, 14), SetStringTip(STR_STOCK_TF_5M, STR_STOCK_TIP_TF_5M),
 				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_DAY), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_TF_1H, STR_STOCK_TIP_TF_1H),
 				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_MONTH), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_TF_4H, STR_STOCK_TIP_TF_4H),
 				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_ST_TF_YEAR), SetMinimalSize(70, 14), SetStringTip(STR_STOCK_TF_12H, STR_STOCK_TIP_TF_12H),
@@ -1703,7 +1765,7 @@ static constexpr std::initializer_list<NWidgetPart> _nested_stock_widgets = {
 				EndContainer(),
 				NWidget(WWT_PUSHBTN, COLOUR_GREY, WID_ST_CHART_EXPAND), SetMinimalSize(70, 14),
 			EndContainer(),
-			NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_CHART), SetMinimalSize(400, 184), SetResize(1, 1), SetFill(1, 1), SetToolTip(STR_STOCK_TIP_CHART),
+			NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_CHART), SetMinimalSize(CHART_WIDTH_PX, CHART_HEIGHT_PX), SetResize(1, 1), SetFill(1, 1), SetToolTip(STR_STOCK_TIP_CHART),
 			EndContainer(),
 		EndContainer(),
 	EndContainer(),

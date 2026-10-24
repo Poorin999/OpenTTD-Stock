@@ -6,15 +6,15 @@
  */
 
 /**
- * @file game_time_aggregator.h Collects samples (e.g. prices) into buckets of the 1h, 4h and 12h timeframes.
+ * @file game_time_aggregator.h Collects samples (e.g. prices) into buckets of the 5m, 1h, 4h, 12h, day, week, month and year timeframes.
  *
- * The aggregator listens to the Hour, Hour4 and Hour12 events of the GameTimeManager, so a bucket is closed exactly at
+ * The aggregator listens to the Minute5, Hour, Hour4, Hour12, Day, Week, Month and Year events of the GameTimeManager, so a bucket is closed exactly at
  * the boundary of its timeframe, also when no sample arrived in it. Only the standard library and the manager are
  * needed. It does not know about savegames: Export() and Import() convert the state to a flat list of records that
  * any chunk handler can write.
  *
  * Buckets of a timeframe are numbered from game minute 0 (bucket 0 starts at 00:00 of the first day), so the number of
- * the 4h bucket at game hour H is H / 4. That makes the numbers the same on every client and after every load.
+ * the 4h bucket at game hour H is H / 4 and the number of the 5m bucket at game minute M is M / 5. That makes the numbers the same on every client and after every load.
  *
  * Saving: Export() gives a flat list of records and Import() takes it back; see SRK_TIMEFRAME in stock_sl.cpp for a
  * mapping to savegame rows. Collect all rows of one aggregator in a std::vector<TimeframeRecord> and call Import()
@@ -75,6 +75,8 @@ public:
 
 	/** Number of closed buckets that are kept per timeframe by default. */
 	static constexpr size_t DEFAULT_MAX_CLOSED = 500;
+	/** The 5m timeframe closes a bucket every 5 real seconds, so it keeps this many times more buckets (the same stretch of real time would be too short otherwise). */
+	static constexpr size_t SHORT_FRAME_FACTOR = 3;
 
 	/** Not explicit, so that an array of aggregators can be default constructed. */
 	TimeframeAggregator() : TimeframeAggregator(DEFAULT_MAX_CLOSED) {}
@@ -85,7 +87,7 @@ public:
 		for (size_t i = 0; i < GAME_TIMEFRAME_COUNT; i++) {
 			const GameTimeframe tf = static_cast<GameTimeframe>(i);
 			this->subscriptions_[i] = std::make_unique<GameTimeSubscription>(GameTimeframeEvent(tf),
-					[this, tf](const GameTimeSnapshot &now) { this->OnBoundary(tf, now.total_hours); }, TimeframeAggregator::PRIORITY);
+					[this, tf](const GameTimeSnapshot &now) { this->OnBoundary(tf, now.total_minutes); }, TimeframeAggregator::PRIORITY);
 		}
 	}
 
@@ -109,11 +111,11 @@ public:
 	 */
 	void AddSample(int64_t value)
 	{
-		const uint64_t hours = GameTimeManager::Get().GetSnapshot().total_hours;
+		const uint64_t minutes = GameTimeManager::Get().GetSnapshot().total_minutes;
 		for (size_t i = 0; i < GAME_TIMEFRAME_COUNT; i++) {
 			const GameTimeframe tf = static_cast<GameTimeframe>(i);
 			Series &s = this->series_[i];
-			const uint64_t index = hours / static_cast<uint64_t>(GameTimeframeHours(tf));
+			const uint64_t index = minutes / static_cast<uint64_t>(GameTimeframeMinutes(tf));
 			if (!s.has_running) {
 				s.running = TimeframeBucket{};
 				s.running.index = index;
@@ -140,11 +142,11 @@ public:
 	void AddVolume(int64_t volume)
 	{
 		if (volume <= 0) return;
-		const uint64_t hours = GameTimeManager::Get().GetSnapshot().total_hours;
+		const uint64_t minutes = GameTimeManager::Get().GetSnapshot().total_minutes;
 		for (size_t i = 0; i < GAME_TIMEFRAME_COUNT; i++) {
 			const GameTimeframe tf = static_cast<GameTimeframe>(i);
 			if (!this->series_[i].has_running) continue;
-			this->CloseUntil(tf, hours / static_cast<uint64_t>(GameTimeframeHours(tf)));
+			this->CloseUntil(tf, minutes / static_cast<uint64_t>(GameTimeframeMinutes(tf)));
 			this->series_[i].running.volume += volume;
 		}
 	}
@@ -186,7 +188,7 @@ public:
 				s.has_running = true;
 			} else {
 				s.closed.push_back(r.bucket);
-				if (s.closed.size() > this->max_closed_) s.closed.pop_front();
+				if (s.closed.size() > this->MaxClosed(static_cast<GameTimeframe>(r.timeframe))) s.closed.pop_front();
 			}
 		}
 		for (size_t i = 0; i < GAME_TIMEFRAME_COUNT; i++) {
@@ -211,6 +213,12 @@ private:
 		return b.open >= b.low && b.open <= b.high && b.close >= b.low && b.close <= b.high;
 	}
 
+	/** Number of closed buckets that are kept for a timeframe. */
+	size_t MaxClosed(GameTimeframe tf) const
+	{
+		return tf == GameTimeframe::M5 ? this->max_closed_ * SHORT_FRAME_FACTOR : this->max_closed_;
+	}
+
 	bool Fail()
 	{
 		this->Reset();
@@ -218,11 +226,11 @@ private:
 	}
 
 	/** The clock reached the start of a bucket: close everything before it. */
-	void OnBoundary(GameTimeframe tf, uint64_t total_hours)
+	void OnBoundary(GameTimeframe tf, uint64_t total_minutes)
 	{
 		Series &s = this->series_[static_cast<size_t>(tf)];
 		if (!s.has_running) return; // No sample yet: nothing to close.
-		this->CloseUntil(tf, total_hours / static_cast<uint64_t>(GameTimeframeHours(tf)));
+		this->CloseUntil(tf, total_minutes / static_cast<uint64_t>(GameTimeframeMinutes(tf)));
 	}
 
 	/** Close the running bucket, and the empty ones after it, until the running one has the number #index. */
@@ -232,7 +240,7 @@ private:
 		while (s.has_running && s.running.index < index) {
 			const TimeframeBucket done = s.running;
 			s.closed.push_back(done);
-			if (s.closed.size() > this->max_closed_) s.closed.pop_front();
+			if (s.closed.size() > this->MaxClosed(tf)) s.closed.pop_front();
 
 			TimeframeBucket next;
 			next.index = done.index + 1;

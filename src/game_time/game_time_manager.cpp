@@ -66,9 +66,9 @@ uint64_t GameTimeManager::GetTotalMilliseconds() const { return this->total_ms_.
 /** Number of the candle of a timeframe that contains the current time. */
 uint64_t GameTimeManager::GetCandleIndex(GameTimeframe tf) const
 {
-	const int hours = GameTimeframeHours(tf);
-	if (hours <= 0) return 0;
-	return this->total_ms_.load() / (MS_PER_MINUTE * MINUTES_PER_HOUR * static_cast<uint64_t>(hours));
+	const int minutes = GameTimeframeMinutes(tf);
+	if (minutes <= 0) return 0;
+	return this->total_ms_.load() / (MS_PER_MINUTE * static_cast<uint64_t>(minutes));
 }
 
 /** Milliseconds until the next boundary of an event. A boundary that has just fired counts as passed. */
@@ -207,6 +207,9 @@ void GameTimeManager::Dispatch(GameTimeEvent event)
 /** Dispatcher: a game minute has passed (every real second). */
 void GameTimeManager::OnMinuteUpdate() { this->Dispatch(GameTimeEvent::Minute); }
 
+/** Dispatcher: 5 game minutes have passed (every 5 real seconds). */
+void GameTimeManager::OnMinute5Update() { this->Dispatch(GameTimeEvent::Minute5); }
+
 /** Dispatcher: a game hour has passed (every real minute). */
 void GameTimeManager::OnHourlyUpdate() { this->Dispatch(GameTimeEvent::Hour); }
 
@@ -229,7 +232,7 @@ void GameTimeManager::OnMonthlyUpdate() { this->Dispatch(GameTimeEvent::Month); 
 void GameTimeManager::OnYearlyUpdate() { this->Dispatch(GameTimeEvent::Year); }
 
 /**
- * Move the clock forward. Every minute boundary that is crossed sends its events, in the order minute, hour, 4h, 12h,
+ * Move the clock forward. Every minute boundary that is crossed sends its events, in the order minute, 5 minutes, hour, 4h, 12h,
  * day, week, month, year, also when the time that is added is many minutes (fast-forward), so no event is lost. When a callback calls this
  * function, the time is added after the running events have been sent.
  * @param delta_ms Milliseconds to add.
@@ -260,6 +263,7 @@ void GameTimeManager::AdvanceMilliseconds(uint64_t delta_ms)
 		if ((now + step) % MS_PER_MINUTE == 0) {
 			const uint64_t minutes = (now + step) / MS_PER_MINUTE;
 			this->OnMinuteUpdate();
+			if (minutes % 5 == 0) this->OnMinute5Update();
 			if (minutes % MINUTES_PER_HOUR == 0) {
 				const uint64_t hours = minutes / MINUTES_PER_HOUR;
 				this->OnHourlyUpdate();

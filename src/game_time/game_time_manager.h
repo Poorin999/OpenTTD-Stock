@@ -19,11 +19,11 @@
  * result the clock stops when the game is paused and runs faster when the game is fast-forwarded, just like the rest
  * of the game.
  *
- * Timeframes: next to the minute, hour and day events there are the events of the 4h, 12h, week, month and year timeframes.
- * They are aligned to game midnight: 4h fires at 00:00, 04:00, 08:00, ... and 12h fires at 00:00 and 12:00, that is every 4 and
+ * Timeframes: next to the minute, hour and day events there are the events of the 5m, 4h, 12h, week, month and year timeframes.
+ * They are aligned to game midnight: 5m fires at 00:00, 00:05, 00:10, ... (every 5 real seconds), 4h fires at 00:00, 04:00, 08:00, ... and 12h fires at 00:00 and 12:00, that is every 4 and
  * every 12 real minutes. A week is 7 game days, a month 30 game days and a year 365 game days; they all start at game day 0. When one clock step crosses several boundaries (fast-forward, a big catch-up), every
  * boundary is still dispatched, one by one, in time order. At one boundary the order is
- * Minute, Hour, Hour4, Hour12, Day, Week, Month, Year.
+ * Minute, Minute5, Hour, Hour4, Hour12, Day, Week, Month, Year.
  *
  * This file only needs the standard library. The connection to the game ticks and to the savegame is in
  * game_time_driver.cpp, so the clock can also be tested outside of the game.
@@ -73,6 +73,7 @@ static constexpr int64_t GAME_TIME_STARTING_CAPITAL = 1'500'000;
 /** The kinds of events that a system can subscribe to. */
 enum class GameTimeEvent : uint8_t {
 	Minute, ///< Once per game minute (every real second).
+	Minute5, ///< Once per 5 game minutes (every 5 real seconds): end of a 5m timeframe.
 	Hour,   ///< Once per game hour (every real minute). This is also the end of a 1h timeframe.
 	Hour4,  ///< Once per 4 game hours (every 4 real minutes): end of a 4h timeframe.
 	Hour12, ///< Once per 12 game hours (every 12 real minutes): end of a 12h timeframe.
@@ -85,6 +86,8 @@ enum class GameTimeEvent : uint8_t {
 
 /** The timeframes of the chart and of the data aggregation. Each one has its own event. */
 enum class GameTimeframe : uint8_t {
+	/* The numbers are saved in savegames (see SRK_TIMEFRAME), so a new timeframe is always added at the END of the list, before Count. The chart
+	 * shows the timeframes in its own order (5m first), see the buttons of stock_gui.cpp. */
 	H1,    ///< 1 game hour  = 1 real minute.
 	H4,    ///< 4 game hours = 4 real minutes.
 	H12,   ///< 12 game hours = 12 real minutes.
@@ -92,12 +95,29 @@ enum class GameTimeframe : uint8_t {
 	W1,    ///< 1 game week = 7 game days = 168 real minutes.
 	MN,    ///< 1 game month = 30 game days = 720 real minutes. The game year has no calendar months; a month is always 30 days.
 	Y1,    ///< 1 game year = 365 game days = 8,760 real minutes.
+	M5,    ///< 5 game minutes = 5 real seconds. Added after the others, so that the numbers in old savegames keep their meaning.
 	Count, ///< Number of timeframes.
 };
 
 inline constexpr size_t GAME_TIMEFRAME_COUNT = static_cast<size_t>(GameTimeframe::Count);
 
-/** Length of a timeframe in game hours. */
+/** Length of a timeframe in game minutes. */
+constexpr int GameTimeframeMinutes(GameTimeframe tf)
+{
+	switch (tf) {
+		case GameTimeframe::M5:  return 5;
+		case GameTimeframe::H1:  return 60;
+		case GameTimeframe::H4:  return 60 * 4;
+		case GameTimeframe::H12: return 60 * 12;
+		case GameTimeframe::D1:  return 60 * 24;
+		case GameTimeframe::W1:  return 60 * 24 * 7;
+		case GameTimeframe::MN:  return 60 * 24 * 30;
+		case GameTimeframe::Y1:  return 60 * 24 * 365;
+		default:                 return 0;
+	}
+}
+
+/** Length of a timeframe in whole game hours. 0 for a timeframe that is shorter than an hour (5m): use GameTimeframeMinutes() for those. */
 constexpr int GameTimeframeHours(GameTimeframe tf)
 {
 	switch (tf) {
@@ -116,6 +136,7 @@ constexpr int GameTimeframeHours(GameTimeframe tf)
 constexpr GameTimeEvent GameTimeframeEvent(GameTimeframe tf)
 {
 	switch (tf) {
+		case GameTimeframe::M5:  return GameTimeEvent::Minute5;
 		case GameTimeframe::H4:  return GameTimeEvent::Hour4;
 		case GameTimeframe::H12: return GameTimeEvent::Hour12;
 		case GameTimeframe::D1:  return GameTimeEvent::Day;
@@ -130,6 +151,7 @@ constexpr GameTimeEvent GameTimeframeEvent(GameTimeframe tf)
 constexpr const char *GameTimeframeName(GameTimeframe tf)
 {
 	switch (tf) {
+		case GameTimeframe::M5:  return "5m";
 		case GameTimeframe::H4:  return "4h";
 		case GameTimeframe::H12: return "12h";
 		case GameTimeframe::D1:  return "1d";
@@ -144,6 +166,7 @@ constexpr const char *GameTimeframeName(GameTimeframe tf)
 struct GameTimeSnapshot {
 	uint64_t total_minutes = 0; ///< Game minutes since the start of the game.
 	uint64_t total_hours = 0;   ///< Complete game hours since the start of the game; total_hours / 4 is the number of the 4h candle.
+	/* The number of the 5m candle is total_minutes / 5. */
 	int minute = 0;             ///< Minute of the hour, 0..59.
 	int hour = 0;               ///< Hour of the day, 0..23.
 	int day = 1;                ///< Day of the year, 1..365.
@@ -180,6 +203,7 @@ public:
 	{
 		switch (event) {
 			case GameTimeEvent::Minute: return MS_PER_MINUTE;
+			case GameTimeEvent::Minute5: return MS_PER_MINUTE * 5;
 			case GameTimeEvent::Hour:   return MS_PER_MINUTE * MINUTES_PER_HOUR;
 			case GameTimeEvent::Hour4:  return MS_PER_MINUTE * MINUTES_PER_HOUR * 4;
 			case GameTimeEvent::Hour12: return MS_PER_MINUTE * MINUTES_PER_HOUR * 12;
@@ -227,6 +251,7 @@ public:
 
 	/** The dispatchers. They call the subscribers of the event for the current time; AdvanceMilliseconds calls them at every boundary. */
 	void OnMinuteUpdate();
+	void OnMinute5Update();
 	void OnHourlyUpdate();
 	void OnHour4Update();
 	void OnHour12Update();

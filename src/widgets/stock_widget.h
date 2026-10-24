@@ -41,6 +41,7 @@ enum StockWidgets : WidgetID {
 	WID_ST_PNL,              ///< Panel: floating and realised profit of the selected wallet.
 	WID_ST_RISK,             ///< Panel: margin usage and the margin call warning.
 	WID_ST_CHART_EXPAND,     ///< Button: enlarge the window to (nearly) the whole screen so that the chart gets bigger; press again to restore.
+	WID_ST_TF_M5,            ///< Toggle button: chart with 5m candles (5 game minutes = 5 real seconds). It is shown before the 1h button.
 };
 
 /** Widgets of the #StockOrderWindow class. */

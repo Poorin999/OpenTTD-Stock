@@ -287,7 +287,8 @@ void TestAggregatorBasics()
 	Fresh();
 	TimeframeAggregator agg;
 	std::vector<std::pair<GameTimeframe, TimeframeBucket>> closed;
-	agg.SetCloseCallback([&](GameTimeframe tf, const TimeframeBucket &b) { closed.push_back({tf, b}); });
+	/* The 5m timeframe closes a candle every 5 game minutes; it has its own test (TestFiveMinuteTimeframe). */
+	agg.SetCloseCallback([&](GameTimeframe tf, const TimeframeBucket &b) { if (tf != GameTimeframe::M5) closed.push_back({tf, b}); });
 
 	Check("no running bucket before the first sample", !agg.HasRunning(GameTimeframe::H1));
 	Clock().AdvanceMilliseconds(3 * HOUR_MS);
@@ -530,6 +531,92 @@ void TestCalendarSync()
 	Check("all 74 steps of the day are visited", std::all_of(seen.begin(), seen.end(), [](bool b) { return b; }));
 }
 
+/** The 5 minute timeframe: an event every 5 game minutes (5 real seconds), candles numbered from minute 0, and the old timeframes keep their numbers. */
+void TestFiveMinuteTimeframe()
+{
+	Fresh();
+	CheckEq("5m is 5 game minutes", 5, GameTimeframeMinutes(GameTimeframe::M5));
+	CheckEq("5m has no whole hours", 0, GameTimeframeHours(GameTimeframe::M5));
+	CheckEq("1h is 60 game minutes", 60, GameTimeframeMinutes(GameTimeframe::H1));
+	CheckEq("12h is 720 game minutes", 720, GameTimeframeMinutes(GameTimeframe::H12));
+	CheckEq("the numbers of the old timeframes did not move (savegames)", 0, static_cast<int>(GameTimeframe::H1));
+	CheckEq("... 4h", 1, static_cast<int>(GameTimeframe::H4));
+	CheckEq("... 12h", 2, static_cast<int>(GameTimeframe::H12));
+	CheckEq("... year", 6, static_cast<int>(GameTimeframe::Y1));
+	CheckEq("5m is the last one", 7, static_cast<int>(GameTimeframe::M5));
+	Check("5m listens to its own event", GameTimeframeEvent(GameTimeframe::M5) == GameTimeEvent::Minute5);
+
+	/* Events: 12 per game hour, and at a full hour the 5m event comes right after the minute event and before the hour event. */
+	Counter c;
+	GameTimeSubscription five{GameTimeEvent::Minute5, [&c](const GameTimeSnapshot &) { c.Hit(GameTimeEvent::Minute5); }};
+	Clock().AdvanceMilliseconds(HOUR_MS * 2);
+	CheckEq("12 five-minute events per game hour", 24, c.Get(GameTimeEvent::Minute5));
+	CheckEq("... 120 minute events", 120, c.Get(GameTimeEvent::Minute));
+	CheckEq("... 2 hour events", 2, c.Get(GameTimeEvent::Hour));
+	size_t h = 0;
+	for (size_t i = 0; i + 1 < c.order.size(); i++) {
+		if (c.order[i] == GameTimeEvent::Hour) { h = i; break; }
+	}
+	Check("order at a full hour: minute, 5 minutes, hour", h >= 2 && c.order[h - 1] == GameTimeEvent::Minute5 && c.order[h - 2] == GameTimeEvent::Minute);
+	CheckEq("period of the 5m event", 5000, GameTimeManager::EventPeriodMs(GameTimeEvent::Minute5));
+
+	/* Countdown and candle index. */
+	Fresh();
+	Clock().AdvanceMilliseconds(3 * MIN_MS + 250);
+	CheckEq("5m candle index at 00:03", 0, Clock().GetCandleIndex(GameTimeframe::M5));
+	CheckEq("countdown to the next 5m candle", 5 * MIN_MS - (3 * MIN_MS + 250), Clock().GetMillisecondsUntil(GameTimeEvent::Minute5));
+	Clock().AdvanceMilliseconds(2 * MIN_MS);
+	CheckEq("5m candle index at 00:05", 1, Clock().GetCandleIndex(GameTimeframe::M5));
+	CheckEq("1h candle index is not changed by the 5m timeframe", 0, Clock().GetCandleIndex(GameTimeframe::H1));
+
+	/* The aggregator: candles close at 00:05, 00:10, ... and the 1h candle is still the same as before. */
+	Fresh();
+	TimeframeAggregator agg;
+	std::vector<std::pair<GameTimeframe, TimeframeBucket>> closed;
+	agg.SetCloseCallback([&](GameTimeframe tf, const TimeframeBucket &b) { closed.push_back({tf, b}); });
+	agg.AddSample(100);
+	Clock().AdvanceMilliseconds(2 * MIN_MS);
+	agg.AddSample(130);
+	Clock().AdvanceMilliseconds(2 * MIN_MS);
+	agg.AddSample(90);
+	CheckEq("nothing closed at 00:04 (5m)", 0, agg.Closed(GameTimeframe::M5).size());
+	Clock().AdvanceMilliseconds(MIN_MS); // 00:05
+	CheckEq("the first 5m candle closed at 00:05", 1, agg.Closed(GameTimeframe::M5).size());
+	const TimeframeBucket &b0 = agg.Closed(GameTimeframe::M5)[0];
+	Check("5m candle has open 100, high 130, low 90, close 90", b0.open == 100 && b0.high == 130 && b0.low == 90 && b0.close == 90 && b0.index == 0);
+	CheckEq("the running 5m candle is number 1", 1, agg.Running(GameTimeframe::M5).index);
+	CheckEq("the 1h candle is still running", 0, agg.Closed(GameTimeframe::H1).size());
+	Clock().AdvanceMilliseconds(HOUR_MS); // 01:05: 12 more 5m candles (the first hour is complete: 12 candles) and one 1h candle
+	CheckEq("12 + 1 5m candles are closed 1 hour after the first", 13, agg.Closed(GameTimeframe::M5).size());
+	CheckEq("one 1h candle closed", 1, agg.Closed(GameTimeframe::H1).size());
+	Check("candles without a sample are flat at the previous close", agg.Closed(GameTimeframe::M5).back().close == 90 && agg.Closed(GameTimeframe::M5).back().samples == 0);
+
+	/* Savegame: the 5m candles are saved with their own number, and an old save without them still loads. */
+	const std::vector<TimeframeRecord> rec = agg.Export();
+	bool has5 = false;
+	for (const TimeframeRecord &r : rec) has5 = has5 || r.timeframe == static_cast<uint8_t>(GameTimeframe::M5);
+	Check("the 5m candles are exported", has5);
+	TimeframeAggregator copy;
+	Check("import with 5m candles", copy.Import(rec));
+	CheckEq("5m candles survive export and import", agg.Closed(GameTimeframe::M5).size(), copy.Closed(GameTimeframe::M5).size());
+	std::vector<TimeframeRecord> old_save;
+	for (const TimeframeRecord &r : rec) if (r.timeframe != static_cast<uint8_t>(GameTimeframe::M5)) old_save.push_back(r);
+	TimeframeAggregator legacy;
+	Check("a savegame from before 5m loads", legacy.Import(old_save));
+	Check("... and has no 5m candles", legacy.Closed(GameTimeframe::M5).empty() && !legacy.HasRunning(GameTimeframe::M5));
+	Check("... but keeps its 1h candles", legacy.Closed(GameTimeframe::H1).size() == agg.Closed(GameTimeframe::H1).size());
+
+	/* The 5m timeframe keeps more closed candles than the others. */
+	Fresh();
+	TimeframeAggregator small(10);
+	small.AddSample(5);
+	Clock().AdvanceMilliseconds(HOUR_MS * 20);
+	small.AddSample(6);
+	CheckEq("10 closed 1h candles are kept", 10, small.Closed(GameTimeframe::H1).size());
+	CheckEq("30 closed 5m candles are kept", 30, small.Closed(GameTimeframe::M5).size());
+	CheckEq("... the newest ones", 20 * 12 - 1, small.Closed(GameTimeframe::M5).back().index);
+}
+
 int main()
 {
 	TestScale();
@@ -543,6 +630,7 @@ int main()
 	TestAggregatorAgainstSimTime();
 	TestAggregatorSaveLoad();
 	TestLongTimeframes();
+	TestFiveMinuteTimeframe();
 	TestCalendarSync();
 
 	std::cout << _passed << " checks passed, " << _failed << " failed\n";
