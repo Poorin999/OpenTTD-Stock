@@ -44,7 +44,7 @@ static GoldBuyBlock GetGoldBuyBlock(int64_t ounces)
 	if (_gold_reserve.GetPriceCents() <= 0) return GoldBuyBlock::NoMarket;
 	if (ounces <= 0 || ounces > 1000000) return GoldBuyBlock::BadQty;
 	if (_gold_reserve.market_stock_oz < ounces) return GoldBuyBlock::NoStock;
-	const int64_t cost = _gold_reserve.GetBuyCost(ounces);
+	const int64_t cost = _gold_reserve.GetBuyTotal(ounces); // the gold and the commission
 	if (cost <= GetUnborrowedLiquidCash(_local_company)) return GoldBuyBlock::Ok;
 	return static_cast<int64_t>(Company::Get(_local_company)->money) >= cost ? GoldBuyBlock::Borrowed : GoldBuyBlock::NoCash;
 }
@@ -127,6 +127,7 @@ void GoldPanel::DrawInfo(const Rect &r) const
 
 	DrawGoldLine(left, right, y, bottom, row_h, "GOLD TRADING PANEL", "", TC_LIGHT_BLUE);
 	DrawGoldLine(left, right, y, bottom, row_h, "Spot price per oz", money(price / 100), TC_GOLD);
+	DrawGoldLine(left, right, y, bottom, row_h, "Buy / sell price per oz", money(_gold_reserve.GetAskCents() / 100) + " / " + money(_gold_reserve.GetBidCents() / 100));
 	DrawGoldLine(left, right, y, bottom, row_h, "Spot price per ton", money(price * GoldReserveManager::OUNCES_PER_TON / 100), TC_GOLD);
 	DrawGoldLine(left, right, y, bottom, row_h, "Gold reserves (all)", money(_gold_reserve.GetReserveValue()) + "  (" + ounces(_gold_reserve.GetTotalReserveOunces()) + ")");
 	DrawGoldLine(left, right, y, bottom, row_h, "Market stock for sale", ounces(_gold_reserve.market_stock_oz));
@@ -138,7 +139,7 @@ void GoldPanel::DrawInfo(const Rect &r) const
 	if (!Company::IsValidID(_local_company)) return;
 	y += ScaleGUITrad(4);
 	const int64_t held = _gold_reserve.GetHoldings(_local_company);
-	DrawGoldLine(left, right, y, bottom, row_h, "Your gold reserve", ounces(held) + "  (" + money(_gold_reserve.GetSellProceeds(held)) + ")");
+	DrawGoldLine(left, right, y, bottom, row_h, "Your gold reserve", ounces(held) + "  (" + money(_gold_reserve.GetSellNet(held)) + ")");
 	DrawGoldLine(left, right, y, bottom, row_h, "Unborrowed liquid cash", money(GetUnborrowedLiquidCash(_local_company)));
 
 	/* The alert: why Buy Gold is switched off. */
@@ -161,7 +162,7 @@ void GoldPanel::DrawQuantity(const Rect &r, bool buy) const
 	const int64_t qty = buy ? this->buy_qty : this->sell_qty;
 	std::string text = fmt::format("{}: {} oz", buy ? "Buy" : "Sell", qty);
 	if (_gold_reserve.GetPriceCents() > 0) {
-		const int64_t value = buy ? _gold_reserve.GetBuyCost(qty) : _gold_reserve.GetSellProceeds(qty);
+		const int64_t value = buy ? _gold_reserve.GetBuyTotal(qty) : _gold_reserve.GetSellNet(qty);
 		text += fmt::format("  ~ {}", GetString(STR_JUST_CURRENCY_LONG, value));
 	}
 	DrawString(left, right, CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL)), text, TC_BLACK, SA_LEFT);

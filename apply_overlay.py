@@ -380,9 +380,32 @@ def patch_graph_window_name(tree):
     print(f"lang: the operating profit graph is now called '{GOLD_WINDOW_NAME}' ({changed} language files)")
 
 
+CARGO_MARKER = "GOLD_CARGO_PATCH"
+
+
+def patch_cargo_delivery(tree):
+    """Gold and valuables that are delivered to a station feed the stock of the gold market: one call at the start of
+    CargoPayment::PayFinalDelivery in economy.cpp (in place, at an anchor; nothing is written when the anchor is missing)."""
+    target = tree / "src" / "economy.cpp"
+    if not target.is_file():
+        sys.exit(f"ERROR: {target} not found in the OpenTTD tree")
+    text, crlf = _read_lf(target)
+    if CARGO_MARKER in text:
+        print("economy.cpp: gold delivery hook already there")
+        return
+    m = re.search(r"^void CargoPayment::PayFinalDelivery\(CargoType cargo, const CargoPacket \*cp, uint count, TileIndex current_tile\)\n\{\n", text, re.M)
+    if not m:
+        sys.exit("ERROR: CargoPayment::PayFinalDelivery not found in economy.cpp (anchor of the gold delivery patch)")
+    text = text[:m.end()] + f"\tGoldFromDelivery(cargo, count); /* {CARGO_MARKER} */\n" + text[m.end():]
+    text = ensure_include(text, '#include "gold_reserve.h" /* GOLD_CARGO_PATCH */', ['#include "central_bank.h"', '#include "stdafx.h"'])
+    _write_like(target, text, crlf)
+    print("economy.cpp: gold delivery hook added")
+
+
 def main(tree):
     patch_graph_files(tree)
     patch_graph_window_name(tree)
+    patch_cargo_delivery(tree)
     patch_console_file(tree)
     for name, folder in FILES.items():
         src = find(name, folder)

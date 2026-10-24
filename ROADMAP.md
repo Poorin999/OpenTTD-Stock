@@ -68,6 +68,10 @@ Source of gold: a world market with a limited stock. It is **not** connected to 
 
 ## 5. Done
 - [x] Cleanup: deleted duplicate/stale files (`src/stock_sl.cpp`, `src/stock_widget.h`, `saveload_and_overlay.patch`, `apply_wallet_fix.py`, root `CMakeLists.txt`, `build/`), added `.gitignore`.
+- [x] Gold in the account statement: `LedgerItem::GoldBuy` / `GoldSell` (appended last, the index is saved) in a new section "Gold Reserve" of both statement windows (shown, not counted in the result of the year); the realised profit of gold goes to `RealizedProfit` (average cost basis: `holdings_cost`, saved in `SRK_GOLD_HOLD` v2; an unknown cost from an old savegame gives no profit); the commission goes to `TradeCommission`. Account log names: Gold buy / Gold sale.
+- [x] Spread and commission for gold: the company buys at spot +0.50% (ask) and sells at spot -0.50% (bid), commission 0.25% on every purchase and sale (`SPREAD_BP`, `COMMISSION_BP` in `gold_reserve.h`; `GetAskCents`, `GetBidCents`, `GetBuyTotal`, `GetSellNet`, `GetMaxBuyOunces`). The buy window shows the ask price and the real fee.
+- [x] Gold from the map: gold and valuables delivered to a station add 10 oz per cargo unit to the market stock (`GoldFromDelivery`, cap = 2 x start stock). Hook: one line at the start of `CargoPayment::PayFinalDelivery` in `economy.cpp`, added by `patch_cargo_delivery` in `apply_overlay.py` (marker `GOLD_CARGO_PATCH`). Only the stock changes, not the reserve of the central bank.
+- [x] Buy gold window: Thai text no longer uses the small font (unreadable), readable colours, the window stays open after a purchase, taller panel (cash rows no longer under the buttons).
 - [x] Central Bank window: the test buttons row no longer leaves a blank gap when `stock_dev` is off (`UpdateSkipRow` in `central_bank_gui.cpp`: plane `SZSP_NONE` + `ReInit`).
 - [x] Buy gold window (`gold_buy_gui.cpp`) as in the design; Buy Gold button opens it. The operating profit graph is renamed Gold Investment Types in all languages. Checked by compiling `gold_buy_gui.cpp`, `gold_panel.cpp`, `graph_gui.cpp` on a real OpenTTD 15.3 tree with the overlay applied (not run in the game).
 - [x] Build fix 6: `graph_gui.cpp` and `graph_widget.h` are no longer copied from a newer OpenTTD. They are patched in place by `patch_graph_files` in `apply_overlay.py`, which reads the base class and colour names from the real 15.3 file. This makes build fixes 3-5 and the `replace/` folder unnecessary (they were all caused by the copy). The compile errors were `Normal`/`Black`/`Brown` illegal qualified name at graph_gui.cpp(82).
@@ -83,14 +87,11 @@ Source of gold: a world market with a limited stock. It is **not** connected to 
 - [x] Build fix: removed the duplicate `src/graph_gui.cpp` and `src/widgets/graph_widget.h` (identical to the files in `replace/`), which made the "Add stock market source files" step fail.
 
 ## 6. Planned (in a sensible order)
-1. **Gold in the account statement**: add `LedgerItem` lines for gold purchases and sales, and a section in both statement windows. Realised profit of gold belongs in "Capital Gains / Realized Profit".
-2. **Spread and commission for gold**: buy a little above, sell a little below the spot price; commission into the ledger (`TradeCommission`).
-3. **Gold from the map (source 3)**: gold or valuables delivered to a station/bank feed the market stock (and the reserve). Needs a hook where cargo is delivered (`economy.cpp`, `CargoPayment`); decide how much of the delivery counts. Keep the start stock so the market works on maps without a gold mine.
-4. **Optional random layer**: daily noise of +-1-3 percent and world news events (war +15% in 3 days, big new mine -20%, central bank rate rise slowly lowers the price). Must use the game's synchronised random (`Random()` / `RandomRange`), never `std::rand`.
-5. **Credit standing with an effect**: for example the tier changes the central bank interest rate or the loan limit.
-6. **Script API**: `ScriptCompany::GetGoldHoldings`, `GetGoldPrice`, so game scripts and AIs can see it (see how `GetCentralBankDebt` was added in `apply_overlay.py`).
-7. **Translations**: the gold panel is English only.
-8. **Gold price chart**: a history of the daily price (needs a saved ring buffer).
+1. **Optional random layer**: daily noise of +-1-3 percent and world news events (war +15% in 3 days, big new mine -20%, central bank rate rise slowly lowers the price). Must use the game's synchronised random (`Random()` / `RandomRange`), never `std::rand`.
+2. **Credit standing with an effect**: for example the tier changes the central bank interest rate or the loan limit.
+3. **Script API**: `ScriptCompany::GetGoldHoldings`, `GetGoldPrice`, so game scripts and AIs can see it (see how `GetCentralBankDebt` was added in `apply_overlay.py`).
+4. **Translations**: the gold panel is English only.
+5. **Gold price chart**: a history of the daily price (needs a saved ring buffer).
 
 ## 6b. Evaluated and NOT done: three real climates in one map
 The owner asked for Temperate + Sub-arctic + Sub-tropical in one map, chosen at world generation. Checked against OpenTTD 15.3 sources (genworld.cpp, genworld_gui.cpp, industry_cmd.cpp, landscape.cpp, tgp.cpp, settings/*.ini):

@@ -186,6 +186,10 @@ static void DrawAccountStatement(const Rect &r, int offset)
 	booked("Inter-Wallet Transfer (cash in / out)", LedgerItem::WalletTransfer);
 	booked("Company Injection: Loans (paid out / repaid)", LedgerItem::BankLoan);
 
+	category("Gold Reserve (exchange of cash for gold, not earnings)");
+	booked("Gold Purchases (bought for the vault)", LedgerItem::GoldBuy);
+	booked("Gold Sales (sold from the vault)", LedgerItem::GoldSell);
+
 	category("Assets & Operations");
 	yearly("Vehicle & Infrastructure Running Costs", {EXPENSES_TRAIN_RUN, EXPENSES_ROADVEH_RUN, EXPENSES_AIRCRAFT_RUN, EXPENSES_SHIP_RUN, EXPENSES_PROPERTY});
 	yearly("Construction & Land Purchase", {EXPENSES_CONSTRUCTION});
@@ -328,6 +332,10 @@ static void DrawArchiveStatement(const Rect &r, int age)
 	/* Moves between wallets and loans are not earnings: they are shown, but not added to the result of the year. */
 	line("Inter-Wallet Transfer (cash in / out)", GetLedgerEntry(_local_company, LedgerItem::WalletTransfer, year), true, false);
 	line("Company Injection: Loans (paid out / repaid)", GetLedgerEntry(_local_company, LedgerItem::BankLoan, year), true, false);
+
+	category("Gold Reserve (exchange of cash for gold, not earnings)");
+	line("Gold Purchases (bought for the vault)", GetLedgerEntry(_local_company, LedgerItem::GoldBuy, year), true, false);
+	line("Gold Sales (sold from the vault)", GetLedgerEntry(_local_company, LedgerItem::GoldSell, year), true, false);
 
 	category("Assets & Operations");
 	yearly("Vehicle & Infrastructure Running Costs", LedgerItem::YearRunning, {EXPENSES_TRAIN_RUN, EXPENSES_ROADVEH_RUN, EXPENSES_AIRCRAFT_RUN, EXPENSES_SHIP_RUN, EXPENSES_PROPERTY});
@@ -541,6 +549,8 @@ struct CentralBankWindow : Window {
 			case LedgerItem::RealizedProfit:  return e.amount >= 0 ? CbText("กำไรปิดสถานะ", "Profit") : CbText("ขาดทุนปิดสถานะ", "Loss");
 			case LedgerItem::WalletTransfer:  return e.amount >= 0 ? CbText("โอนเข้าเงินสด", "To cash") : CbText("โอนไปกระเป๋าเทรด", "To wallet");
 			case LedgerItem::BankLoan:        return e.amount >= 0 ? CbText("กู้เงิน", "Borrow") : CbText("ชำระคืน", "Repay");
+			case LedgerItem::GoldBuy:         return CbText("ซื้อทอง", "Gold buy");
+			case LedgerItem::GoldSell:        return CbText("ขายทอง", "Gold sale");
 			default:                          return "";
 		}
 	}

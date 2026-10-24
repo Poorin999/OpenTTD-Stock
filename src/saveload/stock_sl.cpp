@@ -40,7 +40,7 @@ enum StockRecordKind : uint8_t {
 	SRK_TIMEFRAME_VOL = 21, ///< Traded volume of the SRK_TIMEFRAME row just before it: a = company, v1 = volume. Only written when it is not 0.
 	SRK_LEDGER = 22,  ///< Line of the account statement: a = company, b = line (LedgerItem), ym = economy year, v1 = income, v2 = expense.
 	SRK_GOLD = 24,    ///< Gold market: v1 = price in 1/100 money units, v2 = baseline cash supply, v3 = ounces of the central bank, v4 = demand pressure in ppm, v5 = ounces for sale in the market plus 1 (0 = savegame from before the stock).
-	SRK_GOLD_HOLD = 25, ///< Gold of a company: a = company, v1 = ounces.
+	SRK_GOLD_HOLD = 25, ///< Gold of a company: a = company, v1 = ounces, v2 = what the gold cost (0 = unknown).
 	SRK_BANK = 18,    ///< Loan at the central bank: a = company, v1 = debt, v2 = interest that has been added.
 	SRK_BANK_RISK = 23, ///< Rate and penalty of the loan at the central bank: a = company, v1 = penalty level | in default << 8 | days paid on time << 16, v2 = rest of the daily interest, v3 = annual rate in bp, v4 = number of the game day charged last.
 	SRK_POSITION_EXT = 15, ///< More data of an open position: a = owner, ym = id, v1 = trailing stop distance, v2 = month of opening.
@@ -254,6 +254,7 @@ struct STCKChunkHandler : ChunkHandler {
 			r.kind = SRK_GOLD_HOLD;
 			r.a = i;
 			r.v1 = _gold_reserve.holdings_oz[i];
+			r.v2 = _gold_reserve.holdings_cost[i];
 			write(r);
 		}
 
@@ -526,7 +527,10 @@ struct STCKChunkHandler : ChunkHandler {
 					break;
 
 				case SRK_GOLD_HOLD:
-					if (r.a < MAX_COMPANIES) _gold_reserve.holdings_oz[r.a] = std::max<int64_t>(r.v1, 0);
+					if (r.a < MAX_COMPANIES) {
+						_gold_reserve.holdings_oz[r.a] = std::max<int64_t>(r.v1, 0);
+						_gold_reserve.holdings_cost[r.a] = std::max<int64_t>(r.v2, 0); // v2 = cost of the gold; 0 in older savegames.
+					}
 					break;
 
 				case SRK_LEDGER:

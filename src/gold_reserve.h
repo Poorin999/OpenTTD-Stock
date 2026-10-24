@@ -13,6 +13,7 @@
 #include "command_type.h"
 #include "company_type.h"
 #include "economy_type.h"
+#include "cargo_type.h"
 #include <array>
 #include <cstdint>
 
@@ -38,6 +39,10 @@ struct GoldReserveManager {
 	static constexpr int64_t DEPTH_OUNCES = 20000;          ///< Market depth: buying this many ounces moves the price by +100%.
 	static constexpr int64_t PRESSURE_MAX_PPM = 300000;     ///< The demand effect never moves the price more than 30%.
 	static constexpr int64_t MARKET_STOCK_START = 200000;   ///< Ounces that the market has for sale at the start. Buying takes from it, selling gives back.
+	static constexpr int64_t SPREAD_BP = 50;                ///< The company buys at spot +0.50% (ask) and sells at spot -0.50% (bid).
+	static constexpr int64_t COMMISSION_BP = 25;            ///< Commission of 0.25% of the value of every purchase and every sale.
+	static constexpr int64_t OUNCES_PER_DELIVERED_UNIT = 10; ///< Gold or valuables delivered to a station: one unit of cargo (one bag) adds this many ounces to the market stock.
+	static constexpr int64_t MARKET_STOCK_CAP = 2 * MARKET_STOCK_START; ///< Deliveries never fill the market stock above this.
 	static constexpr int64_t SCARCITY_FLOOR_DIV = 4;        ///< The scarcity factor stops growing when the stock is 1/4 of the start stock (price x4).
 
 
@@ -47,6 +52,7 @@ struct GoldReserveManager {
 	int64_t market_stock_oz = 0;  ///< Ounces that the market still has for sale. Less stock = a dearer price (scarcity).
 	int64_t pressure_ppm = 0;     ///< Demand effect of the buying and selling of the companies; fades by 3% a day.
 	std::array<int64_t, MAX_COMPANIES> holdings_oz{}; ///< Ounces of every company.
+	std::array<int64_t, MAX_COMPANIES> holdings_cost{}; ///< What the gold of every company cost (money units, without commission): the base of the realised profit. 0 = unknown (old savegame).
 
 	void Reset();
 	void UpdateDaily();
@@ -58,14 +64,23 @@ struct GoldReserveManager {
 	int64_t GetCirculatingCash() const;
 	int64_t GetBackingBp() const;
 	CreditTier GetCreditTier() const;
+	int64_t GetAskCents() const;
+	int64_t GetBidCents() const;
 	int64_t GetBuyCost(int64_t ounces) const;
+	static int64_t GetCommission(int64_t value);
+	int64_t GetBuyTotal(int64_t ounces) const;
+	int64_t GetMaxBuyOunces(int64_t cash) const;
 	int64_t GetSellProceeds(int64_t ounces) const;
+	int64_t GetSellNet(int64_t ounces) const;
 	bool EnsureStarted();
 };
 
 extern GoldReserveManager _gold_reserve;
 
 const char *GetCreditTierName(CreditTier tier);
+
+/** Gold (and valuables) delivered to a station feeds the stock of the gold market. Called from CargoPayment::PayFinalDelivery (economy.cpp). */
+void GoldFromDelivery(CargoType cargo, uint count);
 
 CommandCost CmdGoldBuy(DoCommandFlags flags, uint32_t ounces);
 CommandCost CmdGoldSell(DoCommandFlags flags, uint32_t ounces);

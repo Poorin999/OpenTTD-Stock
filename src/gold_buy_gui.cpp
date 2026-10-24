@@ -167,8 +167,7 @@ struct GoldBuyWindow : Window {
 	{
 		const int64_t price = _gold_reserve.GetPriceCents();
 		if (!Company::IsValidID(_local_company) || price <= 0) return 0;
-		/* The cost is rounded up, so n ounces cost at most the cash when n * price <= cash * 100. */
-		const int64_t by_cash = UsableCash() * 100 / price;
+		const int64_t by_cash = _gold_reserve.GetMaxBuyOunces(UsableCash());
 		return std::max<int64_t>(0, std::min({by_cash, _gold_reserve.market_stock_oz, GB_MAX_ORDER_OZ}));
 	}
 
@@ -194,7 +193,7 @@ struct GoldBuyWindow : Window {
 
 	int64_t TotalCents() const
 	{
-		return _gold_reserve.GetBuyCost(this->qty) * 100;
+		return _gold_reserve.GetBuyTotal(this->qty) * 100;
 	}
 
 	Rect PanelRect() const
@@ -228,7 +227,7 @@ struct GoldBuyWindow : Window {
 		auto at = [&](const Rect &rect) { return GbOffset(rect, dx, dy); };
 
 		const PixelColour paper = GetColourGradient(COLOUR_BROWN, SHADE_LIGHTER);
-		const PixelColour paper_dark = GetColourGradient(COLOUR_BROWN, SHADE_NORMAL);
+		const PixelColour paper_dark = GetColourGradient(COLOUR_BROWN, SHADE_LIGHTEST);
 		const PixelColour ink_box = GetColourGradient(COLOUR_BROWN, SHADE_DARKER);
 		const PixelColour ink_bar = GetColourGradient(COLOUR_BROWN, SHADE_DARKEST);
 		GfxFillRect(r.left, r.top, r.right, r.bottom, paper);
@@ -239,16 +238,17 @@ struct GoldBuyWindow : Window {
 		const int64_t max_oz = MaxOunces();
 		const int64_t cash = UsableCash();
 		const int64_t total = market_open ? this->TotalCents() : 0;
+		const int64_t value_cents = market_open ? _gold_reserve.GetBuyCost(this->qty) * 100 : 0;
+		const int64_t fee_cents = market_open ? total - value_cents : 0;
 		const int h_norm = GetCharacterHeight(FS_NORMAL);
-		const int h_small = GetCharacterHeight(FS_SMALL);
-		const int h_large = GetCharacterHeight(FS_LARGE);
+			const int h_large = GetCharacterHeight(FS_LARGE);
 		const int pad = ScaleGUITrad(10);
 
 		/* Heading and subtitle. */
 		{
 			const Rect hd = at(l.heading);
 			DrawString(hd.left, hd.right, hd.top, GbText("ซื้อทองเข้าคลัง", "Buy gold for the vault"), TC_BLACK, SA_LEFT, false, FS_LARGE);
-			DrawString(hd.left, hd.right, hd.top + h_large + ScaleGUITrad(4), GbText("ทองคำแท่ง · หน่วยซื้อขายเป็นออนซ์ (oz)", "Gold bars · traded in ounces (oz)"), TC_BROWN, SA_LEFT, false, FS_SMALL);
+			DrawString(hd.left, hd.right, hd.top + h_large + ScaleGUITrad(4), GbText("ทองคำแท่ง · หน่วยซื้อขายเป็นออนซ์ (oz)", "Gold bars · traded in ounces (oz)"), TC_BLACK, SA_LEFT, false, FS_NORMAL);
 		}
 
 		/* The GOLD badge: opens the gold window (the Gold Investment Types window). */
@@ -256,7 +256,7 @@ struct GoldBuyWindow : Window {
 			const Rect b = at(l.badge);
 			DrawFrameRect(b.left, b.top, b.right, b.bottom, COLOUR_YELLOW, {});
 			DrawString(b.left + ScaleGUITrad(8), b.right - ScaleGUITrad(8), b.top + ScaleGUITrad(4), "GOLD", TC_BLACK, SA_LEFT, false, FS_LARGE);
-			DrawString(b.left + ScaleGUITrad(8), b.right - ScaleGUITrad(4), b.bottom - h_small - ScaleGUITrad(5), GbText("ดูกราฟราคาทอง", "View gold price"), TC_BLACK, SA_LEFT, false, FS_SMALL);
+			DrawString(b.left + ScaleGUITrad(8), b.right - ScaleGUITrad(4), b.bottom - h_norm - ScaleGUITrad(4), GbText("ดูกราฟราคาทอง", "View gold price"), TC_BLACK, SA_LEFT, false, FS_NORMAL);
 		}
 
 		/* The price box. */
@@ -265,8 +265,8 @@ struct GoldBuyWindow : Window {
 			GfxFillRect(pb.left, pb.top, pb.right, pb.bottom, ink_box);
 			const int left = pb.left + pad;
 			const int right = pb.right - pad;
-			DrawString(left, right, pb.top + ScaleGUITrad(5), GbText("ราคาซื้อต่อออนซ์", "Buy price per ounce"), TC_SILVER, SA_LEFT, false, FS_SMALL);
-			const std::string price_text = market_open ? GbMoney(price) : std::string("-");
+			DrawString(left, right, pb.top + ScaleGUITrad(5), GbText("ราคาซื้อต่อออนซ์", "Buy price per ounce"), TC_SILVER, SA_LEFT, false, FS_NORMAL);
+			const std::string price_text = market_open ? GbMoney(_gold_reserve.GetAskCents()) : std::string("-");
 			const int price_y = pb.bottom - h_large - ScaleGUITrad(5);
 			DrawString(left, right, price_y, price_text, TC_GOLD, SA_LEFT, false, FS_LARGE);
 			const int unit_x = left + GetStringBoundingBox(price_text, FS_LARGE).width + ScaleGUITrad(6);
@@ -290,7 +290,7 @@ struct GoldBuyWindow : Window {
 			const Rect ql = at(l.qty_label);
 			DrawString(ql.left, ql.right, ql.top, GbText("จำนวนที่ต้องการซื้อ", "Ounces to buy"), TC_BLACK, SA_LEFT, false, FS_NORMAL);
 			const std::string most = GbText("ซื้อได้สูงสุด ", "Most you can buy ") + fmt::format("{} oz", max_oz);
-			DrawString(ql.left, ql.right, ql.top + (h_norm - h_small), most, TC_BROWN, SA_RIGHT, false, FS_SMALL);
+			DrawString(ql.left, ql.right, ql.top + 0, most, TC_BLACK, SA_RIGHT, false, FS_NORMAL);
 		}
 
 		/* The quantity row. */
@@ -304,11 +304,11 @@ struct GoldBuyWindow : Window {
 			const int fr = f.right - ScaleGUITrad(6);
 			const std::string unit = " oz";
 			const int unit_w = GetStringBoundingBox(unit, FS_NORMAL).width;
-			DrawString(fr - unit_w, fr, CentreBounds(f.top, f.bottom, h_norm), unit, TC_BROWN, SA_RIGHT, false, FS_NORMAL);
+			DrawString(fr - unit_w, fr, CentreBounds(f.top, f.bottom, h_norm), unit, TC_BLACK, SA_RIGHT, false, FS_NORMAL);
 			DrawString(fl, fr - unit_w - ScaleGUITrad(2), CentreBounds(f.top, f.bottom, h_large), fmt::format("{}", this->qty), TC_BLACK, SA_RIGHT, false, FS_LARGE);
 		}
 		for (int i = 0; i < 3; i++) {
-			DrawButton(at(l.quick[i]), COLOUR_BROWN, fmt::format("{} oz", GB_QUICK_OUNCES[i]), this->qty == GB_QUICK_OUNCES[i], max_oz >= 1, FS_SMALL);
+			DrawButton(at(l.quick[i]), COLOUR_BROWN, fmt::format("{} oz", GB_QUICK_OUNCES[i]), this->qty == GB_QUICK_OUNCES[i], max_oz >= 1, FS_NORMAL);
 		}
 
 		/* The summary box. */
@@ -320,11 +320,11 @@ struct GoldBuyWindow : Window {
 			const int right = sb.right - pad;
 			const int row = ScaleGUITrad(17);
 			int y = sb.top + ScaleGUITrad(6);
-			DrawString(left, right, y, GbText("มูลค่าทองคำ ", "Value of ") + fmt::format("{} oz", this->qty), TC_BROWN, SA_LEFT);
-			DrawString(left, right, y, market_open ? GbMoney(total) : std::string("-"), TC_BLACK, SA_RIGHT);
+			DrawString(left, right, y, GbText("มูลค่าทองคำ ", "Value of ") + fmt::format("{} oz", this->qty), TC_BLACK, SA_LEFT);
+			DrawString(left, right, y, market_open ? GbMoney(value_cents) : std::string("-"), TC_BLACK, SA_RIGHT);
 			y += row;
-			DrawString(left, right, y, GbText("ค่าธรรมเนียม", "Fee"), TC_BROWN, SA_LEFT);
-			DrawString(left, right, y, GbMoney(0), TC_BLACK, SA_RIGHT);
+			DrawString(left, right, y, GbText("ค่าธรรมเนียม", "Fee"), TC_BLACK, SA_LEFT);
+			DrawString(left, right, y, GbMoney(fee_cents), TC_BLACK, SA_RIGHT);
 			y += row;
 			GfxDrawLine(left, y, right, y, ink_bar);
 			y += ScaleGUITrad(5);
@@ -337,11 +337,11 @@ struct GoldBuyWindow : Window {
 			const Rect cr = at(l.cash_rows);
 			int y = cr.top;
 			const int row = ScaleGUITrad(17);
-			DrawString(cr.left, cr.right, y, GbText("เงินสดที่ใช้ได้", "Usable cash"), TC_BROWN, SA_LEFT);
+			DrawString(cr.left, cr.right, y, GbText("เงินสดที่ใช้ได้", "Usable cash"), TC_BLACK, SA_LEFT);
 			DrawString(cr.left, cr.right, y, GbMoney(cash * 100), TC_BLACK, SA_RIGHT);
 			y += row;
 			const int64_t after = cash * 100 - total;
-			DrawString(cr.left, cr.right, y, GbText("เงินคงเหลือหลังซื้อ", "Cash left after buying"), TC_BROWN, SA_LEFT);
+			DrawString(cr.left, cr.right, y, GbText("เงินคงเหลือหลังซื้อ", "Cash left after buying"), TC_BLACK, SA_LEFT);
 			DrawString(cr.left, cr.right, y, GbMoney(after), after < 0 ? TC_RED : TC_BLACK, SA_RIGHT);
 		}
 
@@ -355,10 +355,10 @@ struct GoldBuyWindow : Window {
 			GfxFillRect(fb.left, fb.top, fb.right, fb.bottom, ink_bar);
 			const int left = fb.left + ScaleGUITrad(8);
 			const int right = fb.right - ScaleGUITrad(8);
-			const int y = CentreBounds(fb.top, fb.bottom, h_small);
+			const int y = CentreBounds(fb.top, fb.bottom, h_norm);
 			const std::string date = GetString(STR_JUST_DATE_LONG, TimerGameCalendar::date);
-			const int date_w = GetStringBoundingBox(date, FS_SMALL).width;
-			DrawString(right - date_w, right, y, date, TC_SILVER, SA_RIGHT, false, FS_SMALL);
+			const int date_w = GetStringBoundingBox(date, FS_NORMAL).width;
+			DrawString(right - date_w, right, y, date, TC_SILVER, SA_RIGHT, false, FS_NORMAL);
 
 			std::string note = GbText("ทองที่ซื้อจะถูกเพิ่มเข้าคลังบริษัททันที", "The gold is added to the company vault at once");
 			TextColour note_colour = TC_SILVER;
@@ -369,7 +369,7 @@ struct GoldBuyWindow : Window {
 				default: break;
 			}
 			const int note_right = right - date_w - ScaleGUITrad(8);
-			if (note_right > left) DrawString(left, note_right, y, note, note_colour, SA_LEFT, false, FS_SMALL);
+			if (note_right > left) DrawString(left, note_right, y, note, note_colour, SA_LEFT, false, FS_NORMAL);
 		}
 	}
 
@@ -405,7 +405,7 @@ struct GoldBuyWindow : Window {
 			/* Check again: a click can arrive in the same frame as a change of the cash or of the price. */
 			if (this->CanConfirm()) {
 				Command<CMD_GOLD_BUY>::Post(STR_GOLD_ERROR_CANT_BUY, static_cast<uint32_t>(this->qty));
-				this->Close();
+				this->SetDirty(); // The window stays open: the cash and the stock change, and the player can buy again.
 			}
 		} else {
 			for (int i = 0; i < 3; i++) {
@@ -429,7 +429,7 @@ static constexpr std::initializer_list<NWidgetPart> _nested_gold_buy_widgets = {
 		NWidget(WWT_CAPTION, COLOUR_BROWN, WID_GB_CAPTION), SetStringTip(STR_GOLD_BUY_CAPTION, STR_TOOLTIP_WINDOW_TITLE_DRAG_THIS),
 		NWidget(WWT_STICKYBOX, COLOUR_BROWN),
 	EndContainer(),
-	NWidget(WWT_PANEL, COLOUR_BROWN, WID_GB_PANEL), SetMinimalSize(430, 336), SetFill(1, 1),
+	NWidget(WWT_PANEL, COLOUR_BROWN, WID_GB_PANEL), SetMinimalSize(430, 376), SetFill(1, 1),
 	EndContainer(),
 };
 

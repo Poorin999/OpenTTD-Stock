@@ -249,6 +249,8 @@ enum class LedgerItem : uint8_t {
 	YearRunning,     ///< Running costs of vehicles and property.
 	YearConstruction,///< Construction and land purchase.
 	YearNewVehicles, ///< Purchases of new vehicles.
+	GoldBuy,         ///< Gold bought for the vault (expense): an exchange of cash for an asset, shown but not counted as a cost. Appended last: the index is saved.
+	GoldSell,        ///< Gold sold from the vault (income): shown, not counted as earnings (the profit is on RealizedProfit).
 	End,
 };
 static constexpr size_t LEDGER_ITEMS = static_cast<size_t>(LedgerItem::End);
