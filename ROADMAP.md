@@ -68,6 +68,7 @@ Source of gold: a world market with a limited stock. It is **not** connected to 
 
 ## 5. Done
 - [x] Cleanup: deleted duplicate/stale files (`src/stock_sl.cpp`, `src/stock_widget.h`, `saveload_and_overlay.patch`, `apply_wallet_fix.py`, root `CMakeLists.txt`, `build/`), added `.gitignore`.
+- [x] Central Bank window: the test buttons row no longer leaves a blank gap when `stock_dev` is off (`UpdateSkipRow` in `central_bank_gui.cpp`: plane `SZSP_NONE` + `ReInit`).
 - [x] Buy gold window (`gold_buy_gui.cpp`) as in the design; Buy Gold button opens it. The operating profit graph is renamed Gold Investment Types in all languages. Checked by compiling `gold_buy_gui.cpp`, `gold_panel.cpp`, `graph_gui.cpp` on a real OpenTTD 15.3 tree with the overlay applied (not run in the game).
 - [x] Build fix 6: `graph_gui.cpp` and `graph_widget.h` are no longer copied from a newer OpenTTD. They are patched in place by `patch_graph_files` in `apply_overlay.py`, which reads the base class and colour names from the real 15.3 file. This makes build fixes 3-5 and the `replace/` folder unnecessary (they were all caused by the copy). The compile errors were `Normal`/`Black`/`Brown` illegal qualified name at graph_gui.cpp(82).
 - [x] Build fix 5: `replace/src/graph_gui.cpp` line 24 was an empty `#include` (C2006/C1083 at graph_gui.cpp(24)); now `#include "currency.h"`. Rule: never write `<...>` includes in chat-copied text without checking the line is not empty.
