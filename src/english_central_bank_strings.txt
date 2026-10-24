@@ -18,3 +18,6 @@ STR_CENTRAL_BANK_SKIP_7D                                        :+7 days
 STR_CENTRAL_BANK_SKIP_30D                                       :+30 days
 STR_CENTRAL_BANK_SKIP_90D                                       :+90 days
 STR_CENTRAL_BANK_TIP_SKIP                                       :{BLACK}Test tool: move the game clock forward. Interest, retail investors, candles, gold price and quarters all run as if the time had passed. Single player only
+STR_CENTRAL_BANK_POLICY                                         :นโยบายการเงิน (Monetary policy)
+STR_CENTRAL_BANK_TIP_POLICY                                     :{BLACK}Open the monetary policy in its own window: price index, inflation against the target, the shift of the interest rates and when the bank decides next
+STR_CENTRAL_BANK_POLICY_CAPTION                                 :นโยบายการเงิน (MONETARY POLICY)

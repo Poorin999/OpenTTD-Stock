@@ -13,5 +13,6 @@
 void ShowCentralBankWindow();
 void ShowCentralBankStatementWindow();
 void ShowCentralBankArchiveWindow();
+void ShowCentralBankPolicyWindow();
 
 #endif /* CENTRAL_BANK_GUI_H */

@@ -39,32 +39,6 @@
 #include "safeguards.h"
 
 /**
- * Look of the trading terminal (TradingView style): near-black panels, thin dim lines, quiet grey captions, one blue accent.
- * Drawing only: nothing here is read by the game. All colours are palette entries (GREY_SCALE levels), so they work in 8bpp and 32bpp.
- */
-namespace StockTheme {
-	static constexpr uint8_t PANEL = 1;    ///< Background of every panel.
-	static constexpr uint8_t SELECTED = 3; ///< Background of the selected row.
-	static constexpr uint8_t ROW_LINE = 2; ///< Thin line between two rows.
-	static constexpr uint8_t RULE = 3;     ///< Line under a column header and between panes.
-	static constexpr uint8_t GRID = 2;     ///< Grid lines of the chart, quieter than the rules.
-	static constexpr uint8_t TICK = 8;     ///< Ticks of the time axis.
-}
-
-/** Fill a panel with the terminal background, inside the frame that the widget has already drawn. */
-static void FillTerminalPanel(const Rect &r)
-{
-	GfxFillRect(r.left + 1, r.top + 1, r.right - 1, r.bottom - 1, GREY_SCALE(StockTheme::PANEL));
-}
-
-/** The row that is selected: a lighter background and a blue bar at the left edge. */
-static void DrawSelectedRowMark(const Rect &r, int y, int row_h)
-{
-	GfxFillRect(r.left + 1, y - 1, r.right - 1, y + row_h - 2, GREY_SCALE(StockTheme::SELECTED));
-	GfxFillRect(r.left + 1, y - 1, r.left + 1 + std::max(1, ScaleGUITrad(2)), y + row_h - 2, PC_LIGHT_BLUE);
-}
-
-/**
  * Widget number of the Close All button. It has this name in this file; the number is defined in widgets/stock_widget.h,
  * together with the wallet widgets that follow it.
  */
@@ -781,7 +755,8 @@ struct StockWindow : Window {
 				if (!Company::IsValidID(_local_company)) break;
 				DropDownList list;
 				for (uint8_t id : _wallets.GetIds(_local_company)) {
-					list.push_back(MakeDropDownListStringItem(GetString(STR_STOCK_WALLET, GetWalletName(_local_company, id), GetWalletBalance(_local_company, id)), id));
+					/* No colour code in this string: the list picks black text, and white text on the highlighted row. {BLACK} would stay black on the black highlight. */
+					list.push_back(MakeDropDownListStringItem(GetString(STR_STOCK_WALLET_ITEM, GetWalletName(_local_company, id), GetWalletBalance(_local_company, id)), id));
 				}
 				if (list.empty()) break;
 				ShowDropDownList(this, std::move(list), GetStockActiveWallet(), WID_ST_WALLET_DROPDOWN, 0);
@@ -935,18 +910,6 @@ struct StockWindow : Window {
 	void DrawWidget(const Rect &r, WidgetID widget) const override
 	{
 		switch (widget) {
-			case WID_ST_ACCOUNT:
-			case WID_ST_PNL:
-			case WID_ST_RISK:
-			case WID_ST_WATCH:
-			case WID_ST_TITLE:
-			case WID_ST_SUMMARY:
-			case WID_ST_TOOLBOX:
-				FillTerminalPanel(r);
-				break;
-			default: break;
-		}
-		switch (widget) {
 			case WID_ST_ACCOUNT: this->DrawAccount(r); break;
 			case WID_ST_PNL: this->DrawPnl(r); break;
 			case WID_ST_RISK: this->DrawRisk(r); break;
@@ -1004,10 +967,10 @@ struct StockWindow : Window {
 	/** Draw a caption and a money value that is green for a profit and red for a loss. @return The x position after the text. */
 	static int DrawSignedMoney(int x, int right, int top, const std::string &caption, int64_t value)
 	{
-		DrawString(x, right, top, caption, TC_GREY, SA_LEFT);
+		DrawString(x, right, top, caption, TC_BLACK, SA_LEFT);
 		x += GetStringBoundingBox(caption).width;
 		const std::string money = GetString(STR_JUST_CURRENCY_LONG, value);
-		DrawString(x, right, top, money, value < 0 ? TC_RED : (value > 0 ? TC_GREEN : TC_WHITE), SA_LEFT);
+		DrawString(x, right, top, money, value < 0 ? TC_RED : (value > 0 ? TC_GREEN : TC_BLACK), SA_LEFT);
 		return x + GetStringBoundingBox(money).width;
 	}
 
@@ -1032,7 +995,7 @@ struct StockWindow : Window {
 		const int top = CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL));
 		const StockRisk risk = GetStockRisk(_local_company, wallet);
 		if (risk.level == StockRiskLevel::None) {
-			DrawString(r.left + ScaleGUITrad(4), r.right - 4, top, std::string("Margin Usage: 0.0%"), TC_GREY, SA_LEFT);
+			DrawString(r.left + ScaleGUITrad(4), r.right - 4, top, std::string("Margin Usage: 0.0%"), TC_BLACK, SA_LEFT);
 			return;
 		}
 		const TextColour colour = risk.level == StockRiskLevel::Safe ? TC_GREEN : TC_RED;
@@ -1053,11 +1016,11 @@ struct StockWindow : Window {
 		const int left = r.left + ScaleGUITrad(4);
 
 		int y = r.top + ScaleGUITrad(2);
-		DrawString(left, bid_right - ScaleGUITrad(74), y, STR_STOCK_COL_SYMBOL, TC_GREY, SA_LEFT);
-		DrawString(bid_right - ScaleGUITrad(70), bid_right, y, STR_STOCK_COL_BID, TC_GREY, SA_RIGHT);
-		DrawString(ask_right - ScaleGUITrad(70), ask_right, y, STR_STOCK_COL_ASK, TC_GREY, SA_RIGHT);
+		DrawString(left, bid_right - ScaleGUITrad(74), y, STR_STOCK_COL_SYMBOL, TC_BLACK, SA_LEFT);
+		DrawString(bid_right - ScaleGUITrad(70), bid_right, y, STR_STOCK_COL_BID, TC_BLACK, SA_RIGHT);
+		DrawString(ask_right - ScaleGUITrad(70), ask_right, y, STR_STOCK_COL_ASK, TC_BLACK, SA_RIGHT);
 		y = r.top + this->HeaderHeight();
-		GfxDrawLine(r.left + 1, y - 2, r.right - 1, y - 2, GREY_SCALE(StockTheme::RULE));
+		GfxDrawLine(r.left + 1, y - 2, r.right - 1, y - 2, GREY_SCALE(4));
 
 		/* Companies that have been scrolled out of the top of the list are skipped. */
 		const size_t first = this->watch_scroll->GetPosition();
@@ -1065,15 +1028,11 @@ struct StockWindow : Window {
 		for (const Company *c : Company::Iterate()) {
 			if (n++ < first) continue;
 			if (y + row_h > r.bottom) break;
-			if (c->index == this->selected) {
-				DrawSelectedRowMark(r, y, row_h);
-			} else {
-				GfxDrawLine(r.left + 1, y + row_h - 2, r.right - 1, y + row_h - 2, GREY_SCALE(StockTheme::ROW_LINE));
-			}
+			if (c->index == this->selected) GfxFillRect(r.left + 1, y - 1, r.right - 1, y + row_h - 2, GREY_SCALE(4));
 
 			DrawString(left, bid_right - ScaleGUITrad(74), y, GetString(STR_STOCK_SYMBOL, c->index), TC_WHITE, SA_LEFT);
-			DrawString(bid_right - ScaleGUITrad(70), bid_right, y, GetString(STR_JUST_CURRENCY_SHORT, GetStockBid(c->index)), TC_WHITE, SA_RIGHT);
-			DrawString(ask_right - ScaleGUITrad(70), ask_right, y, GetString(STR_JUST_CURRENCY_SHORT, GetStockAsk(c->index)), TC_SILVER, SA_RIGHT);
+			DrawString(bid_right - ScaleGUITrad(70), bid_right, y, GetString(STR_JUST_CURRENCY_SHORT, GetStockBid(c->index)), TC_LIGHT_BLUE, SA_RIGHT);
+			DrawString(ask_right - ScaleGUITrad(70), ask_right, y, GetString(STR_JUST_CURRENCY_SHORT, GetStockAsk(c->index)), TC_LIGHT_BLUE, SA_RIGHT);
 			y += row_h;
 		}
 	}
@@ -1159,12 +1118,7 @@ struct StockWindow : Window {
 		GfxFillRect(left, top, right, bottom, GREY_SCALE(1));
 		if (vol_height > 0) GfxFillRect(left, vol_top, right, vol_bottom, GREY_SCALE(1));
 		if (rsi_height > 0) GfxFillRect(left, full_bottom - rsi_height, right, full_bottom, GREY_SCALE(1));
-		GfxDrawLine(right, r.top + 1, right, r.bottom - 1, GREY_SCALE(StockTheme::RULE)); // Line between the chart and the price axis.
-		if (panes) {
-			/* Thin rules between the price, volume and RSI panes. */
-			GfxDrawLine(r.left + 1, bottom + gap / 2, r.right - 1, bottom + gap / 2, GREY_SCALE(StockTheme::RULE));
-			GfxDrawLine(r.left + 1, vol_bottom + gap / 2, r.right - 1, vol_bottom + gap / 2, GREY_SCALE(StockTheme::RULE));
-		}
+		GfxDrawLine(right, r.top + 1, right, r.bottom - 1, GREY_SCALE(3)); // Line between the chart and the price axis.
 
 		if (candles.empty()) {
 			DrawString(left + 4, right - 4, top + 4, STR_STOCK_FRAME_WAIT, TC_WHITE, SA_LEFT);
@@ -1239,8 +1193,8 @@ struct StockWindow : Window {
 		for (int i = 0; i <= 4; i++) {
 			const int64_t value = lo + (hi - lo) * i / 4;
 			const int y = to_y(value);
-			GfxDrawLine(left, y, right, y, GREY_SCALE(StockTheme::GRID));
-			DrawString(right + ScaleGUITrad(6), r.right - 2, y - small_height / 2, GetString(STR_JUST_CURRENCY_SHORT, value), TC_SILVER, SA_LEFT, false, FS_SMALL);
+			GfxDrawLine(left, y, right, y, GREY_SCALE(3));
+			DrawString(right + ScaleGUITrad(6), r.right - 2, y - small_height / 2, GetString(STR_JUST_CURRENCY_SHORT, value), TC_WHITE, SA_LEFT, false, FS_SMALL);
 		}
 
 		/* Texts under the chart for the candle with the number ym (the candles of the future have numbers too: they go on counting). */
@@ -1308,8 +1262,8 @@ struct StockWindow : Window {
 		auto draw_label = [&](int cx, const std::string &label) {
 			if (label.empty() || cx - last_label_x < ScaleGUITrad(44)) return;
 			last_label_x = cx;
-			GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(3), GREY_SCALE(StockTheme::TICK));
-			DrawString(cx - ScaleGUITrad(20), cx + ScaleGUITrad(20), full_bottom + ScaleGUITrad(3), label, TC_SILVER, SA_HOR_CENTER, false, FS_SMALL);
+			GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(3), PC_WHITE);
+			DrawString(cx - ScaleGUITrad(20), cx + ScaleGUITrad(20), full_bottom + ScaleGUITrad(3), label, TC_WHITE, SA_HOR_CENTER, false, FS_SMALL);
 		};
 		for (int i = 0; i < count; i++) {
 			const StockCandle &c = candles[first + i];
@@ -1324,7 +1278,7 @@ struct StockWindow : Window {
 			if (body_bottom >= top && body_top <= bottom) GfxFillRect(cx - candle_half, std::clamp(body_top, top, bottom), cx + candle_half, std::clamp(body_bottom, top, bottom), colour);
 
 			/* One small tick for every candle. */
-			GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(2), GREY_SCALE(StockTheme::TICK));
+			GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(2), PC_WHITE);
 
 			/* Labels in game time. Each label is wider than one candle, so only some candles get one: every 30 minutes on the 5m chart,
 			 * every 6 hours on the 1h chart (the time, or the day at midnight), every day on the 4h chart, every 4 days on the 12h chart,
@@ -1337,7 +1291,7 @@ struct StockWindow : Window {
 			const int64_t newest_ym = candles[last - 1].ym;
 			for (int k = 0; k < static_cast<int>(future); k++) {
 				const int cx = x0 + (count + k) * slot + slot / 2;
-				GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(2), GREY_SCALE(StockTheme::TICK));
+				GfxDrawLine(cx, full_bottom, cx, full_bottom + ScaleGUITrad(2), PC_WHITE);
 				draw_label(cx, candle_label(newest_ym + 1 + k));
 			}
 		}
@@ -1441,8 +1395,8 @@ struct StockWindow : Window {
 
 			for (const int level : {30, 70}) {
 				const int y = rsi_y(level);
-				GfxDrawLine(left, y, right, y, GREY_SCALE(StockTheme::GRID));
-				DrawString(right + ScaleGUITrad(6), r.right - 2, y - small_height / 2, GetString(STR_JUST_INT, level), TC_SILVER, SA_LEFT, false, FS_SMALL);
+				GfxDrawLine(left, y, right, y, GREY_SCALE(3));
+				DrawString(right + ScaleGUITrad(6), r.right - 2, y - small_height / 2, GetString(STR_JUST_INT, level), TC_WHITE, SA_LEFT, false, FS_SMALL);
 			}
 
 			int prev_rx = 0;
@@ -1524,17 +1478,17 @@ struct StockWindow : Window {
 		const int c_profit = r.left + ScaleGUITrad(680);
 
 		int y = r.top + ScaleGUITrad(2);
-		DrawString(c_id, c_symbol, y, STR_STOCK_COL_ID, TC_GREY, SA_LEFT);
-		DrawString(c_symbol, c_type, y, STR_STOCK_COL_SYMBOL, TC_GREY, SA_LEFT);
-		DrawString(c_type, c_volume - ScaleGUITrad(60), y, STR_STOCK_COL_TYPE, TC_GREY, SA_LEFT);
-		DrawString(c_volume - ScaleGUITrad(60), c_volume, y, STR_STOCK_COL_VOLUME, TC_GREY, SA_RIGHT);
-		DrawString(c_volume, c_open, y, STR_STOCK_COL_OPEN, TC_GREY, SA_RIGHT);
-		DrawString(c_open, c_close, y, STR_STOCK_COL_CLOSE_PRICE, TC_GREY, SA_RIGHT);
-		DrawString(c_close, c_opened, y, std::string("Opened"), TC_GREY, SA_RIGHT);
-		DrawString(c_opened, c_date, y, STR_STOCK_COL_CLOSED, TC_GREY, SA_RIGHT);
-		DrawString(c_date, c_reason, y, STR_STOCK_COL_REASON, TC_GREY, SA_RIGHT);
-		DrawString(c_reason, c_profit, y, STR_STOCK_COL_PROFIT, TC_GREY, SA_RIGHT);
-		GfxDrawLine(r.left + 1, r.top + header_h - 2, r.right - 1, r.top + header_h - 2, GREY_SCALE(StockTheme::RULE));
+		DrawString(c_id, c_symbol, y, STR_STOCK_COL_ID, TC_BLACK, SA_LEFT);
+		DrawString(c_symbol, c_type, y, STR_STOCK_COL_SYMBOL, TC_BLACK, SA_LEFT);
+		DrawString(c_type, c_volume - ScaleGUITrad(60), y, STR_STOCK_COL_TYPE, TC_BLACK, SA_LEFT);
+		DrawString(c_volume - ScaleGUITrad(60), c_volume, y, STR_STOCK_COL_VOLUME, TC_BLACK, SA_RIGHT);
+		DrawString(c_volume, c_open, y, STR_STOCK_COL_OPEN, TC_BLACK, SA_RIGHT);
+		DrawString(c_open, c_close, y, STR_STOCK_COL_CLOSE_PRICE, TC_BLACK, SA_RIGHT);
+		DrawString(c_close, c_opened, y, std::string("Opened"), TC_BLACK, SA_RIGHT);
+		DrawString(c_opened, c_date, y, STR_STOCK_COL_CLOSED, TC_BLACK, SA_RIGHT);
+		DrawString(c_date, c_reason, y, STR_STOCK_COL_REASON, TC_BLACK, SA_RIGHT);
+		DrawString(c_reason, c_profit, y, STR_STOCK_COL_PROFIT, TC_BLACK, SA_RIGHT);
+		GfxDrawLine(r.left + 1, r.top + header_h - 2, r.right - 1, r.top + header_h - 2, GREY_SCALE(4));
 
 		const std::vector<const StockClosedTrade *> rows = this->GetHistoryRows();
 		if (rows.empty()) {
@@ -1602,11 +1556,11 @@ struct StockWindow : Window {
 		const int c_rate = r.left + ScaleGUITrad(300);
 		const int c_profit = r.left + ScaleGUITrad(440);
 		const int c_total = r.left + ScaleGUITrad(580);
-		DrawString(c_month, c_trades, y, std::string("Month"), TC_GREY, SA_LEFT);
-		DrawString(c_month, c_trades, y, std::string("Trades"), TC_GREY, SA_RIGHT);
-		DrawString(c_trades, c_rate, y, std::string("Win rate"), TC_GREY, SA_RIGHT);
-		DrawString(c_rate, c_profit, y, std::string("Profit"), TC_GREY, SA_RIGHT);
-		DrawString(c_profit, c_total, y, std::string("Cumulative"), TC_GREY, SA_RIGHT);
+		DrawString(c_month, c_trades, y, std::string("Month"), TC_BLACK, SA_LEFT);
+		DrawString(c_month, c_trades, y, std::string("Trades"), TC_BLACK, SA_RIGHT);
+		DrawString(c_trades, c_rate, y, std::string("Win rate"), TC_BLACK, SA_RIGHT);
+		DrawString(c_rate, c_profit, y, std::string("Profit"), TC_BLACK, SA_RIGHT);
+		DrawString(c_profit, c_total, y, std::string("Cumulative"), TC_BLACK, SA_RIGHT);
 		GfxDrawLine(r.left + 1, y + row_h - 1, r.right - 1, y + row_h - 1, GREY_SCALE(4));
 		y = r.top + header_h + (PORTFOLIO_FIXED_ROWS - 1) * row_h;
 
@@ -1647,12 +1601,12 @@ struct StockWindow : Window {
 
 		const char *mark = " v";
 		int y = r.top + ScaleGUITrad(2);
-		DrawString(col.rank, col.symbol, y, std::string("#"), TC_GREY, SA_LEFT);
-		DrawString(col.symbol, col.price - ScaleGUITrad(90), y, STR_STOCK_COL_SYMBOL, TC_GREY, SA_LEFT);
-		DrawString(col.symbol, col.price, y, std::string("Price") + (this->rank_sort == StockRankSort::Price ? mark : ""), TC_GREY, SA_RIGHT);
-		DrawString(col.price, col.change, y, std::string("Change") + (this->rank_sort == StockRankSort::Change ? mark : ""), TC_GREY, SA_RIGHT);
-		DrawString(col.change, col.cap, y, std::string("Market cap") + (this->rank_sort == StockRankSort::MarketCap ? mark : ""), TC_GREY, SA_RIGHT);
-		GfxDrawLine(r.left + 1, r.top + header_h - 2, r.right - 1, r.top + header_h - 2, GREY_SCALE(StockTheme::RULE));
+		DrawString(col.rank, col.symbol, y, std::string("#"), TC_BLACK, SA_LEFT);
+		DrawString(col.symbol, col.price - ScaleGUITrad(90), y, STR_STOCK_COL_SYMBOL, TC_BLACK, SA_LEFT);
+		DrawString(col.symbol, col.price, y, std::string("Price") + (this->rank_sort == StockRankSort::Price ? mark : ""), TC_BLACK, SA_RIGHT);
+		DrawString(col.price, col.change, y, std::string("Change") + (this->rank_sort == StockRankSort::Change ? mark : ""), TC_BLACK, SA_RIGHT);
+		DrawString(col.change, col.cap, y, std::string("Market cap") + (this->rank_sort == StockRankSort::MarketCap ? mark : ""), TC_BLACK, SA_RIGHT);
+		GfxDrawLine(r.left + 1, r.top + header_h - 2, r.right - 1, r.top + header_h - 2, GREY_SCALE(4));
 
 		const std::vector<StockRankEntry> list = GetStockRanking(this->rank_sort);
 		int64_t top_cap = 1;
@@ -1665,7 +1619,7 @@ struct StockWindow : Window {
 		for (size_t i = first; i < last; i++, y += row_h) {
 			const StockRankEntry &e = list[i];
 			const bool mine = e.company == _local_company;
-			if (e.company == this->selected) DrawSelectedRowMark(r, y, row_h);
+			if (e.company == this->selected) GfxFillRect(r.left + 1, y - 1, r.right - 1, y + row_h - 2, GREY_SCALE(4));
 
 			DrawString(col.rank, col.symbol, y, GetString(STR_JUST_INT, i + 1), TC_WHITE, SA_LEFT);
 			DrawString(col.symbol, col.price - ScaleGUITrad(90), y, GetString(STR_STOCK_SYMBOL, e.company), mine ? TC_GOLD : TC_WHITE, SA_LEFT);
@@ -1707,17 +1661,17 @@ struct StockWindow : Window {
 		const int close_left = col.close;
 
 		int y = r.top + ScaleGUITrad(2);
-		DrawString(c_id, c_symbol, y, STR_STOCK_COL_ID, TC_GREY, SA_LEFT);
-		DrawString(c_symbol, c_type, y, STR_STOCK_COL_SYMBOL, TC_GREY, SA_LEFT);
-		DrawString(c_type, c_volume - ScaleGUITrad(60), y, STR_STOCK_COL_TYPE, TC_GREY, SA_LEFT);
-		DrawString(c_volume - ScaleGUITrad(60), c_volume, y, STR_STOCK_COL_VOLUME, TC_GREY, SA_RIGHT);
-		DrawString(c_volume, c_open, y, STR_STOCK_COL_OPEN, TC_GREY, SA_RIGHT);
-		DrawString(c_open, c_sl, y, STR_STOCK_COL_SL, TC_GREY, SA_RIGHT);
-		DrawString(c_sl, c_tp, y, STR_STOCK_COL_TP, TC_GREY, SA_RIGHT);
-		DrawString(c_tp, c_trail, y, std::string("Trail"), TC_GREY, SA_RIGHT);
-		DrawString(c_trail, c_price, y, STR_STOCK_COL_PRICE, TC_GREY, SA_RIGHT);
-		DrawString(c_price, c_profit, y, STR_STOCK_COL_PROFIT, TC_GREY, SA_RIGHT);
-		GfxDrawLine(r.left + 1, r.top + header_h - 2, r.right - 1, r.top + header_h - 2, GREY_SCALE(StockTheme::RULE));
+		DrawString(c_id, c_symbol, y, STR_STOCK_COL_ID, TC_BLACK, SA_LEFT);
+		DrawString(c_symbol, c_type, y, STR_STOCK_COL_SYMBOL, TC_BLACK, SA_LEFT);
+		DrawString(c_type, c_volume - ScaleGUITrad(60), y, STR_STOCK_COL_TYPE, TC_BLACK, SA_LEFT);
+		DrawString(c_volume - ScaleGUITrad(60), c_volume, y, STR_STOCK_COL_VOLUME, TC_BLACK, SA_RIGHT);
+		DrawString(c_volume, c_open, y, STR_STOCK_COL_OPEN, TC_BLACK, SA_RIGHT);
+		DrawString(c_open, c_sl, y, STR_STOCK_COL_SL, TC_BLACK, SA_RIGHT);
+		DrawString(c_sl, c_tp, y, STR_STOCK_COL_TP, TC_BLACK, SA_RIGHT);
+		DrawString(c_tp, c_trail, y, std::string("Trail"), TC_BLACK, SA_RIGHT);
+		DrawString(c_trail, c_price, y, STR_STOCK_COL_PRICE, TC_BLACK, SA_RIGHT);
+		DrawString(c_price, c_profit, y, STR_STOCK_COL_PROFIT, TC_BLACK, SA_RIGHT);
+		GfxDrawLine(r.left + 1, r.top + header_h - 2, r.right - 1, r.top + header_h - 2, GREY_SCALE(4));
 
 		const std::vector<const StockOrder *> rows = this->GetRows();
 		if (rows.empty()) {
@@ -1735,7 +1689,7 @@ struct StockWindow : Window {
 
 			DrawString(c_id, c_symbol, y, GetString(STR_JUST_INT, o.id), TC_WHITE, SA_LEFT);
 			DrawString(c_symbol, c_type, y, GetString(STR_STOCK_SYMBOL, target), TC_WHITE, SA_LEFT);
-			DrawString(c_type, c_volume - ScaleGUITrad(60), y, GetStockOrderTypeString(o.type), IsStockBuy(o.type) ? TC_LIGHT_BLUE : TC_RED, SA_LEFT);
+			DrawString(c_type, c_volume - ScaleGUITrad(60), y, GetStockOrderTypeString(o.type), IsStockBuy(o.type) ? TC_LIGHT_BLUE : TC_ORANGE, SA_LEFT);
 			DrawString(c_volume - ScaleGUITrad(60), c_volume, y, StockVolumeToString(o.volume), TC_WHITE, SA_RIGHT);
 			/* The price of a pending order and the levels of every trade can be clicked to change them, which the colour shows. */
 			DrawString(c_volume, c_open, y, GetString(STR_JUST_CURRENCY_LONG, o.price), is_position ? TC_WHITE : TC_LIGHT_BLUE, SA_RIGHT);

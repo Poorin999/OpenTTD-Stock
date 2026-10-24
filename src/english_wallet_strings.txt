@@ -13,6 +13,7 @@ STR_WALLET_ERROR_IN_USE                                         :{WHITE}Close th
 STR_WALLET_ERROR_CANT_CREATE                                    :{WHITE}Can't create the wallet...
 STR_WALLET_ERROR_CANT_DELETE                                    :{WHITE}Can't delete the wallet...
 STR_STOCK_WALLET                                                :{BLACK}{RAW_STRING}: {CURRENCY_LONG}
+STR_STOCK_WALLET_ITEM                                           :{RAW_STRING}: {CURRENCY_LONG}
 STR_STOCK_WALLET_NEW                                            :+ Wallet
 STR_STOCK_WALLET_DELETE                                         :- Wallet
 STR_STOCK_TIP_WALLET                                            :{BLACK}The wallet that is shown, traded with, and used by Deposit and Withdraw. Click to switch to the next wallet

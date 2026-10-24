@@ -10,7 +10,7 @@
 #ifndef WIDGETS_CENTRAL_BANK_WIDGET_H
 #define WIDGETS_CENTRAL_BANK_WIDGET_H
 
-/** Widgets of the #CentralBankWindow class (window number 0) and of the #CentralBankStatementWindow class (window number 1) and of the #CentralBankArchiveWindow class (window number 2) and of the buy gold window (window number 3). */
+/** Widgets of the #CentralBankWindow class (window number 0) and of the #CentralBankStatementWindow class (window number 1) and of the #CentralBankArchiveWindow class (window number 2) and of the buy gold window (window number 3) and of the monetary policy window (window number 4). */
 enum CentralBankWidgets : WidgetID {
 	WID_CB_CAPTION,         ///< Caption of the bank window.
 	WID_CB_SUMMARY,         ///< Left panel: cash, deposits, debt, credit limit, interest rate, credit rating.
@@ -19,6 +19,7 @@ enum CentralBankWidgets : WidgetID {
 	WID_CB_REPAY,           ///< Button: repay a part of the debt from the company cash.
 	WID_CB_REPAY_ALL,       ///< Button: repay as much of the debt as the company cash allows.
 	WID_CB_OPEN_STATEMENT,  ///< Button: open the account statement in its own window.
+	WID_CB_OPEN_POLICY,     ///< Button: open the monetary policy (price index, inflation, policy rate) in its own window.
 	WID_CB_SKIP_SEL,        ///< Selection: the test buttons (after the console command) or nothing.
 	WID_CB_SKIP_1H,         ///< Test button: move the game clock forward by 1 hour (single player only).
 	WID_CB_SKIP_1D,         ///< Test button: move the game clock forward by 1 day (single player only).
@@ -34,6 +35,8 @@ enum CentralBankWidgets : WidgetID {
 	WID_CBA_PANEL,          ///< Right panel: the statement of the chosen year, in its sections.
 	WID_GB_CAPTION,         ///< Caption of the buy gold window.
 	WID_GB_PANEL,           ///< Panel of the buy gold window: price, quantity, cost and buttons are drawn and clicked here.
+	WID_CBP_CAPTION,        ///< Caption of the monetary policy window.
+	WID_CBP_PANEL,          ///< Panel of the monetary policy window: price index, inflation, policy shift and the loan rates.
 };
 
 #endif /* WIDGETS_CENTRAL_BANK_WIDGET_H */

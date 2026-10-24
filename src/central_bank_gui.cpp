@@ -50,6 +50,7 @@ static std::string CbText(const char *thai, const char *english)
 static constexpr int CB_WINDOW_BANK = 0;
 static constexpr int CB_WINDOW_STATEMENT = 1;
 static constexpr int CB_WINDOW_ARCHIVE = 2; ///< The past statements window: 10 years.
+static constexpr int CB_WINDOW_POLICY = 4;  ///< The monetary policy window (3 is the buy gold window).
 
 static int CbRowHeight() { return GetCharacterHeight(FS_NORMAL) + ScaleGUITrad(2); }
 
@@ -368,8 +369,8 @@ struct CentralBankWindow : Window {
 		Repay,
 	};
 
-	static constexpr int SUMMARY_ROWS = 15; ///< Rows of the left panel, with room for the two penalty lines.
-	static constexpr int SEPARATORS = 5;    ///< Lines between the groups of the left panel.
+	static constexpr int SUMMARY_ROWS = 11; ///< Rows of the left panel, with room for the two penalty lines.
+	static constexpr int SEPARATORS = 4;    ///< Lines between the groups of the left panel.
 	static constexpr int LOG_ROWS = 8;      ///< Lines of the account log that are shown.
 
 	QueryKind query_kind = QueryKind::None; ///< What the open query window is for.
@@ -396,6 +397,7 @@ struct CentralBankWindow : Window {
 	{
 		/* The button is pushed in while the statement window is open. */
 		this->SetWidgetLoweredState(WID_CB_OPEN_STATEMENT, FindWindowById(WC_CENTRAL_BANK, CB_WINDOW_STATEMENT) != nullptr);
+		this->SetWidgetLoweredState(WID_CB_OPEN_POLICY, FindWindowById(WC_CENTRAL_BANK, CB_WINDOW_POLICY) != nullptr);
 		this->DrawWidgets();
 	}
 
@@ -493,29 +495,6 @@ struct CentralBankWindow : Window {
 		row(CbText("อัตราดอกเบี้ย", "Interest rate"), fmt::format("{}.{:02}% / {}", rate_bp / 100, rate_bp % 100, CbText("ปี", "year")), a.in_default ? TC_RED : TC_WHITE);
 		row(CbText("ดอกเบี้ย / วัน", "Interest / day"), money(per_day), TC_ORANGE);
 		separator();
-
-		/* Group 4b: the monetary policy of the bank: price index, yearly change against the target, shift of the rates, next decision. */
-		{
-			const MonetaryPolicy &p = _central_bank.policy;
-			const int64_t idx = GetPriceIndexPpm();
-			row(CbText("ดัชนีราคา", "Price index"), fmt::format("{}.{:03}", idx / 1'000'000, (idx % 1'000'000) / 1000));
-			if (p.measured) {
-				const int64_t infl = p.inflation_bp;
-				const int64_t aerr = infl > POLICY_TARGET_INFLATION_BP ? infl - POLICY_TARGET_INFLATION_BP : POLICY_TARGET_INFLATION_BP - infl;
-				const std::string sign = infl < 0 ? "-" : "";
-				const int64_t ai = infl < 0 ? -infl : infl;
-				row(CbText("เงินเฟ้อ (ต่อปี)", "Inflation (yearly)"), fmt::format("{}{}.{:02}%  ({} {}.{:02}%)", sign, ai / 100, ai % 100, CbText("เป้า", "target"), POLICY_TARGET_INFLATION_BP / 100, POLICY_TARGET_INFLATION_BP % 100),
-					aerr <= POLICY_DEADBAND_BP ? TC_GREEN : (aerr <= 3 * POLICY_DEADBAND_BP ? TC_ORANGE : TC_RED));
-			} else {
-				row(CbText("เงินเฟ้อ (ต่อปี)", "Inflation (yearly)"), CbText("กำลังวัด...", "measuring..."), TC_GREY);
-			}
-			const int64_t sh = p.shift_bp < 0 ? -p.shift_bp : p.shift_bp;
-			row(CbText("นโยบายดอกเบี้ย", "Policy rate shift"), fmt::format("{}{}.{:02}%", p.shift_bp < 0 ? "-" : "+", sh / 100, sh % 100), p.shift_bp > 0 ? TC_ORANGE : (p.shift_bp < 0 ? TC_GREEN : TC_WHITE));
-			const int64_t today = static_cast<int64_t>(GameTimeManager::Get().GetCurrentGameDay());
-			const int64_t left_days = p.last_decision_day < 0 ? POLICY_DECISION_DAYS : std::clamp<int64_t>(POLICY_DECISION_DAYS - (today - p.last_decision_day), 0, POLICY_DECISION_DAYS);
-			row(CbText("ทบทวนครั้งต่อไป", "Next review"), fmt::format("{} {}", left_days, CbText("วัน", "days")), TC_GREY);
-			separator();
-		}
 
 		/* Group 5: the status and the credit rating. */
 		{
@@ -640,6 +619,16 @@ struct CentralBankWindow : Window {
 				this->SetDirty();
 				break;
 
+			case WID_CB_OPEN_POLICY:
+				/* The monetary policy is its own window, like the statement: a second click closes it. */
+				if (FindWindowById(WC_CENTRAL_BANK, CB_WINDOW_POLICY) != nullptr) {
+					CloseWindowById(WC_CENTRAL_BANK, CB_WINDOW_POLICY);
+				} else {
+					ShowCentralBankPolicyWindow();
+				}
+				this->SetDirty();
+				break;
+
 			case WID_CB_BORROW:
 				this->query_kind = QueryKind::Borrow;
 				ShowQueryString({}, STR_STOCK_QUERY_BORROW, 24, this, CS_ALPHANUMERAL, {});
@@ -749,6 +738,97 @@ struct CentralBankStatementWindow : Window {
 	}
 };
 
+/** Draw the monetary policy: the price index, the inflation against the target, the shift of the rates, the rates of the loans now and the rule of the bank. */
+static void DrawMonetaryPolicy(const Rect &r)
+{
+	const int left = r.left + ScaleGUITrad(8);
+	const int right = r.right - ScaleGUITrad(8);
+	int y = r.top + ScaleGUITrad(6);
+	const int row_h = CbRowHeight();
+	const int sep_h = ScaleGUITrad(10);
+
+	const MonetaryPolicy &p = _central_bank.policy;
+	auto pct = [](int64_t bp, bool plus = false) {
+		const int64_t a = bp < 0 ? -bp : bp;
+		return fmt::format("{}{}.{:02}%", bp < 0 ? "-" : (plus ? "+" : ""), a / 100, a % 100);
+	};
+	auto row = [&](const std::string &label, const std::string &value, TextColour colour = TC_WHITE) {
+		DrawString(left, right, y, label, TC_WHITE, SA_LEFT);
+		DrawString(left, right, y, value, colour, SA_RIGHT);
+		y += row_h;
+	};
+	auto separator = [&]() {
+		GfxDrawLine(left, y + sep_h / 2 - 1, right, y + sep_h / 2 - 1, GREY_SCALE(4));
+		y += sep_h;
+	};
+
+	/* Group 1: what the bank measures. */
+	const int64_t idx = GetPriceIndexPpm();
+	row(CbText("ดัชนีราคา", "Price index"), fmt::format("{}.{:03}", idx / 1'000'000, (idx % 1'000'000) / 1000));
+	if (p.measured) {
+		const int64_t err = p.inflation_bp > POLICY_TARGET_INFLATION_BP ? p.inflation_bp - POLICY_TARGET_INFLATION_BP : POLICY_TARGET_INFLATION_BP - p.inflation_bp;
+		row(CbText("เงินเฟ้อ (ต่อปี)", "Inflation (yearly)"), pct(p.inflation_bp), err <= POLICY_DEADBAND_BP ? TC_GREEN : (err <= 3 * POLICY_DEADBAND_BP ? TC_ORANGE : TC_RED));
+		row(CbText("การเติบโตของมูลค่าบริษัท (ต่อปี)", "Company value growth (yearly)"), pct(p.growth_bp));
+	} else {
+		row(CbText("เงินเฟ้อ (ต่อปี)", "Inflation (yearly)"), CbText("กำลังวัด...", "measuring..."), TC_GREY);
+		row(CbText("การเติบโตของมูลค่าบริษัท (ต่อปี)", "Company value growth (yearly)"), CbText("กำลังวัด...", "measuring..."), TC_GREY);
+	}
+	row(CbText("เป้าหมายเงินเฟ้อ", "Inflation target"), fmt::format("{} (+/-{})", pct(POLICY_TARGET_INFLATION_BP), pct(POLICY_DEADBAND_BP)));
+	separator();
+
+	/* Group 2: what the bank decided. */
+	row(CbText("ส่วนปรับดอกเบี้ย (นโยบาย)", "Policy rate shift"), pct(p.shift_bp, true), p.shift_bp > 0 ? TC_ORANGE : (p.shift_bp < 0 ? TC_GREEN : TC_WHITE));
+	row(CbText("การปรับครั้งล่าสุด", "Last change"), p.measured ? pct(p.last_step_bp, true) : std::string("-"), TC_GREY);
+	const int64_t today = static_cast<int64_t>(GameTimeManager::Get().GetCurrentGameDay());
+	const int64_t left_days = p.last_decision_day < 0 ? POLICY_DECISION_DAYS : std::clamp<int64_t>(POLICY_DECISION_DAYS - (today - p.last_decision_day), 0, POLICY_DECISION_DAYS);
+	row(CbText("ทบทวนครั้งต่อไป", "Next review"), fmt::format("{} {}", left_days, CbText("วัน", "days")), TC_GREY);
+	separator();
+
+	/* Group 3: the rates of the loans now. */
+	row(CbText("ดอกเบี้ยเงินกู้ เครดิตดี", "Loan rate, good credit"), fmt::format("{} - {}", pct(BankShiftedRateBp(BANK_RATE_GOOD_MIN_BP, p.shift_bp)), pct(BankShiftedRateBp(BANK_RATE_GOOD_MAX_BP, p.shift_bp))));
+	row(CbText("ดอกเบี้ยเงินกู้ เครดิตต่ำ", "Loan rate, poor credit"), fmt::format("{} - {}", pct(BankShiftedRateBp(BANK_RATE_POOR_MIN_BP, p.shift_bp)), pct(BankShiftedRateBp(BANK_RATE_POOR_MAX_BP, p.shift_bp))));
+	row(CbText("ดอกเบี้ยผิดนัด", "Penalty rate"), fmt::format("{} - {}", pct(BANK_PENALTY_MIN_BP), pct(BANK_PENALTY_MAX_BP)), TC_RED);
+	separator();
+
+	/* Group 4: the rule of the bank. */
+	row(CbText("ทบทวนทุก", "Review every"), fmt::format("{} {}", POLICY_DECISION_DAYS, CbText("วัน", "days")), TC_GREY);
+	row(CbText("ปรับได้ไม่เกินครั้งละ", "At most per review"), pct(POLICY_MAX_STEP_BP), TC_GREY);
+	row(CbText("ช่วงส่วนปรับ", "Range of the shift"), fmt::format("{} .. {}", pct(POLICY_SHIFT_MIN_BP, true), pct(POLICY_SHIFT_MAX_BP, true)), TC_GREY);
+}
+
+/** The monetary policy window: its own window, so it can stay open next to the bank window. */
+struct CentralBankPolicyWindow : Window {
+	static constexpr int POLICY_ROWS = 13; ///< Rows of the panel.
+	static constexpr int POLICY_SEPARATORS = 4;
+
+	/** Redraw regularly: the numbers change all the time. */
+	const IntervalTimer<TimerWindow> redraw_interval = {std::chrono::milliseconds(500), [this](auto) {
+		this->SetDirty();
+	}};
+
+	CentralBankPolicyWindow(WindowDesc &desc) : Window(desc)
+	{
+		this->InitNested(CB_WINDOW_POLICY);
+	}
+
+	void OnInvalidateData([[maybe_unused]] int data = 0, [[maybe_unused]] bool gui_scope = true) override
+	{
+		this->SetDirty();
+	}
+
+	void UpdateWidgetSize(WidgetID widget, Dimension &size, [[maybe_unused]] const Dimension &padding, [[maybe_unused]] Dimension &fill, [[maybe_unused]] Dimension &resize) override
+	{
+		if (widget != WID_CBP_PANEL) return;
+		size.width = std::max<uint>(size.width, ScaleGUITrad(380));
+		size.height = std::max<uint>(size.height, CbRowHeight() * POLICY_ROWS + ScaleGUITrad(10) * POLICY_SEPARATORS + ScaleGUITrad(12));
+	}
+
+	void DrawWidget(const Rect &r, WidgetID widget) const override
+	{
+		if (widget == WID_CBP_PANEL) DrawMonetaryPolicy(r);
+	}
+};
+
 /** The past statements window ("Statement ย้อนหลัง"): the last 10 years in a list, and the statement of the chosen year. */
 struct CentralBankArchiveWindow : Window {
 	int selected = 0; ///< Chosen year: 0 = this year, 9 = nine years ago.
@@ -837,7 +917,10 @@ static constexpr std::initializer_list<NWidgetPart> _nested_central_bank_widgets
 		NWidget(NWID_VERTICAL),
 			NWidget(WWT_PANEL, COLOUR_GREY, WID_CB_LOG), SetMinimalSize(300, 120), SetResize(1, 1), SetFill(1, 1),
 			EndContainer(),
-			NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_CB_OPEN_STATEMENT), SetMinimalSize(100, 14), SetFill(1, 0), SetStringTip(STR_CENTRAL_BANK_STATEMENT, STR_CENTRAL_BANK_TIP_STATEMENT),
+			NWidget(NWID_HORIZONTAL),
+				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_CB_OPEN_STATEMENT), SetMinimalSize(100, 14), SetFill(1, 0), SetStringTip(STR_CENTRAL_BANK_STATEMENT, STR_CENTRAL_BANK_TIP_STATEMENT),
+				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_CB_OPEN_POLICY), SetMinimalSize(100, 14), SetFill(1, 0), SetStringTip(STR_CENTRAL_BANK_POLICY, STR_CENTRAL_BANK_TIP_POLICY),
+			EndContainer(),
 		EndContainer(),
 	EndContainer(),
 };
@@ -855,6 +938,17 @@ static constexpr std::initializer_list<NWidgetPart> _nested_central_bank_stateme
 		NWidget(WWT_PANEL, COLOUR_GREY), SetFill(1, 1), SetResize(1, 0),
 		EndContainer(),
 		NWidget(WWT_PUSHBTN, COLOUR_GREY, WID_CBS_OLDER), SetMinimalSize(190, 14),
+	EndContainer(),
+};
+
+static constexpr std::initializer_list<NWidgetPart> _nested_central_bank_policy_widgets = {
+	NWidget(NWID_HORIZONTAL),
+		NWidget(WWT_CLOSEBOX, COLOUR_GREY),
+		NWidget(WWT_CAPTION, COLOUR_GREY, WID_CBP_CAPTION), SetStringTip(STR_CENTRAL_BANK_POLICY_CAPTION, STR_TOOLTIP_WINDOW_TITLE_DRAG_THIS),
+		NWidget(WWT_SHADEBOX, COLOUR_GREY),
+		NWidget(WWT_STICKYBOX, COLOUR_GREY),
+	EndContainer(),
+	NWidget(WWT_PANEL, COLOUR_GREY, WID_CBP_PANEL), SetMinimalSize(380, 120), SetFill(1, 1), SetResize(1, 0),
 	EndContainer(),
 };
 
@@ -887,6 +981,13 @@ static WindowDesc _central_bank_statement_desc(
 	_nested_central_bank_statement_widgets
 );
 
+static WindowDesc _central_bank_policy_desc(
+	WDP_AUTO, "central_bank_policy", 0, 0,
+	WC_CENTRAL_BANK, WC_NONE,
+	{},
+	_nested_central_bank_policy_widgets
+);
+
 static WindowDesc _central_bank_archive_desc(
 	WDP_AUTO, "central_bank_archive", 0, 0,
 	WC_CENTRAL_BANK, WC_NONE,
@@ -911,6 +1012,14 @@ void ShowCentralBankStatementWindow()
 	if (!Company::IsValidID(_local_company)) return;
 	if (BringWindowToFrontById(WC_CENTRAL_BANK, CB_WINDOW_STATEMENT) != nullptr) return;
 	new CentralBankStatementWindow(_central_bank_statement_desc);
+}
+
+/** Open the monetary policy window (window number 4 of #WC_CENTRAL_BANK), or bring it to the front. It can be open together with the bank window. */
+void ShowCentralBankPolicyWindow()
+{
+	if (!Company::IsValidID(_local_company)) return;
+	if (BringWindowToFrontById(WC_CENTRAL_BANK, CB_WINDOW_POLICY) != nullptr) return;
+	new CentralBankPolicyWindow(_central_bank_policy_desc);
 }
 
 /** Open the past statements window (window number 2 of #WC_CENTRAL_BANK): the last 10 years, or bring it to the front. */
