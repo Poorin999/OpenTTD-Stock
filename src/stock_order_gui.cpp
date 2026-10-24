@@ -222,11 +222,13 @@ struct StockOrderWindow : Window {
 				const bool buy = IsStockBuy(market ? StockOrderType::Buy : PENDING_TYPES[std::clamp(this->type_index, 1, 4) - 1]);
 				const int64_t price = market ? GetStockExecutionPrice(this->symbol, buy, volume) : (buy ? GetStockAsk(this->symbol) : GetStockBid(this->symbol));
 				const int64_t value = price * static_cast<int64_t>(volume);
-				const int64_t divisor = GetStockMarginDivisor(this->symbol.base());
+				/* The leverage of the trading wallet that is shown in the terminal; 0 = unlimited (no margin). */
+				const int64_t divisor = Company::IsValidID(_local_company) ? GetWalletLeverageDivisor(_local_company, GetStockActiveWallet()) : STOCK_MARGIN_DIVISOR;
+				const int64_t margin = divisor > 0 ? value / divisor : 0;
 				if (IsValuableSymbol(this->symbol.base())) {
-					DrawString(r.left + 4, r.right - 4, top, GetString(STR_STOCK_ORDER_INFO_VALUABLE, static_cast<int64_t>(volume), value, value / divisor, GetStockCommission(value), divisor), TC_FROMSTRING, SA_LEFT);
+					DrawString(r.left + 4, r.right - 4, top, GetString(STR_STOCK_ORDER_INFO_VALUABLE, static_cast<int64_t>(volume), value, margin, GetStockCommission(value), divisor), TC_FROMSTRING, SA_LEFT);
 				} else {
-					DrawString(r.left + 4, r.right - 4, top, GetString(STR_STOCK_ORDER_INFO, static_cast<int64_t>(volume), value, value / divisor, GetStockCommission(value)), TC_FROMSTRING, SA_LEFT);
+					DrawString(r.left + 4, r.right - 4, top, GetString(STR_STOCK_ORDER_INFO, static_cast<int64_t>(volume), value, margin, GetStockCommission(value)), TC_FROMSTRING, SA_LEFT);
 				}
 				break;
 			}

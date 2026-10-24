@@ -119,24 +119,81 @@ static constexpr int64_t POLICY_MONEY_WEIGHT_PERCENT = 30;   ///< How much of th
 static constexpr int64_t BANK_RATE_FLOOR_BP = 100;           ///< The rate of a loan is never below 1% ...
 static constexpr int64_t BANK_RATE_CEIL_BP = 1400;           ///< ... and never above 14%, so it stays under the penalty rate (15%).
 
+/*
+ * ---- Emergency mode for high inflation -------------------------------------------------------------------------------
+ * Above POLICY_EMERGENCY_ON_BP of yearly inflation the bank switches to emergency mode (it goes back below POLICY_EMERGENCY_OFF_BP,
+ * so the mode does not flicker). In emergency mode the shift may go up to POLICY_EMERGENCY_SHIFT_MAX_BP and moves by
+ * POLICY_EMERGENCY_STEP_BP per review. Everything else follows from the shift alone, so it is the same on every client:
+ * while the shift is above the normal ceiling POLICY_SHIFT_MAX_BP the loan rate ceiling is BANK_RATE_CEIL_EMERGENCY_BP, the
+ * penalty rate is BANK_PENALTY_EMERGENCY_EXTRA_BP higher (so it stays above the loan rate), and the credit share may fall to
+ * POLICY_CREDIT_MIN_EMERGENCY_PERCENT.
+ */
+static constexpr int64_t POLICY_EMERGENCY_ON_BP = 1000;          ///< Emergency mode starts above 10% yearly inflation.
+static constexpr int64_t POLICY_EMERGENCY_OFF_BP = 700;          ///< Emergency mode ends below 7% yearly inflation.
+static constexpr int64_t POLICY_EMERGENCY_STEP_BP = 100;         ///< Speed limit in emergency mode: 1% per review.
+static constexpr int64_t POLICY_EMERGENCY_SHIFT_MAX_BP = 1500;   ///< Highest shift in emergency mode: +15%.
+static constexpr int64_t BANK_RATE_CEIL_EMERGENCY_BP = 2500;     ///< Loan rate ceiling while the shift is above the normal ceiling: 25%.
+static constexpr int64_t BANK_PENALTY_EMERGENCY_EXTRA_BP = BANK_RATE_CEIL_EMERGENCY_BP - BANK_RATE_CEIL_BP; ///< Added to the penalty rate: 26% .. 29%, above the loan ceiling.
+static constexpr int64_t POLICY_CREDIT_MIN_EMERGENCY_PERCENT = 10; ///< The credit share of the equity may fall to 10%.
+
+/*
+ * ---- Credit limit that follows the policy and the credit standing ---------------------------------------------------
+ * The limit is a share of the net equity of the company. The share is CENTRAL_BANK_CREDIT_PERCENT (50%) when the policy shift
+ * is 0. A tight policy (a positive shift) lowers it by 1 percentage point for every POLICY_CREDIT_BP_PER_PERCENT bp of shift,
+ * an easy policy (a negative shift) raises it. The credit standing of the gold reserve (C .. AAA) then scales the limit again.
+ * A company that starts with GAME_TIME_STARTING_CAPITAL (1,500,000) and no debt can borrow about 750,000 at a shift of 0 and standing A.
+ */
+static constexpr int64_t POLICY_CREDIT_BP_PER_PERCENT = 20; ///< 20 bp of shift move the credit share by 1 percentage point.
+static constexpr int64_t POLICY_CREDIT_MIN_PERCENT = 25;    ///< The share of the equity is never below 25% ...
+static constexpr int64_t POLICY_CREDIT_MAX_PERCENT = 60;    ///< ... and never above 60%.
+
+/** Share of the net equity (in percent) that a company may borrow at a policy shift: 50% at 0, 20% less at +600 bp (floor 25%), 57% at -150 bp. */
+inline int64_t BankPolicyCreditPercent(int64_t shift_bp)
+{
+	const int64_t floor_percent = shift_bp > POLICY_SHIFT_MAX_BP ? POLICY_CREDIT_MIN_EMERGENCY_PERCENT : POLICY_CREDIT_MIN_PERCENT;
+	return std::clamp<int64_t>(CENTRAL_BANK_CREDIT_PERCENT - shift_bp / POLICY_CREDIT_BP_PER_PERCENT, floor_percent, POLICY_CREDIT_MAX_PERCENT);
+}
+
+/** Percent of the credit limit that a credit standing allows: C 70%, B 85%, A 100%, AA 110%, AAA 120%. @param tier 0 = C ... 4 = AAA (the CreditTier of the gold reserve). */
+inline int64_t BankTierCreditPercent(int tier)
+{
+	static constexpr int64_t PERCENT[] = {70, 85, 100, 110, 120};
+	return PERCENT[std::clamp(tier, 0, 4)];
+}
+
 /** The rate of the risk curve moved by the policy shift, kept between the floor and the ceiling. */
 inline int64_t BankShiftedRateBp(int64_t base_bp, int64_t shift_bp)
 {
-	return std::clamp<int64_t>(base_bp + shift_bp, BANK_RATE_FLOOR_BP, BANK_RATE_CEIL_BP);
+	const int64_t ceiling = shift_bp > POLICY_SHIFT_MAX_BP ? BANK_RATE_CEIL_EMERGENCY_BP : BANK_RATE_CEIL_BP;
+	return std::clamp<int64_t>(base_bp + shift_bp, BANK_RATE_FLOOR_BP, ceiling);
 }
 
 /**
  * The shift that the rule wants (the speed limit is applied by the caller).
  * @param inflation_bp Yearly change of the price index in bp.
  * @param growth_bp Yearly growth of the company values of the map in bp.
+ * @param emergency True in emergency mode: the shift may go up to POLICY_EMERGENCY_SHIFT_MAX_BP.
  */
-inline int64_t PolicyDesiredShiftBp(int64_t inflation_bp, int64_t growth_bp)
+inline int64_t PolicyDesiredShiftBp(int64_t inflation_bp, int64_t growth_bp, bool emergency = false)
 {
 	int64_t err = inflation_bp - POLICY_TARGET_INFLATION_BP;
 	if (err > -POLICY_DEADBAND_BP && err < POLICY_DEADBAND_BP) err = 0;
 	const int64_t gap = std::clamp<int64_t>((growth_bp - POLICY_TREND_GROWTH_BP) / POLICY_GAP_DIVISOR, -POLICY_GAP_MAX_BP, POLICY_GAP_MAX_BP);
-	return std::clamp<int64_t>(err * POLICY_INFLATION_WEIGHT_PERCENT / 100 + gap, POLICY_SHIFT_MIN_BP, POLICY_SHIFT_MAX_BP);
+	return std::clamp<int64_t>(err * POLICY_INFLATION_WEIGHT_PERCENT / 100 + gap, POLICY_SHIFT_MIN_BP, emergency ? POLICY_EMERGENCY_SHIFT_MAX_BP : POLICY_SHIFT_MAX_BP);
 }
+
+/** One decision of the bank, for the decision log of the policy window. */
+struct PolicyDecision {
+	int64_t day = 0;           ///< Game day of the decision.
+	int64_t shift_before = 0;  ///< Policy shift before it, in bp.
+	int64_t shift_after = 0;   ///< Policy shift after it, in bp.
+	int64_t inflation_bp = 0;  ///< Yearly inflation that it measured.
+	int64_t growth_bp = 0;     ///< Yearly growth of the company values that it measured.
+	bool emergency = false;    ///< True when the bank was in emergency mode at this decision.
+};
+
+/** How many decisions the log keeps. Only for the display: it is not saved and starts empty after a load. */
+static constexpr size_t POLICY_LOG_MAX = 8;
 
 /** State of the monetary policy. Saved in the 'STCK' chunk (SRK_POLICY). */
 struct MonetaryPolicy {
@@ -146,16 +203,21 @@ struct MonetaryPolicy {
 	int64_t inflation_bp = 0;        ///< Yearly change of the price index that the last decision measured. Saved.
 	int64_t growth_bp = 0;           ///< Yearly growth of the company values that the last decision measured. Saved.
 	bool measured = false;           ///< True after the first real decision (before it there is nothing to show). Saved.
+	bool emergency = false;          ///< Emergency mode for high inflation (see POLICY_EMERGENCY_*). Saved in bit 1 of the ym field of SRK_POLICY.
 	int64_t last_step_bp = 0;        ///< What the last decision changed, for the display. Not saved.
+	std::deque<PolicyDecision> log{};///< The latest decisions, the newest in front. Not saved.
 
 	void Reset() { *this = MonetaryPolicy{}; }
+	/** True while the wider limits apply: in emergency mode, and afterwards until the shift is back inside the normal range. */
+	bool Extended() const { return this->emergency || this->shift_bp > POLICY_SHIFT_MAX_BP; }
 	bool Update(int64_t day, int64_t index_ppm, int64_t value_now, int64_t value_before);
 };
 
-/** The penalty rate in bp for a penalty level (1 or more): 1500, 1550, ... capped at 1800. */
-inline int64_t BankPenaltyRateBp(int level)
+/** The penalty rate in bp for a penalty level (1 or more): 1500, 1550, ... capped at 1800; 1100 more while the policy shift is above the normal ceiling (emergency). */
+inline int64_t BankPenaltyRateBp(int level, int64_t policy_shift_bp = 0)
 {
-	return std::min(BANK_PENALTY_MAX_BP, BANK_PENALTY_MIN_BP + BANK_PENALTY_STEP_BP * std::max(0, level - 1));
+	const int64_t extra = policy_shift_bp > POLICY_SHIFT_MAX_BP ? BANK_PENALTY_EMERGENCY_EXTRA_BP : 0;
+	return std::min(BANK_PENALTY_MAX_BP, BANK_PENALTY_MIN_BP + BANK_PENALTY_STEP_BP * std::max(0, level - 1)) + extra;
 }
 
 /** Result of one day of interest: the whole money and the part of a money unit that is carried to the next day. */
@@ -236,7 +298,7 @@ inline BankDayResult BankSettleDay(BankAccount &a, int64_t cash, int64_t equity,
 		a.in_default = false;
 	} else {
 		const int64_t risk_bp = BankShiftedRateBp(BankAnnualRateBp(BankDebtToEquityPpm(a.debt, equity)), policy_shift_bp);
-		out.rate_bp = a.in_default ? BankPenaltyRateBp(std::max<int>(1, a.penalty_level)) : risk_bp;
+		out.rate_bp = a.in_default ? BankPenaltyRateBp(std::max<int>(1, a.penalty_level), policy_shift_bp) : risk_bp;
 		BankInterestResult r = BankDailyInterest(a.debt, out.rate_bp, a.carry);
 
 		if (std::max<int64_t>(0, cash) >= r.interest) {
@@ -249,7 +311,7 @@ inline BankDayResult BankSettleDay(BankAccount &a, int64_t cash, int64_t equity,
 			a.clean_days = 0;
 			a.penalty_level = static_cast<uint8_t>(std::min<int>(BANK_PENALTY_LEVEL_MAX, a.penalty_level + 1));
 			out.defaulted = true;
-			out.rate_bp = BankPenaltyRateBp(a.penalty_level);
+			out.rate_bp = BankPenaltyRateBp(a.penalty_level, policy_shift_bp);
 			r = BankDailyInterest(a.debt, out.rate_bp, a.carry);
 			out.paid_from_cash = std::min(std::max<int64_t>(0, cash), r.interest);
 			out.added_to_debt = r.interest - out.paid_from_cash;
@@ -275,14 +337,50 @@ inline int64_t BankCreditPercentForPenalty(int level)
 	return 100 - BANK_PENALTY_CREDIT_STEP_PERCENT * std::min(std::max(0, level), BANK_PENALTY_LEVEL_MAX);
 }
 
+/*
+ * ---- The bank trades gold with its budget ------------------------------------------------------------------------
+ * Once per game day the bank looks at the backing ratio (value of all gold reserves / cash in circulation). Below
+ * BANK_GOLD_BUY_BELOW_BP it buys gold for its reserve, at the ask price, with its budget (the commission and the spread of the
+ * gold trades of the companies, CentralBank::trading_revenue_cents); it never spends more than the budget. Above
+ * BANK_GOLD_SELL_ABOVE_BP it sells gold of its own reserve at the bid price, and the proceeds go into the budget. It never sells
+ * the gold of the companies. At most BANK_GOLD_MAX_DAILY_OZ ounces a day. Integer only, no random numbers. Its trades move the
+ * price like the trades of the companies do (the market stock and the demand pressure); they do not move the cash of the companies.
+ */
+static constexpr int64_t BANK_GOLD_BUY_BELOW_BP = 1200;   ///< Buy while the backing is below 12% (credit standing A).
+static constexpr int64_t BANK_GOLD_SELL_ABOVE_BP = 3000;  ///< Sell while the backing is above 30% (credit standing AAA).
+static constexpr int64_t BANK_GOLD_MAX_DAILY_OZ = 500;    ///< At most this many ounces per game day.
+static constexpr size_t BANK_GOLD_LOG_MAX = 6;            ///< How many trades the log keeps (not saved).
+
+/*
+ * The gold trade of the bank moves the cash of the companies (open market operation):
+ *   - the bank BUYS gold: the money that it pays goes into the cash of the companies (money comes into circulation),
+ *     in proportion to the company value of the last finished quarter (equally when no value is known);
+ *   - the bank SELLS gold: the money is taken out of the UNBORROWED liquid cash of the companies (money leaves circulation),
+ *     in proportion to that cash, at most BANK_GOLD_CASH_MAX_PERCENT of the total of it per day. Borrowed money is never touched.
+ * Set BANK_GOLD_MOVES_CASH to false and build again to get the old behaviour (only the gold price and the budget move).
+ */
+static constexpr bool BANK_GOLD_MOVES_CASH = true;
+static constexpr int64_t BANK_GOLD_CASH_MAX_PERCENT = 5;  ///< The bank never takes more than 5% of the unborrowed liquid cash of all companies in one day.
+
+/** One gold trade of the bank, for the policy window. */
+struct BankGoldTrade {
+	int64_t day = 0;          ///< Game day.
+	int64_t ounces = 0;       ///< Positive: bought, negative: sold.
+	int64_t price_cents = 0;  ///< Price per ounce of the trade, in 1/100 of a money unit.
+	int64_t cash = 0;         ///< Money units that went into (positive) or came out of (negative) the cash of the companies. 0 when BANK_GOLD_MOVES_CASH is false.
+};
+
 /** The central bank: one account per company. Saved in the 'STCK' chunk together with the wallets. */
 struct CentralBank {
 	std::array<BankAccount, MAX_COMPANIES> accounts{};
 	MonetaryPolicy policy;             ///< Price index and the shift of the interest curve (monetary policy).
 	int64_t trading_revenue_cents = 0; ///< The budget of the bank from trading: commission and spread of the gold trades, in 1/100 of a money unit. Saved (SRK_BANK_BUDGET).
 
+	std::deque<BankGoldTrade> gold_log{}; ///< The latest gold trades of the bank, the newest in front. Not saved: empty after a load.
+
 	void Reset();
 	void UpdateDaily(int64_t day);
+	void TradeGold(int64_t day);
 };
 
 extern CentralBank _central_bank;
@@ -312,6 +410,7 @@ enum class LedgerItem : uint8_t {
 	YearNewVehicles, ///< Purchases of new vehicles.
 	GoldBuy,         ///< Gold bought for the vault (expense): an exchange of cash for an asset, shown but not counted as a cost. Appended last: the index is saved.
 	GoldSell,        ///< Gold sold from the vault (income): shown, not counted as earnings (the profit is on RealizedProfit).
+	BankGoldOp,      ///< Cash that the gold trade of the central bank put into (income) or took out of (expense) the company: shown, not counted as earnings. Appended last: the index is saved.
 	End,
 };
 static constexpr size_t LEDGER_ITEMS = static_cast<size_t>(LedgerItem::End);
@@ -355,6 +454,7 @@ void SnapshotYearlyExpenses();
 int64_t GetCentralBankDebt(CompanyID company);
 int64_t GetCentralBankAnnualRateBp(CompanyID company);
 int64_t GetCentralBankCreditLimit(CompanyID company);
+int64_t GetCentralBankTierCreditPercent();
 int64_t GetCentralBankAvailable(CompanyID company);
 int64_t GetUnborrowedLiquidCash(CompanyID company);
 CommandCost CheckTradingCapital(CompanyID company, int64_t amount);

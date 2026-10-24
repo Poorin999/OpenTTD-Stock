@@ -114,3 +114,32 @@ CommandCost CmdWalletTransfer(DoCommandFlags flags, uint8_t from, uint8_t to, Mo
 	}
 	return CommandCost();
 }
+
+/**
+ * Set the leverage of a trading wallet. It is the same for all symbols and applies to the open positions too, so it is refused
+ * when the margin that the open positions would hold with the new level is more than the equity of the wallet.
+ * @param flags Type of operation.
+ * @param wallet Number of the trading wallet.
+ * @param level Index in #WALLET_LEVERAGE_DIVISORS: 1:1, 1:10, 1:100, 1:1000, 1:2000 or unlimited.
+ * @return Zero cost, or an error.
+ */
+CommandCost CmdWalletLeverage(DoCommandFlags flags, uint8_t wallet, uint8_t level)
+{
+	if (!Company::IsValidID(_current_company)) return CMD_ERROR;
+	if (level >= WALLET_LEVERAGE_COUNT) return CMD_ERROR;
+	Wallet *w = _wallets.Find(_current_company, wallet);
+	if (w == nullptr || w->kind != WalletKind::Trading) return CommandCost(STR_WALLET_ERROR_BAD_WALLET);
+
+	/* Look at the margin that the open positions would hold with the new level; the old level is put back at once. */
+	const uint8_t old_level = w->leverage;
+	w->leverage = level;
+	const bool fits = GetStockUsedMargin(_current_company, wallet) <= GetStockEquity(_current_company, wallet);
+	w->leverage = old_level;
+	if (!fits) return CommandCost(STR_WALLET_ERROR_LEVERAGE_MARGIN);
+
+	if (flags.Test(DoCommandFlag::Execute)) {
+		w->leverage = level;
+		InvalidateWalletWindows();
+	}
+	return CommandCost();
+}

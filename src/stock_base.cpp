@@ -335,7 +335,10 @@ StockSummary GetStockSummary(CompanyID company)
 /** Margin that is held for a position. */
 int64_t GetStockMargin(const StockOrder &position)
 {
-	return position.price * static_cast<int64_t>(position.volume) / GetStockMarginDivisor(position.target);
+	/* The leverage belongs to the trading wallet of the position (0 = unlimited: no margin is held). */
+	const int64_t divisor = GetWalletLeverageDivisor(CompanyID{position.owner}, position.wallet);
+	if (divisor <= 0) return 0;
+	return position.price * static_cast<int64_t>(position.volume) / divisor;
 }
 
 /** Sum of the margins of the open positions in one wallet. */
@@ -792,8 +795,9 @@ void StockMarket::CheckMarginCall()
 			bool stopped_out = false;
 			for (;;) {
 				const int64_t used = GetStockUsedMargin(owner, wallet);
-				if (used <= 0) break;
-				if (GetStockEquity(owner, wallet) >= used * STOCK_STOP_OUT_LEVEL / 100) break;
+				const int64_t equity = GetStockEquity(owner, wallet);
+				/* With unlimited leverage no margin is held, but the positions are still closed when the equity is used up. */
+				if (used <= 0 ? equity > 0 : equity >= used * STOCK_STOP_OUT_LEVEL / 100) break;
 
 				size_t worst = this->positions.size();
 				int64_t worst_profit = 0;

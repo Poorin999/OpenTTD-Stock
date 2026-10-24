@@ -28,6 +28,15 @@
 
 #include "safeguards.h"
 
+/** True: the panel shows Thai text. False: the same panel in English only. Change it here and build again (like USE_THAI in central_bank_gui.cpp). */
+static constexpr bool GP_USE_THAI = true;
+
+/** The text in Thai or in English. */
+static std::string GpText(const char *thai, const char *english)
+{
+	return GP_USE_THAI ? std::string(thai) : std::string(english);
+}
+
 /** Why the Buy Gold button can not be used now. */
 enum class GoldBuyBlock : uint8_t {
 	Ok,        ///< It can be used.
@@ -281,7 +290,7 @@ static void DrawHeader(const GpLayout &l, int dx, int dy, bool chart, const GpCo
 	const Rect title = GpOffset(l.title, dx, dy);
 	const Rect b = GpOffset(l.badge, dx, dy);
 	DrawGoldIcon(icon, c);
-	DrawString(title.left, title.right, CentreBounds(title.top, title.bottom + 1, GetCharacterHeight(FS_LARGE)), chart ? "GOLD PRICE CHART" : "GOLD TRADING PANEL", TC_BLACK, SA_LEFT, false, FS_LARGE);
+	DrawString(title.left, title.right, CentreBounds(title.top, title.bottom + 1, GetCharacterHeight(FS_LARGE)), chart ? GpText("กราฟราคาทองคำ", "GOLD PRICE CHART") : GpText("แผงซื้อขายทองคำ", "GOLD TRADING PANEL"), TC_BLACK, SA_LEFT, false, FS_LARGE);
 	FrameFlags flags{};
 	if (chart) flags.Set(FrameFlag::Lowered);
 	DrawFrameRect(b.left, b.top, b.right, b.bottom, COLOUR_BROWN, flags);
@@ -290,7 +299,7 @@ static void DrawHeader(const GpLayout &l, int dx, int dy, bool chart, const GpCo
 	const int icon_h = ScaleGUITrad(13);
 	const int ix = b.left + ScaleGUITrad(12);
 	DrawChartIcon(ix + shift, CentreBounds(b.top, b.bottom + 1, icon_h) + shift, icon_w, icon_h, c.ink);
-	DrawString(ix + icon_w + ScaleGUITrad(8), b.right - ScaleGUITrad(4), CentreBounds(b.top, b.bottom + 1, GetCharacterHeight(FS_NORMAL)) + shift, "GOLD", TC_BLACK, SA_LEFT);
+	DrawString(ix + icon_w + ScaleGUITrad(8), b.right - ScaleGUITrad(4), CentreBounds(b.top, b.bottom + 1, GetCharacterHeight(FS_NORMAL)) + shift, GpText("ทอง", "GOLD"), TC_BLACK, SA_LEFT);
 }
 
 /** The price chart: last / high / low / change of the chosen range, and the line with the area under it. */
@@ -308,7 +317,7 @@ static void DrawGoldChart(const Rect &card, const Rect ranges[4], int days, cons
 		const bool selected = days == GP_RANGE_DAYS[i];
 		if (selected) flags.Set(FrameFlag::Lowered);
 		DrawFrameRect(b.left, b.top, b.right, b.bottom, COLOUR_BROWN, flags);
-		DrawString(b.left + 2, b.right - 2, CentreBounds(b.top, b.bottom + 1, hn) + (selected ? 1 : 0), GP_RANGE_NAMES[i], TC_BLACK, SA_HOR_CENTER);
+		DrawString(b.left + 2, b.right - 2, CentreBounds(b.top, b.bottom + 1, hn) + (selected ? 1 : 0), i == 3 ? GpText("ทั้งหมด", "All") : std::string(GP_RANGE_NAMES[i]), TC_BLACK, SA_HOR_CENTER);
 	}
 
 	const std::vector<int64_t> &hist = _gold_reserve.history_cents;
@@ -330,12 +339,12 @@ static void DrawGoldChart(const Rect &card, const Rect ranges[4], int days, cons
 	/* The four figures below the buttons. */
 	const int stats_top = ranges[0].bottom + ScaleGUITrad(8);
 	const int col_w = (card.right - card.left + 1 - 2 * pad) / 4;
-	struct Stat { const char *caption; std::string value; TextColour colour; };
+	struct Stat { std::string caption; std::string value; TextColour colour; };
 	const Stat stats[4] = {
-		{"Last", GpMoney(last / 100), TC_BROWN},
-		{"High", GpMoney(hi / 100), TC_BLACK},
-		{"Low", GpMoney(lo / 100), TC_BLACK},
-		{"Change", fmt::format("{}{}.{:02}%", change_bp < 0 ? "-" : "+", abs_bp / 100, abs_bp % 100), change_bp > 0 ? TC_DARK_GREEN : (change_bp < 0 ? TC_RED : TC_BLACK)},
+		{GpText("ล่าสุด", "Last"), GpMoney(last / 100), TC_BROWN},
+		{GpText("สูงสุด", "High"), GpMoney(hi / 100), TC_BLACK},
+		{GpText("ต่ำสุด", "Low"), GpMoney(lo / 100), TC_BLACK},
+		{GpText("เปลี่ยนแปลง", "Change"), fmt::format("{}{}.{:02}%", change_bp < 0 ? "-" : "+", abs_bp / 100, abs_bp % 100), change_bp > 0 ? TC_DARK_GREEN : (change_bp < 0 ? TC_RED : TC_BLACK)},
 	};
 	for (int i = 0; i < 4; i++) {
 		const int x = card.left + pad + i * col_w;
@@ -370,7 +379,7 @@ static void DrawGoldChart(const Rect &card, const Rect ranges[4], int days, cons
 	GfxDrawLine(plot.left, plot.bottom, plot.right, plot.bottom, c.border);
 
 	if (n < 2) {
-		DrawString(plot.left, plot.right, CentreBounds(plot.top, plot.bottom + 1, hn), "Collecting price data: a point is added every game day", TC_BLACK, SA_HOR_CENTER);
+		DrawString(plot.left, plot.right, CentreBounds(plot.top, plot.bottom + 1, hn), GpText("กำลังเก็บข้อมูลราคา: เพิ่มหนึ่งจุดทุกวันในเกม", "Collecting price data: a point is added every game day"), TC_BLACK, SA_HOR_CENTER);
 		return;
 	}
 
@@ -399,8 +408,8 @@ static void DrawGoldChart(const Rect &card, const Rect ranges[4], int days, cons
 
 	/* The time axis. */
 	const int ay = plot.bottom + ScaleGUITrad(4);
-	DrawString(plot.left, plot.right, ay, fmt::format("{} days ago", n - 1), TC_BLACK, SA_LEFT);
-	DrawString(plot.left, plot.right, ay, "Now", TC_BLACK, SA_RIGHT);
+	DrawString(plot.left, plot.right, ay, fmt::format("{} {}", n - 1, GpText("วันที่แล้ว", "days ago")), TC_BLACK, SA_LEFT);
+	DrawString(plot.left, plot.right, ay, GpText("ตอนนี้", "Now"), TC_BLACK, SA_RIGHT);
 }
 
 /** The info area: the trading panel (cards) or the price chart. */
@@ -418,7 +427,7 @@ void GoldPanel::DrawInfo(const Rect &r) const
 
 	if (_gold_reserve.GetPriceCents() <= 0) {
 		const Rect card = at(l.spot);
-		DrawStringMultiLine(card.left, card.right, card.top, r.bottom - ScaleGUITrad(4), std::string("The gold market has not started yet."), TC_BLACK, SA_TOP | SA_LEFT);
+		DrawStringMultiLine(card.left, card.right, card.top, r.bottom - ScaleGUITrad(4), GpText("ตลาดทองคำยังไม่เปิด", "The gold market has not started yet."), TC_BLACK, SA_TOP | SA_LEFT);
 		return;
 	}
 
@@ -442,32 +451,32 @@ void GoldPanel::DrawInfo(const Rect &r) const
 		const int right = card.right - pad;
 		const int hn = GetCharacterHeight(FS_NORMAL);
 		const int hl = GetCharacterHeight(FS_LARGE);
-		auto big_row = [&](int top, const char *caption, const std::string &value) {
+		auto big_row = [&](int top, const std::string &caption, const std::string &value) {
 			const int value_w = std::min(static_cast<int>(GetStringBoundingBox(value, FS_LARGE).width), right - left);
 			DrawString(std::max(left, right - value_w), right, CentreBounds(top, top + l.big_h, hl), value, TC_BROWN, SA_RIGHT, false, FS_LARGE);
 			const int caption_right = right - value_w - ScaleGUITrad(8);
 			if (caption_right > left) DrawString(left, caption_right, CentreBounds(top, top + l.big_h, hn), caption, TC_BLACK, SA_LEFT);
 		};
 		const int top = card.top + ScaleGUITrad(2);
-		big_row(top, "Spot price per oz", GpMoney(price / 100));
-		big_row(top + l.big_h, "Spot price per ton", GpMoney(price * GoldReserveManager::OUNCES_PER_TON / 100));
+		big_row(top, GpText("ราคาทองต่อออนซ์", "Spot price per oz"), GpMoney(price / 100));
+		big_row(top + l.big_h, GpText("ราคาทองต่อตัน", "Spot price per ton"), GpMoney(price * GoldReserveManager::OUNCES_PER_TON / 100));
 		const int sub = top + 2 * l.big_h;
 		const std::string quote = GpMoney(_gold_reserve.GetAskCents() / 100) + " / " + GpMoney(_gold_reserve.GetBidCents() / 100);
 		const int quote_w = std::min(static_cast<int>(GetStringBoundingBox(quote).width), right - left);
 		DrawString(std::max(left, right - quote_w), right, CentreBounds(sub, sub + l.row_h, hn), quote, TC_BLACK, SA_RIGHT);
 		const int caption_right = right - quote_w - ScaleGUITrad(8);
-		if (caption_right > left) DrawString(left, caption_right, CentreBounds(sub, sub + l.row_h, hn), "Buy / sell price per oz", TC_BLACK, SA_LEFT);
+		if (caption_right > left) DrawString(left, caption_right, CentreBounds(sub, sub + l.row_h, hn), GpText("ราคาซื้อ / ขายต่อออนซ์", "Buy / sell price per oz"), TC_BLACK, SA_LEFT);
 	}
 
 	/* Card 2: the gold reserve of the money system. */
 	{
 		const Rect card = at(l.table);
 		DrawCard(card, c.paper, c);
-		DrawTableRow(card, 0, l.row_h, "Gold reserves (all)", GpMoney(_gold_reserve.GetReserveValue()) + " (" + ounces(_gold_reserve.GetTotalReserveOunces()) + ")", TC_BLACK, c);
-		DrawTableRow(card, 1, l.row_h, "Market stock for sale", ounces(_gold_reserve.market_stock_oz), TC_BLACK, c);
-		DrawTableRow(card, 2, l.row_h, "Circulating cash", GpMoney(_gold_reserve.GetCirculatingCash()), TC_BLACK, c);
-		DrawTableRow(card, 3, l.row_h, "Backing ratio (reserves / cash)", fmt::format("{}.{:02}%", backing / 100, backing % 100), TC_BLACK, c);
-		DrawTierRow(card, 4, l.row_h, "Credit standing", tier, c);
+		DrawTableRow(card, 0, l.row_h, GpText("ทองสำรองทั้งหมด", "Gold reserves (all)"), GpMoney(_gold_reserve.GetReserveValue()) + " (" + ounces(_gold_reserve.GetTotalReserveOunces()) + ")", TC_BLACK, c);
+		DrawTableRow(card, 1, l.row_h, GpText("ทองในตลาดที่ขาย", "Market stock for sale"), ounces(_gold_reserve.market_stock_oz), TC_BLACK, c);
+		DrawTableRow(card, 2, l.row_h, GpText("เงินสดหมุนเวียน", "Circulating cash"), GpMoney(_gold_reserve.GetCirculatingCash()), TC_BLACK, c);
+		DrawTableRow(card, 3, l.row_h, GpText("อัตราหนุนหลัง (ทองสำรอง / เงินสด)", "Backing ratio (reserves / cash)"), fmt::format("{}.{:02}%", backing / 100, backing % 100), TC_BLACK, c);
+		DrawTierRow(card, 4, l.row_h, GpText("ระดับเครดิต", "Credit standing"), tier, c);
 	}
 
 	if (!Company::IsValidID(_local_company)) return;
@@ -477,21 +486,21 @@ void GoldPanel::DrawInfo(const Rect &r) const
 		const Rect card = at(l.mine);
 		DrawCard(card, c.paper, c);
 		const int64_t held = _gold_reserve.GetHoldings(_local_company);
-		DrawTableRow(card, 0, l.row_h, "Your gold reserve", ounces(held) + " (" + GpMoney(_gold_reserve.GetSellNet(held)) + ")", TC_BLACK, c);
-		DrawTableRow(card, 1, l.row_h, "Unborrowed liquid cash", GpMoney(GetUnborrowedLiquidCash(_local_company)), TC_BLACK, c);
+		DrawTableRow(card, 0, l.row_h, GpText("ทองในคลังของคุณ", "Your gold reserve"), ounces(held) + " (" + GpMoney(_gold_reserve.GetSellNet(held)) + ")", TC_BLACK, c);
+		DrawTableRow(card, 1, l.row_h, GpText("เงินสดคล่องตัวที่ไม่ได้กู้", "Unborrowed liquid cash"), GpMoney(GetUnborrowedLiquidCash(_local_company)), TC_BLACK, c);
 	}
 
 	/* The alert: why Buy Gold is switched off. */
-	const char *alert = nullptr;
+	std::string alert;
 	switch (GetGoldBuyBlock(this->buy_qty)) {
-		case GoldBuyBlock::Borrowed: alert = "Alert: the cash for this order is borrowed from the central bank. Gold can only be bought with unborrowed liquid cash."; break;
-		case GoldBuyBlock::NoStock:  alert = "Alert: the market does not have that much gold for sale."; break;
-		case GoldBuyBlock::NoCash:   alert = "Alert: not enough unborrowed liquid cash for this order."; break;
+		case GoldBuyBlock::Borrowed: alert = GpText("เตือน: เงินสำหรับคำสั่งนี้เป็นเงินกู้จากธนาคารกลาง ซื้อทองได้เฉพาะด้วยเงินสดที่ไม่ได้กู้", "Alert: the cash for this order is borrowed from the central bank. Gold can only be bought with unborrowed liquid cash."); break;
+		case GoldBuyBlock::NoStock:  alert = GpText("เตือน: ตลาดมีทองขายไม่พอ", "Alert: the market does not have that much gold for sale."); break;
+		case GoldBuyBlock::NoCash:   alert = GpText("เตือน: เงินสดที่ไม่ได้กู้ไม่พอสำหรับคำสั่งนี้", "Alert: not enough unborrowed liquid cash for this order."); break;
 		default: break;
 	}
-	if (alert != nullptr) {
+	if (!alert.empty()) {
 		const Rect a = at(l.alert);
-		if (a.bottom - a.top >= GetCharacterHeight(FS_NORMAL)) DrawStringMultiLine(a.left, a.right, a.top, a.bottom, std::string(alert), TC_RED, SA_TOP | SA_LEFT);
+		if (a.bottom - a.top >= GetCharacterHeight(FS_NORMAL)) DrawStringMultiLine(a.left, a.right, a.top, a.bottom, alert, TC_RED, SA_TOP | SA_LEFT);
 	}
 }
 
@@ -525,7 +534,7 @@ void GoldPanel::DrawQuantity(const Rect &r, bool buy) const
 	const int right = r.right - ScaleGUITrad(4);
 	if (right <= left) return;
 	const int64_t qty = buy ? this->buy_qty : this->sell_qty;
-	std::string text = fmt::format("{}: {} oz", buy ? "Buy" : "Sell", qty);
+	std::string text = fmt::format("{}: {} oz", buy ? GpText("ซื้อ", "Buy") : GpText("ขาย", "Sell"), qty);
 	if (_gold_reserve.GetPriceCents() > 0) {
 		const int64_t value = buy ? _gold_reserve.GetBuyTotal(qty) : _gold_reserve.GetSellNet(qty);
 		text += fmt::format(" ~ {}", GpMoney(value));

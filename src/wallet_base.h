@@ -11,6 +11,7 @@
 #define WALLET_BASE_H
 
 #include "company_type.h"
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -37,12 +38,18 @@ enum class WalletKind : uint8_t {
 	End,      ///< End marker.
 };
 
+/** The leverage levels of a trading wallet, as the divisor of the margin (the margin of a position is its value divided by this). 0 = unlimited: no margin is held. */
+static constexpr int64_t WALLET_LEVERAGE_DIVISORS[] = {1, 10, 100, 1000, 2000, 0};
+static constexpr uint8_t WALLET_LEVERAGE_COUNT = static_cast<uint8_t>(std::size(WALLET_LEVERAGE_DIVISORS)); ///< Number of leverage levels.
+static constexpr uint8_t WALLET_LEVERAGE_DEFAULT = 1;  ///< Index of the level of a new wallet: 1:10, like before the levels existed.
+
 /** One stored wallet. */
 struct Wallet {
 	uint8_t id = 0;                 ///< Number of the wallet within its company; 1 or higher.
 	uint8_t owner = 0;              ///< Company that owns the wallet.
 	WalletKind kind = WalletKind::Trading; ///< What the money may be used for.
 	int64_t balance = 0;            ///< Money in the wallet; never negative.
+	uint8_t leverage = WALLET_LEVERAGE_DEFAULT; ///< Leverage level: an index in #WALLET_LEVERAGE_DIVISORS. Only trading wallets use it.
 };
 
 /** All stored wallets of all companies. Saved together with the trading terminal in the 'STCK' chunk. */
@@ -65,6 +72,7 @@ struct WalletRegistry {
 extern WalletRegistry _wallets;
 
 WalletKind GetWalletKind(CompanyID owner, uint8_t id);
+int64_t GetWalletLeverageDivisor(CompanyID owner, uint8_t id);
 bool IsTradingWallet(CompanyID owner, uint8_t id);
 int64_t GetWalletBalance(CompanyID owner, uint8_t id);
 int64_t GetWalletsTotal(CompanyID owner);

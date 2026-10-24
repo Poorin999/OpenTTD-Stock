@@ -26,6 +26,10 @@
  *                 STOCK_AI_MAX_EXPOSURE_PERCENT (1x, while the terminal allows 10x). Positions are closed when the target price is
  *                 reached, when they are held too long, and when the margin warning shows up.
  *
+ * Valuables: gold, silver, platinum and diamonds are traded by the same rule as the shares. Their fair price is the price of the price model
+ *                 (StockMarket::base_fp), there are no earnings to look at, the edge that is needed is smaller (STOCK_AI_VALUABLE_MIN_EDGE_PPM),
+ *                 and at most STOCK_AI_MAX_VALUABLE_POSITIONS positions are open in them. Switch off with STOCK_AI_TRADE_VALUABLES.
+ *
  * Network games: only the saved game state is read, only integers are used, and nothing is stored in the bot itself, so every client takes the same
  * decisions at the same moment. The commands of the terminal are called directly, with _current_company set to the AI company.
  */
@@ -33,6 +37,7 @@
 #include "stdafx.h"
 #include "stock_cmd.h"
 #include "stock_base.h"
+#include "valuables.h"
 #include "wallet_base.h"
 #include "wallet_cmd.h"
 #include "central_bank.h"
@@ -54,6 +59,8 @@ namespace {
 constexpr bool STOCK_AI_PLAY_ALL_COMPANIES = false;
 /** False: the bot only buys (long). True: it also sells (short) shares that are too expensive. */
 constexpr bool STOCK_AI_ALLOW_SHORTS = true;
+/** True: the bot also trades the valuables (gold, silver, platinum, diamonds) of the terminal, with the same rule as the shares (see below). */
+constexpr bool STOCK_AI_TRADE_VALUABLES = true;
 
 /* ---- Timing ---- */
 
@@ -86,6 +93,8 @@ constexpr int64_t STOCK_AI_MIN_NOTIONAL = 5'000;        ///< Smallest position w
 constexpr int64_t STOCK_AI_MIN_PRICE = 30;              ///< Shares below this price are not traded: whole money units make the stops too coarse.
 constexpr uint32_t STOCK_AI_MIN_VOLUME = 10;            ///< Smallest volume, in shares.
 constexpr int64_t STOCK_AI_MIN_EDGE_PPM = 70'000;       ///< Gain that is expected after all costs, in ppm of the price (7%).
+constexpr int64_t STOCK_AI_VALUABLE_MIN_EDGE_PPM = 25'000; ///< The same for a valuable (2.5%): its price stays closer to the fair price than the price of a share, and it has no earnings to be wrong about.
+constexpr size_t STOCK_AI_MAX_VALUABLE_POSITIONS = 2;   ///< Open positions in valuables per company, so the shares stay the main business.
 constexpr int64_t STOCK_AI_EXPECTED_HOLD_DAYS = 30;     ///< Game days that a trade is expected to be open, for the swap.
 constexpr int64_t STOCK_AI_STOP_LOSS_PPM = 100'000;     ///< Stop Loss distance from the entry price (10%).
 constexpr int64_t STOCK_AI_TRAIL_PPM = 80'000;          ///< Trailing stop distance (8%).
@@ -114,7 +123,7 @@ static bool TryRun(F &&cmd)
 /** Cash that the company keeps: a minimum plus a month of interest at the highest penalty rate. */
 static int64_t CashReserve(CompanyID id)
 {
-	const int64_t daily = BankDailyInterest(GetCentralBankDebt(id), BANK_PENALTY_MAX_BP, 0).interest;
+	const int64_t daily = BankDailyInterest(GetCentralBankDebt(id), BankPenaltyRateBp(BANK_PENALTY_LEVEL_MAX, _central_bank.policy.shift_bp), 0).interest; // The penalty rate is higher in emergency mode.
 	return STOCK_AI_MIN_RESERVE + STOCK_AI_RESERVE_INTEREST_DAYS * daily;
 }
 
@@ -225,7 +234,8 @@ static void ReviewPosition(CompanyID owner, uint32_t id)
 	if (p == nullptr) return; // Closed by its Stop Loss or Take Profit.
 
 	const CompanyID target{p->target};
-	if (!Company::IsValidID(target) || _stock_market.price_fp[target.base()] <= 0) return;
+	const bool valuable = IsValuableSymbol(p->target); // A valuable has no company, no earnings and no valuation: its fair price is the price of the price model.
+	if ((!valuable && !Company::IsValidID(target)) || _stock_market.price_fp[target.base()] <= 0) return;
 
 	const bool buy = IsStockBuy(p->type);
 	const int64_t bid = GetStockBid(target);
@@ -236,8 +246,11 @@ static void ReviewPosition(CompanyID owner, uint32_t id)
 	const int64_t tp = buy ? fair_fixed / STOCK_PRICE_SCALE : (fair_fixed + STOCK_PRICE_SCALE - 1) / STOCK_PRICE_SCALE;
 	const bool reached = buy ? (bid >= tp) : (ask <= tp);
 	const bool too_old = p->open_ym != 0 && GetStockCurrentMonth() - p->open_ym >= STOCK_AI_MAX_HOLD_MONTHS;
-	const StockSummary summary = GetStockSummary(target);
-	const bool turned_bad = buy && summary.has_earnings && summary.eps < 0;
+	bool turned_bad = false;
+	if (!valuable && buy) {
+		const StockSummary summary = GetStockSummary(target);
+		turned_bad = summary.has_earnings && summary.eps < 0;
+	}
 	if (!buy && !STOCK_AI_ALLOW_SHORTS) { ClosePositionNow(owner, id); return; }
 
 	if (reached || too_old || turned_bad || tp <= 0) {
@@ -291,10 +304,12 @@ static int64_t NetEdgePpm(CompanyID target, bool buy, int64_t exec, int64_t fair
 static void OpenBestTrade(CompanyID owner, uint8_t wallet)
 {
 	size_t open_positions = 0;
+	size_t valuable_positions = 0;
 	int64_t exposure = 0;
 	for (const StockOrder &p : _stock_market.positions) {
 		if (p.owner != owner.base() || p.wallet != wallet) continue;
 		open_positions++;
+		if (IsValuableSymbol(p.target)) valuable_positions++;
 		exposure += p.price * static_cast<int64_t>(p.volume);
 	}
 	if (open_positions >= STOCK_AI_MAX_POSITIONS || _stock_market.CountOrders(owner) >= STOCK_MAX_ORDERS_PER_COMPANY) return;
@@ -307,9 +322,15 @@ static void OpenBestTrade(CompanyID owner, uint8_t wallet)
 
 	Candidate best;
 	bool found = false;
-	for (const Company *t : Company::Iterate()) {
-		const CompanyID target = t->index;
-		if (target == owner) continue;
+	for (size_t symbol = 0; symbol < STOCK_SYMBOLS; symbol++) {
+		const CompanyID target{static_cast<uint8_t>(symbol)};
+		const bool valuable = IsValuableSymbol(symbol);
+		if (valuable) {
+			if (!STOCK_AI_TRADE_VALUABLES || valuable_positions >= STOCK_AI_MAX_VALUABLE_POSITIONS) continue;
+		} else if (!Company::IsValidID(target) || target == owner) {
+			continue;
+		}
+		if (!IsStockSymbolValid(symbol)) continue;
 		if (_stock_market.price_fp[target.base()] <= 0 || FairFixed(target) <= 0) continue;
 		if (GetStockPrice(target) < STOCK_AI_MIN_PRICE) continue;
 
@@ -319,9 +340,10 @@ static void OpenBestTrade(CompanyID owner, uint8_t wallet)
 		if (held) continue;
 
 		const int64_t fair_fixed = FairFixed(target);
-		const int64_t drift = EarningsDriftPpm(target);
+		const int64_t drift = valuable ? 0 : EarningsDriftPpm(target);
 		const int64_t trend = TrendPpm(target);
-		const StockSummary summary = GetStockSummary(target);
+		const StockSummary summary = valuable ? StockSummary{} : GetStockSummary(target);
+		const int64_t min_edge = valuable ? STOCK_AI_VALUABLE_MIN_EDGE_PPM : STOCK_AI_MIN_EDGE_PPM;
 
 		/* The price at which a small order would be executed shows how far the price is from the valuation. */
 		for (int side = 0; side < 2; side++) {
@@ -333,7 +355,7 @@ static void OpenBestTrade(CompanyID owner, uint8_t wallet)
 			const int64_t exec = GetStockExecutionPrice(target, buy, STOCK_AI_MIN_VOLUME);
 			if (exec <= 0) continue;
 			const int64_t edge = NetEdgePpm(target, buy, exec, fair_fixed);
-			if (edge < STOCK_AI_MIN_EDGE_PPM) continue;
+			if (edge < min_edge) continue;
 
 			const int64_t score = edge + (buy ? drift : -drift) / 4;
 			if (!found || score > best.score) {
@@ -348,9 +370,10 @@ static void OpenBestTrade(CompanyID owner, uint8_t wallet)
 	const int64_t start_price = std::max<int64_t>(1, GetStockPrice(best.target));
 	uint32_t volume = static_cast<uint32_t>(std::min<int64_t>(notional / start_price, STOCK_MAX_VOLUME));
 	int64_t exec = 0;
+	const int64_t best_min_edge = IsValuableSymbol(best.target.base()) ? STOCK_AI_VALUABLE_MIN_EDGE_PPM : STOCK_AI_MIN_EDGE_PPM;
 	while (volume >= STOCK_AI_MIN_VOLUME) {
 		exec = GetStockExecutionPrice(best.target, best.buy, volume);
-		if (exec > 0 && NetEdgePpm(best.target, best.buy, exec, best.fair_fixed) >= STOCK_AI_MIN_EDGE_PPM) break;
+		if (exec > 0 && NetEdgePpm(best.target, best.buy, exec, best.fair_fixed) >= best_min_edge) break;
 		volume /= 2;
 	}
 	if (volume < STOCK_AI_MIN_VOLUME || exec <= 0) return;

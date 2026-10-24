@@ -635,6 +635,8 @@ void BotTrade(CompanyID id)
 			const int64_t free_margin = GetStockFreeMargin(id, wallet);
 			StockOrder probe;
 			probe.price = best_long ? GetStockAsk(best) : GetStockBid(best);
+			probe.owner = id.base();
+			probe.wallet = wallet;
 			probe.volume = 1000;
 			const int64_t margin_per_1000 = GetStockMargin(probe);
 			if (probe.price > 0 && margin_per_1000 > 0 && free_margin > 0) {

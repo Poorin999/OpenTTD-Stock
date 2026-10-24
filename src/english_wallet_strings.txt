@@ -39,3 +39,8 @@ STR_STOCK_ERROR_NO_FUNDS                                        :{WHITE}Not enou
 STR_STOCK_TF_DAY                                                :Daily
 STR_STOCK_TIP_TF_DAY                                            :{BLACK}Show one candle per day. Daily candles are only recorded from the first time you open this view, so there is no history before that
 STR_STOCK_DAILY_WAIT                                            :{WHITE}Recording daily candles. They appear as the days pass
+STR_STOCK_LEVERAGE                                              :{BLACK}LV
+STR_STOCK_TIP_LEVERAGE                                          :{BLACK}Leverage of the trading wallet: the margin of a position is its value divided by this. 1:Unlimited holds no margin. It applies to the open positions too
+STR_WALLET_ERROR_CANT_LEVERAGE                                  :{WHITE}Can't change the leverage...
+STR_WALLET_ERROR_LEVERAGE_MARGIN                                :{WHITE}The open positions need more margin than the equity at this leverage
+STR_STOCK_LEVERAGE_VALUE                                        :{BLACK}LV {RAW_STRING}

@@ -153,6 +153,12 @@ static GameTimeframe FrameOfWidget(WidgetID widget)
 	}
 }
 
+/** The leverage as text: "1:100", or "1:Unlimited" for the divisor 0. */
+static std::string LeverageText(int64_t divisor)
+{
+	return divisor > 0 ? fmt::format("1:{}", divisor) : std::string("1:Unlimited");
+}
+
 static uint8_t _stock_active_wallet = WALLET_CASH; ///< The wallet that the terminal shows and trades with; only for the local company.
 
 /**
@@ -528,6 +534,12 @@ struct StockWindow : Window {
 
 	void OnDropdownSelect(WidgetID widget, int index, [[maybe_unused]] int click_result) override
 	{
+		if (widget == WID_ST_LEVERAGE && Company::IsValidID(_local_company)) {
+			if (index >= 0 && index < WALLET_LEVERAGE_COUNT) {
+				Command<CMD_WALLET_LEVERAGE>::Post(STR_WALLET_ERROR_CANT_LEVERAGE, GetStockActiveWallet(), static_cast<uint8_t>(index));
+			}
+			return;
+		}
 		if (widget != WID_ST_WALLET_DROPDOWN || !Company::IsValidID(_local_company)) return;
 		for (uint8_t id : _wallets.GetIds(_local_company)) {
 			if (id == index) {
@@ -543,6 +555,9 @@ struct StockWindow : Window {
 		if (widget == WID_ST_WALLET_DROPDOWN && Company::IsValidID(_local_company)) {
 			const uint8_t wallet = GetStockActiveWallet();
 			return GetString(STR_STOCK_WALLET, GetWalletName(_local_company, wallet), GetWalletBalance(_local_company, wallet));
+		}
+		if (widget == WID_ST_LEVERAGE && Company::IsValidID(_local_company)) {
+			return GetString(STR_STOCK_LEVERAGE_VALUE, LeverageText(GetWalletLeverageDivisor(_local_company, GetStockActiveWallet())));
 		}
 		return this->Window::GetWidgetString(widget, stringid);
 	}
@@ -783,6 +798,18 @@ struct StockWindow : Window {
 				for (const auto &[id, volume] : to_close) {
 					Command<CMD_STOCK_CLOSE>::Post(STR_STOCK_ERROR_CANT_CLOSE, id, volume);
 				}
+				break;
+			}
+
+			case WID_ST_LEVERAGE: {
+				if (!Company::IsValidID(_local_company)) break;
+				const Wallet *w = _wallets.Find(_local_company, GetStockActiveWallet());
+				if (w == nullptr || w->kind != WalletKind::Trading) break;
+				DropDownList list;
+				for (uint8_t level = 0; level < WALLET_LEVERAGE_COUNT; level++) {
+					list.push_back(MakeDropDownListStringItem(fmt::format("LV {}", LeverageText(WALLET_LEVERAGE_DIVISORS[level])), level));
+				}
+				ShowDropDownList(this, std::move(list), w->leverage, WID_ST_LEVERAGE, 0);
 				break;
 			}
 
@@ -1142,8 +1169,8 @@ struct StockWindow : Window {
 			const ValuableInfo &info = ValuablesManager::Info(this->selected.base() - STOCK_FIRST_VALUABLE);
 			const int64_t bid = GetStockBid(this->selected);
 			const int64_t ask = GetStockAsk(this->selected);
-			const std::string text = fmt::format("{}: 1 unit = {}   {} 1:{}   Spread {}   1 LOT = 100 units", info.name, info.unit,
-					StockText("เลเวอเรจ", "Leverage"), info.leverage, ask - bid);
+			const std::string text = fmt::format("{}: 1 unit = {}   {} {}   Spread {}   1 LOT = 100 units", info.name, info.unit,
+					StockText("เลเวอเรจ", "Leverage"), LeverageText(Company::IsValidID(_local_company) ? GetWalletLeverageDivisor(_local_company, GetStockActiveWallet()) : STOCK_MARGIN_DIVISOR), ask - bid);
 			DrawString(r.left + 4, r.right - 4, top, text, TC_LIGHT_BLUE, SA_LEFT);
 			return;
 		}
@@ -1820,6 +1847,7 @@ static constexpr std::initializer_list<NWidgetPart> _nested_stock_widgets = {
 	EndContainer(),
 	NWidget(NWID_HORIZONTAL),
 		NWidget(WWT_DROPDOWN, COLOUR_GREY, WID_ST_WALLET_DROPDOWN), SetMinimalSize(190, 14), SetFill(0, 0), SetStringTip(STR_STOCK_WALLET, STR_STOCK_TIP_WALLET_SELECT),
+		NWidget(WWT_DROPDOWN, COLOUR_GREY, WID_ST_LEVERAGE), SetMinimalSize(130, 14), SetFill(0, 0), SetStringTip(STR_STOCK_LEVERAGE, STR_STOCK_TIP_LEVERAGE),
 		NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_ST_WALLET_NEW), SetMinimalSize(76, 14), SetStringTip(STR_STOCK_WALLET_NEW, STR_STOCK_TIP_WALLET_NEW),
 		NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_ST_WALLET_DELETE), SetMinimalSize(76, 14), SetStringTip(STR_STOCK_WALLET_DELETE, STR_STOCK_TIP_WALLET_DELETE),
 		NWidget(WWT_PUSHBTN, COLOUR_GREY, WID_STOCK_CLOSE_ALL), SetMinimalSize(76, 14),

@@ -38,6 +38,7 @@ enum StockWidgets : WidgetID {
 	WID_ST_TF_MN,            ///< Toggle button: chart with one candle per month.
 	WID_ST_TF_Y1,            ///< Toggle button: chart with one candle per year.
 	WID_ST_WALLET_DROPDOWN,  ///< Dropdown: the wallet that is shown and traded with.
+	WID_ST_LEVERAGE,         ///< Dropdown: the leverage (LV) of the wallet that is shown.
 	WID_ST_PNL,              ///< Panel: floating and realised profit of the selected wallet.
 	WID_ST_RISK,             ///< Panel: margin usage and the margin call warning.
 	WID_ST_CHART_EXPAND,     ///< Button: enlarge the window to (nearly) the whole screen so that the chart gets bigger; press again to restore.

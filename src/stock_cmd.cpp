@@ -95,7 +95,9 @@ CommandCost CmdStockOpen(DoCommandFlags flags, CompanyID target, StockOrderType 
 	int64_t commission = 0;
 	if (market) {
 		StockOrder probe;
-		probe.target = target.base(); // The leverage depends on the symbol.
+		probe.target = target.base();
+		probe.owner = _current_company.base(); // The leverage depends on the trading wallet.
+		probe.wallet = wallet;
 		probe.price = entry;
 		probe.volume = volume;
 		commission = GetStockCommission(entry * static_cast<int64_t>(volume));

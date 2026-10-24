@@ -144,6 +144,13 @@ bool IsTradingWallet(CompanyID owner, uint8_t id)
 	return GetWalletKind(owner, id) == WalletKind::Trading;
 }
 
+/** The margin divisor of the leverage of a wallet: 10 for 1:10, 0 for unlimited. A wallet that does not exist has the default level. */
+int64_t GetWalletLeverageDivisor(CompanyID owner, uint8_t id)
+{
+	const Wallet *w = _wallets.Find(owner, id);
+	return WALLET_LEVERAGE_DIVISORS[w != nullptr && w->leverage < WALLET_LEVERAGE_COUNT ? w->leverage : WALLET_LEVERAGE_DEFAULT];
+}
+
 /** Money in a wallet; for #WALLET_CASH the money of the company. 0 when the wallet does not exist. */
 int64_t GetWalletBalance(CompanyID owner, uint8_t id)
 {

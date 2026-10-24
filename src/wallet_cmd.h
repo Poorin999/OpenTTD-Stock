@@ -22,10 +22,12 @@
 CommandCost CmdWalletCreate(DoCommandFlags flags, WalletKind kind);
 CommandCost CmdWalletDelete(DoCommandFlags flags, uint8_t wallet);
 CommandCost CmdWalletTransfer(DoCommandFlags flags, uint8_t from, uint8_t to, Money amount);
+CommandCost CmdWalletLeverage(DoCommandFlags flags, uint8_t wallet, uint8_t level);
 
 DEF_CMD_TRAIT(CMD_WALLET_CREATE,   CmdWalletCreate,   {}, CommandType::MoneyManagement)
 DEF_CMD_TRAIT(CMD_WALLET_DELETE,   CmdWalletDelete,   {}, CommandType::MoneyManagement)
 DEF_CMD_TRAIT(CMD_WALLET_TRANSFER, CmdWalletTransfer, {}, CommandType::MoneyManagement)
+DEF_CMD_TRAIT(CMD_WALLET_LEVERAGE, CmdWalletLeverage, {}, CommandType::MoneyManagement)
 
 #endif /* WALLET_CMD_H */
 

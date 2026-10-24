@@ -11,6 +11,7 @@
 #include <chrono>
 #include <optional>
 #include "central_bank.h"
+#include "gold_reserve.h"
 #include "central_bank_gui.h"
 #include "wallet_base.h"
 #include "wallet_cmd.h"
@@ -190,6 +191,7 @@ static void DrawAccountStatement(const Rect &r, int offset)
 	category("Gold Reserve (exchange of cash for gold, not earnings)");
 	booked("Gold Purchases (bought for the vault)", LedgerItem::GoldBuy);
 	booked("Gold Sales (sold from the vault)", LedgerItem::GoldSell);
+	booked("Bank Gold Operations (cash paid in / taken out)", LedgerItem::BankGoldOp);
 
 	category("Assets & Operations");
 	yearly("Vehicle & Infrastructure Running Costs", {EXPENSES_TRAIN_RUN, EXPENSES_ROADVEH_RUN, EXPENSES_AIRCRAFT_RUN, EXPENSES_SHIP_RUN, EXPENSES_PROPERTY});
@@ -337,6 +339,7 @@ static void DrawArchiveStatement(const Rect &r, int age)
 	category("Gold Reserve (exchange of cash for gold, not earnings)");
 	line("Gold Purchases (bought for the vault)", GetLedgerEntry(_local_company, LedgerItem::GoldBuy, year), true, false);
 	line("Gold Sales (sold from the vault)", GetLedgerEntry(_local_company, LedgerItem::GoldSell, year), true, false);
+	line("Bank Gold Operations (cash paid in / taken out)", GetLedgerEntry(_local_company, LedgerItem::BankGoldOp, year), true, false);
 
 	category("Assets & Operations");
 	yearly("Vehicle & Infrastructure Running Costs", LedgerItem::YearRunning, {EXPENSES_TRAIN_RUN, EXPENSES_ROADVEH_RUN, EXPENSES_AIRCRAFT_RUN, EXPENSES_SHIP_RUN, EXPENSES_PROPERTY});
@@ -553,6 +556,7 @@ struct CentralBankWindow : Window {
 			case LedgerItem::BankLoan:        return e.amount >= 0 ? CbText("กู้เงิน", "Borrow") : CbText("ชำระคืน", "Repay");
 			case LedgerItem::GoldBuy:         return CbText("ซื้อทอง", "Gold buy");
 			case LedgerItem::GoldSell:        return CbText("ขายทอง", "Gold sale");
+			case LedgerItem::BankGoldOp:      return e.amount >= 0 ? CbText("ธนาคารซื้อทอง: เงินเข้า", "Bank gold buy: cash in") : CbText("ธนาคารขายทอง: เงินออก", "Bank gold sale: cash out");
 			default:                          return "";
 		}
 	}
@@ -675,7 +679,7 @@ struct CentralBankWindow : Window {
 
 /** The account statement window: this year and last year, in four groups. It is its own window, so it can stay open next to the bank window. */
 struct CentralBankStatementWindow : Window {
-	static constexpr int STATEMENT_ROWS = 31; ///< Number of rows in the account statement, with room for the notes.
+	static constexpr int STATEMENT_ROWS = 32; ///< Number of rows in the account statement, with room for the notes.
 
 	int offset = 0; ///< How many years back the statement is: 0 = this year and last year.
 
@@ -778,6 +782,7 @@ static void DrawMonetaryPolicy(const Rect &r)
 
 	/* Group 2: what the bank decided. */
 	row(CbText("ส่วนปรับดอกเบี้ย (นโยบาย)", "Policy rate shift"), pct(p.shift_bp, true), p.shift_bp > 0 ? TC_ORANGE : (p.shift_bp < 0 ? TC_GREEN : TC_WHITE));
+	row(CbText("โหมดนโยบาย", "Policy mode"), p.emergency ? CbText("ฉุกเฉิน (เงินเฟ้อสูง)", "EMERGENCY (high inflation)") : (p.Extended() ? CbText("กำลังกลับสู่ปกติ", "returning to normal") : CbText("ปกติ", "Normal")), p.emergency ? TC_RED : (p.Extended() ? TC_ORANGE : TC_GREY));
 	row(CbText("การปรับครั้งล่าสุด", "Last change"), p.measured ? pct(p.last_step_bp, true) : std::string("-"), TC_GREY);
 	const int64_t today = static_cast<int64_t>(GameTimeManager::Get().GetCurrentGameDay());
 	const int64_t left_days = p.last_decision_day < 0 ? POLICY_DECISION_DAYS : std::clamp<int64_t>(POLICY_DECISION_DAYS - (today - p.last_decision_day), 0, POLICY_DECISION_DAYS);
@@ -787,19 +792,73 @@ static void DrawMonetaryPolicy(const Rect &r)
 	/* Group 3: the rates of the loans now. */
 	row(CbText("ดอกเบี้ยเงินกู้ เครดิตดี", "Loan rate, good credit"), fmt::format("{} - {}", pct(BankShiftedRateBp(BANK_RATE_GOOD_MIN_BP, p.shift_bp)), pct(BankShiftedRateBp(BANK_RATE_GOOD_MAX_BP, p.shift_bp))));
 	row(CbText("ดอกเบี้ยเงินกู้ เครดิตต่ำ", "Loan rate, poor credit"), fmt::format("{} - {}", pct(BankShiftedRateBp(BANK_RATE_POOR_MIN_BP, p.shift_bp)), pct(BankShiftedRateBp(BANK_RATE_POOR_MAX_BP, p.shift_bp))));
-	row(CbText("ดอกเบี้ยผิดนัด", "Penalty rate"), fmt::format("{} - {}", pct(BANK_PENALTY_MIN_BP), pct(BANK_PENALTY_MAX_BP)), TC_RED);
+	row(CbText("ดอกเบี้ยผิดนัด", "Penalty rate"), fmt::format("{} - {}", pct(BankPenaltyRateBp(1, p.shift_bp)), pct(BankPenaltyRateBp(BANK_PENALTY_LEVEL_MAX, p.shift_bp))), TC_RED);
 	separator();
 
-	/* Group 4: the rule of the bank. */
+	/* Group 4: the credit limit follows the policy and the credit standing. */
+	{
+		const int64_t share = BankPolicyCreditPercent(p.shift_bp);
+		const int64_t tier_percent = GetCentralBankTierCreditPercent();
+		row(CbText("วงเงินกู้ต่อส่วนของเจ้าของ (นโยบาย)", "Credit limit, share of equity (policy)"), fmt::format("{}%", share), share < CENTRAL_BANK_CREDIT_PERCENT ? TC_ORANGE : (share > CENTRAL_BANK_CREDIT_PERCENT ? TC_GREEN : TC_WHITE));
+		row(CbText("ระดับเครดิตปรับวงเงิน", "Credit standing scales the limit"), fmt::format("{} x{}%", GetCreditTierName(_gold_reserve.GetCreditTier()), tier_percent), tier_percent < 100 ? TC_ORANGE : (tier_percent > 100 ? TC_GREEN : TC_WHITE));
+		if (Company::IsValidID(_local_company)) {
+			row(CbText("วงเงินกู้ของบริษัทคุณตอนนี้", "Your credit limit now"), GetString(STR_JUST_CURRENCY_LONG, GetCentralBankCreditLimit(_local_company)), TC_GREEN);
+		} else {
+			row(CbText("วงเงินกู้ของบริษัทคุณตอนนี้", "Your credit limit now"), std::string("-"), TC_GREY);
+		}
+	}
+	separator();
+
+	/* Group 5: the decision log, the newest first. */
+	DrawString(left, right, y, CbText("บันทึกการตัดสินใจ", "Decision log"), TC_LIGHT_BLUE, SA_LEFT);
+	y += row_h;
+	for (size_t i = 0; i < 5; i++) {
+		if (i >= p.log.size()) {
+			if (i == 0) row(CbText("ยังไม่มีการตัดสินใจ", "No decision yet"), std::string("-"), TC_GREY);
+			else y += row_h;
+			continue;
+		}
+		const PolicyDecision &d = p.log[i];
+		const char *what_th = d.shift_after > d.shift_before ? "ขึ้น" : (d.shift_after < d.shift_before ? "ลง" : "คงที่");
+		const char *what_en = d.shift_after > d.shift_before ? "tighten" : (d.shift_after < d.shift_before ? "ease" : "hold");
+		row(fmt::format("D{}{} {} ({} {}, {} {})", d.day + 1, d.emergency ? "!" : "", CbText(what_th, what_en), CbText("เฟ้อ", "infl"), pct(d.inflation_bp), CbText("โต", "growth"), pct(d.growth_bp)),
+				fmt::format("{} -> {}", pct(d.shift_before, true), pct(d.shift_after, true)),
+				d.shift_after > d.shift_before ? TC_ORANGE : (d.shift_after < d.shift_before ? TC_GREEN : TC_GREY));
+	}
+	separator();
+
+	/* Group 6: the gold of the bank. */
+	{
+		const int64_t backing = _gold_reserve.GetBackingBp();
+		row(CbText("สำรองทองต่อเงินสดในระบบ (ซื้อ-ขาย)", "Gold backing (buy .. sell band)"), fmt::format("{}.{:02}%  ({} .. {})", backing / 100, backing % 100,
+				pct(BANK_GOLD_BUY_BELOW_BP), pct(BANK_GOLD_SELL_ABOVE_BP)));
+		row(CbText("งบซื้อทองของธนาคาร", "Gold budget of the bank"), GetString(STR_JUST_CURRENCY_LONG, _central_bank.trading_revenue_cents / 100), TC_GREEN);
+		DrawString(left, right, y, CbText("ธนาคารซื้อขายทองล่าสุด", "Latest gold trades of the bank"), TC_LIGHT_BLUE, SA_LEFT);
+		y += row_h;
+		for (size_t i = 0; i < 3; i++) {
+			if (i >= _central_bank.gold_log.size()) {
+				if (i == 0) row(CbText("ยังไม่เคยซื้อขาย", "No trade yet"), std::string("-"), TC_GREY);
+				else y += row_h;
+				continue;
+			}
+			const BankGoldTrade &t = _central_bank.gold_log[i];
+			row(fmt::format("D{} {} {} oz", t.day + 1, t.ounces >= 0 ? CbText("ซื้อ", "bought") : CbText("ขาย", "sold"), t.ounces >= 0 ? t.ounces : -t.ounces),
+					fmt::format("@ {}{}", GetString(STR_JUST_CURRENCY_LONG, t.price_cents / 100), t.cash == 0 ? std::string() : fmt::format("  ({}{})", t.cash > 0 ? "+" : "-", GetString(STR_JUST_CURRENCY_LONG, t.cash > 0 ? t.cash : -t.cash))), t.ounces >= 0 ? TC_ORANGE : TC_GREEN);
+		}
+	}
+	separator();
+
+	/* Group 7: the rule of the bank. */
 	row(CbText("ทบทวนทุก", "Review every"), fmt::format("{} {}", POLICY_DECISION_DAYS, CbText("วัน", "days")), TC_GREY);
-	row(CbText("ปรับได้ไม่เกินครั้งละ", "At most per review"), pct(POLICY_MAX_STEP_BP), TC_GREY);
-	row(CbText("ช่วงส่วนปรับ", "Range of the shift"), fmt::format("{} .. {}", pct(POLICY_SHIFT_MIN_BP, true), pct(POLICY_SHIFT_MAX_BP, true)), TC_GREY);
+	row(CbText("ปรับได้ไม่เกินครั้งละ", "At most per review"), pct(p.Extended() ? POLICY_EMERGENCY_STEP_BP : POLICY_MAX_STEP_BP), TC_GREY);
+	row(CbText("ช่วงส่วนปรับ", "Range of the shift"), fmt::format("{} .. {}", pct(POLICY_SHIFT_MIN_BP, true), pct(p.Extended() ? POLICY_EMERGENCY_SHIFT_MAX_BP : POLICY_SHIFT_MAX_BP, true)), TC_GREY);
+	row(CbText("โหมดฉุกเฉิน เริ่ม / สิ้นสุด เมื่อเงินเฟ้อ", "Emergency mode on / off at inflation"), fmt::format("> {} / < {}", pct(POLICY_EMERGENCY_ON_BP), pct(POLICY_EMERGENCY_OFF_BP)), TC_GREY);
 }
 
 /** The monetary policy window: its own window, so it can stay open next to the bank window. */
 struct CentralBankPolicyWindow : Window {
-	static constexpr int POLICY_ROWS = 13; ///< Rows of the panel.
-	static constexpr int POLICY_SEPARATORS = 4;
+	static constexpr int POLICY_ROWS = 30; ///< Rows of the panel: 15 of the policy, 3 of the credit limit, the decision log (a heading and 5 lines), the gold of the bank (2 rows, a heading and 3 lines).
+	static constexpr int POLICY_SEPARATORS = 7;
 
 	/** Redraw regularly: the numbers change all the time. */
 	const IntervalTimer<TimerWindow> redraw_interval = {std::chrono::milliseconds(500), [this](auto) {
@@ -819,7 +878,7 @@ struct CentralBankPolicyWindow : Window {
 	void UpdateWidgetSize(WidgetID widget, Dimension &size, [[maybe_unused]] const Dimension &padding, [[maybe_unused]] Dimension &fill, [[maybe_unused]] Dimension &resize) override
 	{
 		if (widget != WID_CBP_PANEL) return;
-		size.width = std::max<uint>(size.width, ScaleGUITrad(380));
+		size.width = std::max<uint>(size.width, ScaleGUITrad(520));
 		size.height = std::max<uint>(size.height, CbRowHeight() * POLICY_ROWS + ScaleGUITrad(10) * POLICY_SEPARATORS + ScaleGUITrad(12));
 	}
 
@@ -868,7 +927,7 @@ struct CentralBankArchiveWindow : Window {
 				break;
 			case WID_CBA_PANEL:
 				size.width = std::max<uint>(size.width, ScaleGUITrad(640));
-				size.height = std::max<uint>(size.height, CbRowHeight() * 29 + ScaleGUITrad(12));
+				size.height = std::max<uint>(size.height, CbRowHeight() * 30 + ScaleGUITrad(12));
 				break;
 			default: break;
 		}

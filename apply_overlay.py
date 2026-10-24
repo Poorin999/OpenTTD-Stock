@@ -12,7 +12,8 @@ It looks for the mod files by name anywhere next to this script, so it does not 
     old loans are moved to the central bank by central_bank.cpp; bankruptcy and the loan score count the central bank debt
   - window_type.h / widgets: the Central Bank window class (WC_CENTRAL_BANK)
   - ShowCompanyFinances() (company_gui.cpp), statusbar_gui.cpp: the finances menu and the statusbar button open ShowCentralBankWindow()
-  - script_company.hpp/.cpp: ScriptCompany::GetCentralBankDebt and GetCentralBankAvailable, so that AIs can see the central bank debt
+  - script_company.hpp/.cpp: ScriptCompany::GetCentralBankDebt and GetCentralBankAvailable, so that AIs can see the central bank debt;
+    ScriptCompany::GetGoldHoldings and GetGoldPrice, so that AIs and game scripts can see the gold market
   - timer_game_calendar.cpp, economy_settings.ini: the date of the original game follows the HH:MM clock (a new day starts at 00:00)
 """
 import re
@@ -55,6 +56,7 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_WALLET_CREATE", "create a trading wallet"),
     ("CMD_WALLET_DELETE", "delete a trading wallet"),
     ("CMD_WALLET_TRANSFER", "move money between two wallets"),
+    ("CMD_WALLET_LEVERAGE", "set the leverage of a trading wallet"),
     ("CMD_BANK_BORROW", "borrow from the central bank"),
     ("CMD_BANK_REPAY", "repay the central bank"),
     ("CMD_GOLD_BUY", "buy gold for the reserve"),
@@ -784,6 +786,41 @@ def main(tree):
             hpp.write_text(h, encoding="utf-8")
             cpp.write_text(c, encoding="utf-8")
             print("script_company: GetCentralBankDebt and GetCentralBankAvailable added to the script API")
+
+    # Script API: the gold market (OpenTTD-Stock mod). Same anchors and style as the central bank functions above.
+    if hpp.exists() and cpp.exists():
+        h = hpp.read_text(encoding="utf-8")
+        c = cpp.read_text(encoding="utf-8")
+        decl_rx = r"^([ \t]*)static Money GetLoanAmount\(\);[ \t]*\n"
+        if "GetGoldHoldings" in h and "GetGoldHoldings" in c:
+            print("script_company: gold functions already present")
+        elif not re.search(decl_rx, h, re.M):
+            print("WARNING: ScriptCompany::GetLoanAmount not found in script_company.hpp, the script API has no gold functions")
+        else:
+            decls = (
+                "\n\t/**\n\t * Get the ounces of gold that the company holds in its vault (OpenTTD-Stock mod).\n"
+                "\t * @param company The company to get the gold of.\n\t * @pre ResolveCompanyID(company) != COMPANY_INVALID.\n"
+                "\t * @return The ounces of gold, or -1 when the company is not valid.\n\t */\n"
+                "\tstatic SQInteger GetGoldHoldings(CompanyID company);\n"
+                "\n\t/**\n\t * Get the price of one ounce of gold (OpenTTD-Stock mod): the middle price of the gold market, in the money of the game.\n"
+                "\t * @return The price of one ounce, or -1 when the gold market has not started yet.\n\t */\n"
+                "\tstatic Money GetGoldPrice();\n"
+            )
+            m = re.search(decl_rx, h, re.M)
+            h = h[:m.end()] + decls + h[m.end():]
+            impl = (
+                "\n/* static */ SQInteger ScriptCompany::GetGoldHoldings(ScriptCompany::CompanyID company)\n{\n"
+                "\tcompany = ResolveCompanyID(company);\n\tif (company == ScriptCompany::COMPANY_INVALID) return -1;\n\n"
+                "\treturn static_cast<SQInteger>(::_gold_reserve.GetHoldings(ScriptCompany::FromScriptCompanyID(company)));\n}\n"
+                "\n/* static */ Money ScriptCompany::GetGoldPrice()\n{\n"
+                "\tif (::_gold_reserve.GetPriceCents() <= 0) return -1;\n"
+                "\treturn Money(::_gold_reserve.GetPriceCents() / 100);\n}\n"
+            )
+            c = ensure_include(c, '#include "../../gold_reserve.h"', ['#include "../../central_bank.h"', '#include "../../company_base.h"', '#include "../../company_func.h"', '#include "script_company.hpp"', '#include "../../stdafx.h"'])
+            c = c.rstrip("\n") + "\n" + impl
+            hpp.write_text(h, encoding="utf-8")
+            cpp.write_text(c, encoding="utf-8")
+            print("script_company: GetGoldHoldings and GetGoldPrice added to the script API")
 
     print("overlay applied")
 
