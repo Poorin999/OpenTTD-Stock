@@ -1,0 +1,40 @@
+# Strings of the wallet system, for src/lang/english.txt. apply_overlay.py adds them; it skips strings that already exist
+# and replaces the ones listed in REPLACE_KEYS.
+
+STR_WALLET_NAME_CASH                                            :Company cash
+STR_WALLET_NAME_TRADING                                         :Trading #{NUM}
+STR_WALLET_NAME_FUEL                                            :Fuel reserve
+STR_WALLET_NAME_UNKNOWN                                         :Unknown wallet
+STR_WALLET_ERROR_BAD_KIND                                       :{WHITE}This kind of wallet can't be created or deleted
+STR_WALLET_ERROR_BAD_WALLET                                     :{WHITE}This wallet doesn't exist
+STR_WALLET_ERROR_LIMIT                                          :{WHITE}You already have the maximum number of trading wallets
+STR_WALLET_ERROR_LAST                                           :{WHITE}You need at least one trading wallet
+STR_WALLET_ERROR_IN_USE                                         :{WHITE}Close the open positions and cancel the pending orders of this wallet first
+STR_WALLET_ERROR_CANT_CREATE                                    :{WHITE}Can't create the wallet...
+STR_WALLET_ERROR_CANT_DELETE                                    :{WHITE}Can't delete the wallet...
+STR_STOCK_WALLET                                                :{BLACK}{RAW_STRING}: {CURRENCY_LONG}
+STR_STOCK_WALLET_NEW                                            :+ Wallet
+STR_STOCK_WALLET_DELETE                                         :- Wallet
+STR_STOCK_TIP_WALLET                                            :{BLACK}The wallet that is shown, traded with, and used by Deposit and Withdraw. Click to switch to the next wallet
+STR_STOCK_TIP_WALLET_NEW                                        :{BLACK}Create a new trading wallet. Every wallet has its own balance, margin and stop-out, so positions of different wallets do not affect each other
+STR_STOCK_TIP_WALLET_DELETE                                     :{BLACK}Delete the selected trading wallet. Its money goes back to the company cash. A wallet with open positions or pending orders can't be deleted
+STR_STOCK_ACCOUNT_RESERVE                                       :{WHITE}{RAW_STRING} is not used for trading. Use Deposit and Withdraw to fill or empty it
+STR_STOCK_TIP_DEPOSIT                                           :{BLACK}Move money from your company cash to the selected wallet
+STR_STOCK_TIP_WITHDRAW                                          :{BLACK}Move money from the selected wallet back to your company cash. From a trading wallet only the free margin can be withdrawn
+
+# Strings of the deposit / withdraw buttons and of the timeframe buttons (same as in apply_wallet_fix.py)
+STR_STOCK_DEPOSIT                                               :Deposit
+STR_STOCK_WITHDRAW                                              :Withdraw
+STR_STOCK_TF_MONTH                                              :Monthly
+STR_STOCK_TF_YEAR                                               :Yearly
+STR_STOCK_TIP_TF_MONTH                                          :{BLACK}Show one candle per month
+STR_STOCK_TIP_TF_YEAR                                           :{BLACK}Show one candle per year. Drag the chart with the mouse to scroll through the history
+STR_STOCK_QUERY_DEPOSIT                                         :Amount to deposit
+STR_STOCK_QUERY_WITHDRAW                                        :Amount to withdraw
+STR_STOCK_TRADING_BALANCE                                       :{WHITE}   Trading balance: {CURRENCY_LONG}
+STR_STOCK_ERROR_CANT_TRANSFER                                   :{WHITE}Can't transfer the money...
+STR_STOCK_ERROR_BAD_AMOUNT                                      :{WHITE}Invalid amount
+STR_STOCK_ERROR_NO_FUNDS                                        :{WHITE}Not enough money
+STR_STOCK_TF_DAY                                                :Daily
+STR_STOCK_TIP_TF_DAY                                            :{BLACK}Show one candle per day. Daily candles are only recorded from the first time you open this view, so there is no history before that
+STR_STOCK_DAILY_WAIT                                            :{WHITE}Recording daily candles. They appear as the days pass

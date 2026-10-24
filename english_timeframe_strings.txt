@@ -1,0 +1,19 @@
+# Strings of the timeframe buttons and of the chart (all timeframes are periods of the game clock of the mod)
+STR_STOCK_TF_5M                                                 :5m
+STR_STOCK_TF_1H                                                 :1h
+STR_STOCK_TF_4H                                                 :4h
+STR_STOCK_TF_12H                                                :12h
+STR_STOCK_TF_D1                                                 :Day
+STR_STOCK_TF_W1                                                 :Week
+STR_STOCK_TF_MN                                                 :Month
+STR_STOCK_TF_Y1                                                 :Year
+STR_STOCK_TIP_TF_5M                                             :{BLACK}Show one candle per 5 game minutes (5 real seconds). Drag the chart with the mouse to scroll through the history
+STR_STOCK_TIP_TF_1H                                             :{BLACK}Show one candle per game hour (1 real minute). Drag the chart with the mouse to scroll through the history
+STR_STOCK_TIP_TF_4H                                             :{BLACK}Show one candle per 4 game hours (4 real minutes). Drag the chart with the mouse to scroll through the history
+STR_STOCK_TIP_TF_12H                                            :{BLACK}Show one candle per 12 game hours (12 real minutes). Drag the chart with the mouse to scroll through the history
+STR_STOCK_TIP_TF_D1                                             :{BLACK}Show one candle per game day (24 game hours = 24 real minutes). Drag the chart with the mouse to scroll through the history
+STR_STOCK_TIP_TF_W1                                             :{BLACK}Show one candle per game week (7 game days = 168 real minutes). Drag the chart with the mouse to scroll through the history
+STR_STOCK_TIP_TF_MN                                             :{BLACK}Show one candle per game month (30 game days = 720 real minutes). Drag the chart with the mouse to scroll through the history
+STR_STOCK_TIP_TF_Y1                                             :{BLACK}Show one candle per game year (365 game days = 8,760 real minutes). Drag the chart with the mouse to scroll through the history
+STR_STOCK_FRAME_WAIT                                            :{WHITE}Collecting candles. They appear as game time passes
+STR_STOCK_TIP_CHART                                             :{BLACK}Mouse wheel: zoom in/out. Ctrl + mouse wheel: zoom the price. Drag: scroll in time (left/right; drag to the left past the newest candle to show the empty space of the future) and in price (up/down). Double click: reset the view

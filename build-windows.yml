@@ -1,0 +1,132 @@
+name: Build OpenTTD 15.3 (Stock Market) for Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+# vcpkg pushes the packages it builds to a NuGet binary cache (GitHub Packages) with the workflow token.
+# Without "packages: write" that push throws (the long NuGet stack trace at the end of the log) and the vcpkg install is reported as failed.
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  windows:
+    # windows-latest uses a newer MSVC toolchain than the legacy breakpad port supports.
+    # Pin to 2022 until the dependency is updated.
+    runs-on: windows-2022
+
+    steps:
+    - name: Checkout this repository (holds stock-market.patch and the new source files in src/)
+      uses: actions/checkout@v4
+      with:
+        path: mod
+
+    - name: Checkout OpenTTD 15.3
+      uses: actions/checkout@v4
+      with:
+        repository: OpenTTD/OpenTTD
+        ref: '15.3'
+        path: openttd
+
+    # The patch only changes files that already exist in OpenTTD 15.3.
+    - name: Apply stock market patch
+      shell: bash
+      run: |
+        cd openttd
+        git apply --whitespace=nowarn ../mod/stock-market.patch
+        git status --short
+
+    # The new files of the trading terminal live in src/ of this repository.
+    # Refuse to overwrite anything that OpenTTD already has, so that the two sources can never clash.
+    - name: Add stock market source files
+      shell: bash
+      run: |
+        cd mod/src
+        status=0
+        while IFS= read -r f; do
+          if [ -e "../../openttd/src/$f" ]; then
+            echo "::error::src/$f already exists in OpenTTD 15.3 (or in the patch); refusing to overwrite it"
+            status=1
+          fi
+        done < <(find . -type f | sed 's|^\./||' | sort)
+        [ "$status" -eq 0 ] || exit 1
+        cp -rv . ../../openttd/src/
+        
+    - name: Register wallet commands, sources and strings
+      shell: bash
+      run: python3 mod/apply_overlay.py openttd
+      
+    - name: Setup vcpkg
+      id: vcpkg
+      uses: OpenTTD/actions/setup-vcpkg@v6
+      with:
+        path: openttd
+
+    - name: Configure developer command prompt
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+
+    # Source archives that vcpkg downloaded are kept between runs, so one good download is enough for all later builds.
+    - name: Cache vcpkg downloads
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/vcpkg/downloads
+        key: vcpkg-downloads-${{ runner.os }}-${{ hashFiles('openttd/vcpkg.json') }}
+        restore-keys: |
+          vcpkg-downloads-${{ runner.os }}-
+
+    - name: Build
+      shell: bash
+      working-directory: openttd
+      env:
+        # Build the dependencies without the NuGet binary cache: slower, but a failing push can no longer fail the build.
+        VCPKG_BINARY_SOURCES: clear
+      run: |
+        mkdir build
+        cd build
+        # The configure step runs "vcpkg install", which downloads the sources of the libraries from other servers (for example
+        # gitlab.xiph.org for libogg). Those servers sometimes answer 502; the download then fails although nothing is wrong
+        # with the code. So the configure step is tried again a few times, and what was already downloaded is kept.
+        configured=0
+        for attempt in 1 2 3 4 5; do
+          if cmake .. \
+            -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static \
+            -DCMAKE_TOOLCHAIN_FILE="${{ steps.vcpkg.outputs.vcpkg-cmake }}"; then
+            configured=1
+            break
+          fi
+          echo "::warning::cmake configure failed (attempt $attempt of 5), trying again in 90 s"
+          sleep 90
+        done
+        [ "$configured" -eq 1 ] || exit 1
+        cmake --build .
+
+    # Only when the build failed: the real vcpkg error is in these logs, not in the NuGet noise at the end of the console log.
+    - name: Upload vcpkg logs (on failure)
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: vcpkg-logs
+        path: |
+          openttd/build/vcpkg-manifest-install.log
+          D:/a/_temp/vcpkg/buildtrees/**/*.log
+        if-no-files-found: ignore
+
+    - name: Collect files
+      shell: bash
+      run: |
+        mkdir -p out/lang
+        cp openttd/build/openttd.exe out/
+        cp -r openttd/bin/ai openttd/bin/game out/ 2>/dev/null || true
+        cp openttd/build/lang/*.lng out/lang/ 2>/dev/null || true
+
+    - name: Upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: OpenTTD-15.3-StockMarket-Windows
+        path: out
