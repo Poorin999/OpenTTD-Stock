@@ -274,6 +274,8 @@ struct StockWindow : Window {
 	int restore_width = 0;
 	int restore_height = 0;
 	double chart_vshift = 0.0;          ///< Vertical scroll of the price range as a part of the fitted range; positive shows higher prices. Drag up/down.
+	int hover_x = -1;                   ///< Mouse X (in the window) while it is over the chart, otherwise -1. Used by the crosshair.
+	int hover_y = -1;                   ///< Mouse Y (in the window) while it is over the chart, otherwise -1.
 	GameTimeframe frame = GameTimeframe::H1; ///< Timeframe of the chart: one candle per 1h, 4h, 12h, game day, game week, game month (30 days) or game year (365 days).
 
 	StockWindow(WindowDesc &desc) : Window(desc)
@@ -629,6 +631,21 @@ struct StockWindow : Window {
 
 			default: break;
 		}
+	}
+
+	/** Remember where the mouse is over the chart, for the crosshair. */
+	void OnMouseOver(Point pt, WidgetID widget) override
+	{
+		const int old_x = this->hover_x;
+		const int old_y = this->hover_y;
+		if (widget == WID_ST_CHART) {
+			this->hover_x = pt.x;
+			this->hover_y = pt.y;
+		} else {
+			this->hover_x = -1;
+			this->hover_y = -1;
+		}
+		if (old_x != this->hover_x || old_y != this->hover_y) this->SetWidgetDirty(WID_ST_CHART);
 	}
 
 	/** While the mouse button is held down on the chart, scroll the chart one candle for every candle width of mouse movement. */
@@ -1050,8 +1067,8 @@ struct StockWindow : Window {
 
 		const int small_height = GetCharacterHeight(FS_SMALL);
 		const int axis_width = ScaleGUITrad(64);
-		const int left = r.left + axis_width;
-		const int right = r.right - ScaleGUITrad(6);
+		const int left = r.left + ScaleGUITrad(6);
+		const int right = r.right - axis_width; // The price axis is on the right, like in TradingView.
 		const int top = r.top + ScaleGUITrad(6);
 		const int full_bottom = r.bottom - small_height - ScaleGUITrad(4);
 		if (right - left < 20 || full_bottom - top < 20) return;
@@ -1066,9 +1083,12 @@ struct StockWindow : Window {
 		const int vol_top = bottom + gap;
 		const int vol_bottom = vol_top + vol_height;
 
-		GfxFillRect(left, top, right, bottom, GREY_SCALE(2));
-		if (vol_height > 0) GfxFillRect(left, vol_top, right, vol_bottom, GREY_SCALE(2));
-		if (rsi_height > 0) GfxFillRect(left, full_bottom - rsi_height, right, full_bottom, GREY_SCALE(2));
+		/* Almost black chart, the grid is only a little lighter. */
+		GfxFillRect(r.left + 1, r.top + 1, r.right - 1, r.bottom - 1, GREY_SCALE(1));
+		GfxFillRect(left, top, right, bottom, GREY_SCALE(1));
+		if (vol_height > 0) GfxFillRect(left, vol_top, right, vol_bottom, GREY_SCALE(1));
+		if (rsi_height > 0) GfxFillRect(left, full_bottom - rsi_height, right, full_bottom, GREY_SCALE(1));
+		GfxDrawLine(right, r.top + 1, right, r.bottom - 1, GREY_SCALE(3)); // Line between the chart and the price axis.
 
 		if (candles.empty()) {
 			DrawString(left + 4, right - 4, top + 4, STR_STOCK_FRAME_WAIT, TC_WHITE, SA_LEFT);
@@ -1133,8 +1153,8 @@ struct StockWindow : Window {
 		for (int i = 0; i <= 4; i++) {
 			const int64_t value = lo + (hi - lo) * i / 4;
 			const int y = to_y(value);
-			GfxDrawLine(left, y, right, y, GREY_SCALE(4));
-			DrawString(r.left + 2, left - 4, y - small_height / 2, GetString(STR_JUST_CURRENCY_SHORT, value), TC_WHITE, SA_RIGHT, false, FS_SMALL);
+			GfxDrawLine(left, y, right, y, GREY_SCALE(3));
+			DrawString(right + ScaleGUITrad(6), r.right - 2, y - small_height / 2, GetString(STR_JUST_CURRENCY_SHORT, value), TC_WHITE, SA_LEFT, false, FS_SMALL);
 		}
 
 		/* Candles, the newest at the right edge. */
@@ -1146,7 +1166,7 @@ struct StockWindow : Window {
 			const int cx = x0 + i * slot + slot / 2;
 			const PixelColour colour = c.close >= c.open ? PC_GREEN : PC_RED;
 
-			clipped_line(cx, to_y(c.high), cx, to_y(c.low), PC_WHITE);
+			clipped_line(cx, to_y(c.high), cx, to_y(c.low), colour);
 
 			const int body_top = to_y(std::max(c.open, c.close));
 			int body_bottom = to_y(std::min(c.open, c.close));
@@ -1233,16 +1253,45 @@ struct StockWindow : Window {
 		};
 		draw_sma(STOCK_SMA_SLOW, PC_ORANGE);
 		draw_sma(STOCK_SMA_FAST, PC_YELLOW);
-		DrawString(left + ScaleGUITrad(4), right - 4, top + ScaleGUITrad(2), fmt::format("SMA {}", STOCK_SMA_FAST), TC_YELLOW, SA_LEFT, false, FS_SMALL);
-		DrawString(left + ScaleGUITrad(54), right - 4, top + ScaleGUITrad(2), fmt::format("SMA {}", STOCK_SMA_SLOW), TC_ORANGE, SA_LEFT, false, FS_SMALL);
+		DrawString(left + ScaleGUITrad(4), right - 4, top + small_height + ScaleGUITrad(4), fmt::format("SMA {}", STOCK_SMA_FAST), TC_YELLOW, SA_LEFT, false, FS_SMALL);
+		DrawString(left + ScaleGUITrad(54), right - 4, top + small_height + ScaleGUITrad(4), fmt::format("SMA {}", STOCK_SMA_SLOW), TC_ORANGE, SA_LEFT, false, FS_SMALL);
+
+		/* Last price: a dashed line across the chart and a tag on the price axis, green when the newest candle is up, red when down. */
+		{
+			const StockCandle &newest = candles.back();
+			const PixelColour tag_colour = newest.close >= newest.open ? PC_GREEN : PC_RED;
+			const int y = to_y(newest.close);
+			if (y >= top && y <= bottom) {
+				const int dash = std::max(1, ScaleGUITrad(2));
+				for (int x = left; x < right; x += 2 * dash) GfxDrawLine(x, y, std::min(x + dash - 1, right), y, tag_colour);
+				GfxFillRect(right + 1, y - small_height / 2 - 1, r.right - 2, y + small_height / 2 + 1, tag_colour);
+				DrawString(right + ScaleGUITrad(6), r.right - 2, y - small_height / 2, GetString(STR_JUST_CURRENCY_SHORT, newest.close), TC_WHITE, SA_LEFT, false, FS_SMALL);
+			}
+		}
+
+		/* The line above the chart: Open, High, Low and Close of the candle under the mouse (or the newest one) and its change. */
+		{
+			size_t shown = last - 1;
+			if (this->hover_x >= left && this->hover_x <= right && count > 0) {
+				const int idx = (this->hover_x - x0) / slot;
+				if (idx >= 0 && idx < count) shown = first + static_cast<size_t>(idx);
+			}
+			const StockCandle &c = candles[shown];
+			const int64_t prev_close = shown > 0 ? candles[shown - 1].close : c.open;
+			const double change = prev_close > 0 ? static_cast<double>(c.close - prev_close) * 100.0 / static_cast<double>(prev_close) : 0.0;
+			const std::string ohlc = fmt::format("O {}  H {}  L {}  C {}  {:+.2f}%",
+					GetString(STR_JUST_CURRENCY_SHORT, c.open), GetString(STR_JUST_CURRENCY_SHORT, c.high),
+					GetString(STR_JUST_CURRENCY_SHORT, c.low), GetString(STR_JUST_CURRENCY_SHORT, c.close), change);
+			DrawString(left + ScaleGUITrad(4), right - 4, top + ScaleGUITrad(2), ohlc, c.close >= c.open ? TC_GREEN : TC_RED, SA_LEFT, false, FS_SMALL);
+		}
 
 		/* Volume bars under the price: the shares traded by the orders of the players in every candle. */
 		if (vol_height > 0) {
 			int64_t max_volume = 0;
 			for (size_t i = first; i < last; i++) max_volume = std::max(max_volume, candles[i].volume);
-			DrawString(r.left + 2, left - 4, vol_top, std::string("Vol"), TC_WHITE, SA_RIGHT, false, FS_SMALL);
+			DrawString(right + ScaleGUITrad(6), r.right - 2, vol_top, std::string("Vol"), TC_GREY, SA_LEFT, false, FS_SMALL);
 			if (max_volume > 0) {
-				DrawString(r.left + 2, left - 4, vol_top + small_height, StockVolumeToString(static_cast<uint32_t>(std::min<int64_t>(max_volume, UINT32_MAX))), TC_WHITE, SA_RIGHT, false, FS_SMALL);
+				DrawString(right + ScaleGUITrad(6), r.right - 2, vol_top + small_height, StockVolumeToString(static_cast<uint32_t>(std::min<int64_t>(max_volume, UINT32_MAX))), TC_WHITE, SA_LEFT, false, FS_SMALL);
 				for (int i = 0; i < count; i++) {
 					const StockCandle &c = candles[first + i];
 					if (c.volume <= 0) continue;
@@ -1265,8 +1314,8 @@ struct StockWindow : Window {
 
 			for (const int level : {30, 70}) {
 				const int y = rsi_y(level);
-				GfxDrawLine(left, y, right, y, GREY_SCALE(4));
-				DrawString(r.left + 2, left - 4, y - small_height / 2, GetString(STR_JUST_INT, level), TC_WHITE, SA_RIGHT, false, FS_SMALL);
+				GfxDrawLine(left, y, right, y, GREY_SCALE(3));
+				DrawString(right + ScaleGUITrad(6), r.right - 2, y - small_height / 2, GetString(STR_JUST_INT, level), TC_WHITE, SA_LEFT, false, FS_SMALL);
 			}
 
 			int prev_rx = 0;
@@ -1295,6 +1344,48 @@ struct StockWindow : Window {
 				prev_rx = x;
 				prev_ry = y;
 				have_prev_rsi = true;
+			}
+		}
+
+		/* Crosshair: dashed lines through the mouse position, with the price on the axis and the time under the chart. The vertical
+		 * line snaps to the middle of the candle under the mouse. */
+		if (this->hover_x >= left && this->hover_x <= right && this->hover_y >= top && this->hover_y <= full_bottom) {
+			const int idx = std::clamp((this->hover_x - x0) / slot, 0, count - 1);
+			if (this->hover_x >= x0) {
+				const StockCandle &hc = candles[first + static_cast<size_t>(idx)];
+				const int hx = x0 + idx * slot + slot / 2;
+				const int dash = std::max(1, ScaleGUITrad(3));
+				for (int y = top; y < full_bottom; y += 2 * dash) GfxDrawLine(hx, y, hx, std::min(y + dash - 1, full_bottom), GREY_SCALE(10));
+				for (int x = left; x < right; x += 2 * dash) GfxDrawLine(x, this->hover_y, std::min(x + dash - 1, right), this->hover_y, GREY_SCALE(10));
+
+				/* Price tag, only while the mouse is in the price pane. */
+				if (this->hover_y <= bottom) {
+					const int64_t value = lo + static_cast<int64_t>(static_cast<double>(bottom - this->hover_y) * range / (bottom - top));
+					GfxFillRect(right + 1, this->hover_y - small_height / 2 - 1, r.right - 2, this->hover_y + small_height / 2 + 1, GREY_SCALE(6));
+					DrawString(right + ScaleGUITrad(6), r.right - 2, this->hover_y - small_height / 2, GetString(STR_JUST_CURRENCY_SHORT, value), TC_WHITE, SA_LEFT, false, FS_SMALL);
+				}
+
+				/* Time tag under the chart, in game time. */
+				std::string tag;
+				switch (this->frame) {
+					case GameTimeframe::H1:
+					case GameTimeframe::H4:
+					case GameTimeframe::H12: {
+						const uint64_t start_hour = static_cast<uint64_t>(hc.ym) * static_cast<uint64_t>(GameTimeframeHours(this->frame));
+						tag = fmt::format("D{} {:02}:00", start_hour / 24 + 1, start_hour % 24);
+						break;
+					}
+					case GameTimeframe::D1: tag = fmt::format("D{}", hc.ym + 1); break;
+					case GameTimeframe::W1: tag = fmt::format("W{}", hc.ym + 1); break;
+					case GameTimeframe::MN: tag = fmt::format("M{}", hc.ym + 1); break;
+					case GameTimeframe::Y1: tag = fmt::format("{}", GameTimeManager::Get().GetSaveState().start_year + hc.ym); break;
+					default: break;
+				}
+				if (!tag.empty()) {
+					const int half_w = ScaleGUITrad(34);
+					GfxFillRect(hx - half_w, full_bottom + 1, hx + half_w, r.bottom - 1, GREY_SCALE(6));
+					DrawString(hx - half_w, hx + half_w, full_bottom + ScaleGUITrad(2), tag, TC_WHITE, SA_HOR_CENTER, false, FS_SMALL);
+				}
 			}
 		}
 	}
