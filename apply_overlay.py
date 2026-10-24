@@ -204,6 +204,7 @@ GOLD_STRUCT_CODE = r"""
 			case WID_PHG_GOLD_INFO: this->gold.DrawInfo(r); return;
 			case WID_PHG_GOLD_BUY_QTY: this->gold.DrawQuantity(r, true); return;
 			case WID_PHG_GOLD_SELL_QTY: this->gold.DrawQuantity(r, false); return;
+			case WID_PHG_GOLD_DIV: this->gold.DrawDivider(r); return;
 			default: break;
 		}
 		this->@BASE@::DrawWidget(r, widget);
@@ -213,6 +214,10 @@ GOLD_STRUCT_CODE = r"""
 	{
 		switch (widget) {
 			case WID_PHG_GOLD_TOGGLE: this->ShowGold(!this->show_gold); return;
+			case WID_PHG_GOLD_INFO:
+				/* The GOLD button of the header (panel / price chart) and the range buttons of the chart. */
+				if (this->gold.ClickInfo(this->GetWidget<NWidgetBase>(WID_PHG_GOLD_INFO)->GetCurrentRect(), pt)) this->SetDirty();
+				return;
 			case WID_PHG_GOLD_BUY_QTY: this->gold.AskQuantity(this, true); return;
 			case WID_PHG_GOLD_SELL_QTY: this->gold.AskQuantity(this, false); return;
 			case WID_PHG_GOLD_BUY: ShowGoldBuyWindow(this->gold.buy_qty); return;
@@ -233,15 +238,21 @@ GOLD_STRUCT_CODE = r"""
 GOLD_NESTED_CODE = r"""		/* GOLD_PANEL_PATCH: the main area is the profit graph (plane 0) or the gold trading panel (plane 1). Both fill and resize with the window. */
 		NWidget(NWID_SELECTION, @INVALID@, WID_PHG_GOLD_SEL),
 @GRAPH_LINE@			NWidget(NWID_VERTICAL),
-				NWidget(WWT_PANEL, @PANEL@, WID_PHG_GOLD_INFO), SetMinimalSize(576, 140), SetFill(1, 1), SetResize(1, 1),
+				NWidget(WWT_PANEL, @PANEL@, WID_PHG_GOLD_INFO), SetMinimalSize(576, 330), SetFill(1, 1), SetResize(1, 1),
 				EndContainer(),
 				NWidget(NWID_HORIZONTAL),
-					NWidget(WWT_PANEL, @PANEL@, WID_PHG_GOLD_BUY_QTY), SetMinimalSize(150, 14), SetFill(1, 0), SetResize(1, 0), SetToolTip(STR_GOLD_TIP_QTY),
+					NWidget(NWID_VERTICAL),
+						NWidget(WWT_PANEL, @PANEL@, WID_PHG_GOLD_BUY_QTY), SetMinimalSize(150, 20), SetFill(1, 0), SetResize(1, 0), SetToolTip(STR_GOLD_TIP_QTY),
+						EndContainer(),
+						NWidget(WWT_PUSHTXTBTN, @PANEL@, WID_PHG_GOLD_BUY), SetMinimalSize(150, 24), SetFill(1, 0), SetResize(1, 0), SetPadding(0, 6, 6, 10), SetStringTip(STR_GOLD_BUY, STR_GOLD_TIP_BUY),
 					EndContainer(),
-					NWidget(WWT_PUSHTXTBTN, @PANEL@, WID_PHG_GOLD_BUY), SetMinimalSize(90, 14), SetStringTip(STR_GOLD_BUY, STR_GOLD_TIP_BUY),
-					NWidget(WWT_PANEL, @PANEL@, WID_PHG_GOLD_SELL_QTY), SetMinimalSize(150, 14), SetFill(1, 0), SetResize(1, 0), SetToolTip(STR_GOLD_TIP_QTY),
+					NWidget(WWT_PANEL, @PANEL@, WID_PHG_GOLD_DIV), SetMinimalSize(8, 0), SetFill(0, 1),
 					EndContainer(),
-					NWidget(WWT_PUSHTXTBTN, @PANEL@, WID_PHG_GOLD_SELL), SetMinimalSize(90, 14), SetStringTip(STR_GOLD_SELL, STR_GOLD_TIP_SELL),
+					NWidget(NWID_VERTICAL),
+						NWidget(WWT_PANEL, @PANEL@, WID_PHG_GOLD_SELL_QTY), SetMinimalSize(150, 20), SetFill(1, 0), SetResize(1, 0), SetToolTip(STR_GOLD_TIP_QTY),
+						EndContainer(),
+						NWidget(WWT_PUSHTXTBTN, @PANEL@, WID_PHG_GOLD_SELL), SetMinimalSize(150, 24), SetFill(1, 0), SetResize(1, 0), SetPadding(0, 10, 6, 6), SetStringTip(STR_GOLD_SELL, STR_GOLD_TIP_SELL),
+					EndContainer(),
 				EndContainer(),
 			EndContainer(),
 		EndContainer(),
@@ -254,6 +265,7 @@ GOLD_WIDGET_IDS = """	WID_PHG_GOLD_SEL,       ///< Selection: the profit graph o
 	WID_PHG_GOLD_BUY,       ///< Gold panel: Buy Gold button.
 	WID_PHG_GOLD_SELL_QTY,  ///< Gold panel: ounces to sell (click to type).
 	WID_PHG_GOLD_SELL,      ///< Gold panel: Sell Gold button.
+	WID_PHG_GOLD_DIV,       ///< Gold panel: thin line between the Buy and the Sell side.
 """
 
 

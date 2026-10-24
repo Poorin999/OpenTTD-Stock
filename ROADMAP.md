@@ -11,7 +11,7 @@ A mod of OpenTTD (the build uses OpenTTD 15.x, Windows MSVC, GitHub Actions `bui
 - **Past statements window** (`central_bank_gui.cpp`): 10 years, years on the left, the statement of the chosen year on the right.
 - **Gold reserve** (`gold_reserve.{h,cpp}`): organic gold price, limited market stock, gold held by companies, backing ratio, credit standing.
 - **Gold panel** (`gold_panel.{h,cpp}`): drawing and Buy/Sell actions. It is shown in the **operating profit graph window** (OpenTTD `graph_gui.cpp`), in the place of the graph; the Gold / Graph button in the title bar switches back to the graph. It is NOT in the Trading Terminal any more.
-- **Buy gold window** (`gold_buy_gui.cpp`, window number 3 of `WC_CENTRAL_BANK`, widgets `WID_GB_*`): the Buy Gold button of the gold panel opens it (company vault - buy gold). Price per ounce, market state and stock, quantity with - / + / Max / 10 / 50 / 100 oz and click-to-type, value, fee (0 for now), total, usable (unborrowed) cash, cash after the purchase, Cancel / Confirm. All drawn in one panel; the rectangles come from `GbMakeLayout` (used for drawing and clicks). The GOLD badge opens the Gold Investment Types window (there is no price history chart yet, see Planned 8). `GB_USE_THAI` at the top switches Thai / English.
+- **Buy gold window** (`gold_buy_gui.cpp`, window number 3 of `WC_CENTRAL_BANK`, widgets `WID_GB_*`): the Buy Gold button of the gold panel opens it (company vault - buy gold). Price per ounce, market state and stock, quantity with - / + / Max / 10 / 50 / 100 oz and click-to-type, value, fee (0 for now), total, usable (unborrowed) cash, cash after the purchase, Cancel / Confirm. All drawn in one panel; the rectangles come from `GbMakeLayout` (used for drawing and clicks). The GOLD badge opens the Gold Investment Types window, where the GOLD button of the header shows the price chart. `GB_USE_THAI` at the top switches Thai / English.
 - **Game clock** (`game_time/`): the game has an HH:MM clock; days, candles and timeframes are derived from one number.
 - Retail investors (`RetailMarketManager.*`), stock AI (`stock_ai.cpp`).
 
@@ -23,7 +23,7 @@ The repository is an **overlay**, not a full OpenTTD tree. `apply_overlay.py <op
 - A new source file needs entries in: `FILES`, `NEW_SOURCES` (CMake), and `STRING_FILES` if it has strings, all in `apply_overlay.py`.
 - A new command needs: the name in `NEW_COMMANDS` (apply_overlay.py), a `DEF_CMD_TRAIT` in a header that `wallet_cmd.h` includes, and the function.
   Commands run on every client of a multiplayer game, so they must give the same result everywhere.
-- A new saved value needs a record kind in `saveload/stock_sl.cpp` (`StockRecordKind`: used so far 0-26; next free is 27), written in `Save`, read in `Load`, and reset in `StockMarket::Reset` (`stock_base.cpp`).
+- A new saved value needs a record kind in `saveload/stock_sl.cpp` (`StockRecordKind`: used so far 0-27; next free is 28), written in `Save`, read in `Load`, and reset in `StockMarket::Reset` (`stock_base.cpp`).
 - We cannot compile here. The only compiler is the GitHub Actions build. Read its log (the first error is the real one; later ones follow from it).
 
 ## 2b. OpenTTD files that the overlay patches in place
@@ -67,6 +67,8 @@ Buy is paid from unborrowed liquid cash only. No spread, no commission yet. Gold
 Source of gold: a world market with a limited stock. It is **not** connected to mines or cargo yet.
 
 ## 5. Done
+- [x] Gold panel redesign (`gold_panel.cpp`): tan paper, header with gold bar icon and the GOLD button, card 1 with the large spot prices (oz, ton) and the buy / sell price, card 2 (striped rows: reserves, market stock, circulating cash, backing ratio, credit standing in a framed box), card 3 (your gold, unborrowed cash), alert line. Bottom: Buy side and Sell side with a thin divider (`WID_PHG_GOLD_DIV`), each a quantity label (click to type) over its button. Same data as before. All rectangles come from `GpMakeLayout` (drawing and clicks agree).
+- [x] Gold price chart: the GOLD button of the header switches the info area between the panel and the chart (`GoldPanel::show_chart`). Chart: Last / High / Low / Change for the range, grid with a price scale, area and line, marker on the last price, ranges 30D / 90D / 1Y / All (`chart_days`). Data: `GoldReserveManager::history_cents` (one price per game day, at most 730, `PushHistory` from `EnsureStarted` and `UpdateDaily`), saved as `SRK_GOLD_HISTORY` (27, five prices per record). Old savegames start with an empty history: the chart says it is collecting data until two days exist. Checked only for syntax against stubs; not compiled on OpenTTD 15.3 and not run in the game.
 - [x] Cleanup: deleted duplicate/stale files (`src/stock_sl.cpp`, `src/stock_widget.h`, `saveload_and_overlay.patch`, `apply_wallet_fix.py`, root `CMakeLists.txt`, `build/`), added `.gitignore`.
 - [x] Gold in the account statement: `LedgerItem::GoldBuy` / `GoldSell` (appended last, the index is saved) in a new section "Gold Reserve" of both statement windows (shown, not counted in the result of the year); the realised profit of gold goes to `RealizedProfit` (average cost basis: `holdings_cost`, saved in `SRK_GOLD_HOLD` v2; an unknown cost from an old savegame gives no profit); the commission goes to `TradeCommission`. Account log names: Gold buy / Gold sale.
 - [x] Spread and commission for gold (second version): dynamic total spread 0.2% to 0.5% of the base price (`SPREAD_MIN_PPM`, `SPREAD_MAX_PPM`; `ComputeSpreadPpm` = 60% demand pressure + 40% inflation, latched once per game day in `UpdateDaily`, not saved), ask = base x (1 + spread/2), bid = base x (1 - spread/2). Commission 0.1% of the order value, at least 100 money units per order (`COMMISSION_PPM`, `COMMISSION_MIN`). API in `gold_reserve.h`: `CalculateBuyCost(amount)`, `CalculateSellReturn(amount)`, `ExecuteGoldTrade(company, is_buy, amount, execute)` (the one engine; `CmdGoldBuy` / `CmdGoldSell` call it; pays from unborrowed cash only). Commission and spread go to the budget of the central bank: `CentralBank::trading_revenue_cents`, saved as `SRK_BANK_BUDGET` (26). The budget is not shown in a window yet and not spent yet.
@@ -91,7 +93,7 @@ Source of gold: a world market with a limited stock. It is **not** connected to 
 2. **Credit standing with an effect**: for example the tier changes the central bank interest rate or the loan limit.
 3. **Script API**: `ScriptCompany::GetGoldHoldings`, `GetGoldPrice`, so game scripts and AIs can see it (see how `GetCentralBankDebt` was added in `apply_overlay.py`).
 4. **Translations**: the gold panel is English only.
-5. **Gold price chart**: a history of the daily price (needs a saved ring buffer).
+5. ~~Gold price chart~~ (done, see Done). Possible next: hover crosshair with the price of the day under the mouse, hourly points for the last days.
 
 ## 6b. Evaluated and NOT done: three real climates in one map
 The owner asked for Temperate + Sub-arctic + Sub-tropical in one map, chosen at world generation. Checked against OpenTTD 15.3 sources (genworld.cpp, genworld_gui.cpp, industry_cmd.cpp, landscape.cpp, tgp.cpp, settings/*.ini):

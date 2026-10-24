@@ -41,6 +41,7 @@ enum StockRecordKind : uint8_t {
 	SRK_LEDGER = 22,  ///< Line of the account statement: a = company, b = line (LedgerItem), ym = economy year, v1 = income, v2 = expense.
 	SRK_GOLD = 24,    ///< Gold market: v1 = price in 1/100 money units, v2 = baseline cash supply, v3 = ounces of the central bank, v4 = demand pressure in ppm, v5 = ounces for sale in the market plus 1 (0 = savegame from before the stock).
 	SRK_BANK_BUDGET = 26, ///< Budget of the central bank from trading: v1 = commission and spread of the gold trades in 1/100 money units.
+	SRK_GOLD_HISTORY = 27, ///< Five daily gold prices for the chart: ym = number of the record (0, 1, 2 ...), v1..v5 = prices in 1/100 money units, oldest first (0 = no price).
 	SRK_GOLD_HOLD = 25, ///< Gold of a company: a = company, v1 = ounces, v2 = what the gold cost (0 = unknown).
 	SRK_BANK = 18,    ///< Loan at the central bank: a = company, v1 = debt, v2 = interest that has been added.
 	SRK_BANK_RISK = 23, ///< Rate and penalty of the loan at the central bank: a = company, v1 = penalty level | in default << 8 | days paid on time << 16, v2 = rest of the daily interest, v3 = annual rate in bp, v4 = number of the game day charged last.
@@ -254,6 +255,15 @@ struct STCKChunkHandler : ChunkHandler {
 			r.v3 = _gold_reserve.bank_reserve_oz;
 			r.v4 = _gold_reserve.pressure_ppm;
 			r.v5 = _gold_reserve.market_stock_oz + 1;
+			write(r);
+		}
+		/* The daily prices of the gold chart, five to a record. */
+		for (size_t i = 0; i < _gold_reserve.history_cents.size(); i += 5) {
+			StockRecord r;
+			r.kind = SRK_GOLD_HISTORY;
+			r.ym = static_cast<int32_t>(i / 5);
+			int64_t *fields[5] = {&r.v1, &r.v2, &r.v3, &r.v4, &r.v5};
+			for (size_t k = 0; k < 5 && i + k < _gold_reserve.history_cents.size(); k++) *fields[k] = _gold_reserve.history_cents[i + k];
 			write(r);
 		}
 		for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
@@ -537,6 +547,14 @@ struct STCKChunkHandler : ChunkHandler {
 					_gold_reserve.market_stock_oz = r.v5 <= 0 ? GoldReserveManager::MARKET_STOCK_START : r.v5 - 1;
 					_gold_reserve.pressure_ppm = std::clamp<int64_t>(r.v4, -GoldReserveManager::PRESSURE_MAX_PPM, GoldReserveManager::PRESSURE_MAX_PPM);
 					break;
+
+				case SRK_GOLD_HISTORY: {
+					const int64_t prices[5] = {r.v1, r.v2, r.v3, r.v4, r.v5};
+					for (const int64_t price : prices) {
+						if (price > 0 && _gold_reserve.history_cents.size() < GoldReserveManager::HISTORY_MAX_DAYS) _gold_reserve.history_cents.push_back(price);
+					}
+					break;
+				}
 
 				case SRK_GOLD_HOLD:
 					if (r.a < MAX_COMPANIES) {

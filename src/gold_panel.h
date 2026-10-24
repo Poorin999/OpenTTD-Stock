@@ -20,6 +20,8 @@ struct GoldPanel {
 	int64_t buy_qty = 10;   ///< Ounces in the buy field.
 	int64_t sell_qty = 10;  ///< Ounces in the sell field.
 	bool query_buy = true;  ///< Whether the open query window is for the buy field.
+	bool show_chart = false; ///< Whether the info area shows the gold price chart (true) or the trading panel (false).
+	int chart_days = 90;    ///< Days of price history in the chart; 0 = all that is kept.
 
 	bool CanBuy() const;
 	bool CanSell() const;
@@ -30,6 +32,8 @@ struct GoldPanel {
 	void QueryFinished(const std::optional<std::string> &text);
 	void DrawInfo(const Rect &r) const;
 	void DrawQuantity(const Rect &r, bool buy) const;
+	void DrawDivider(const Rect &r) const;
+	bool ClickInfo(const Rect &panel, Point pt);
 };
 
 /** Open the Buy gold window of the company vault (gold_buy_gui.cpp). start_qty is the number of ounces in its field. */

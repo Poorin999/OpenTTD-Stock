@@ -35,7 +35,18 @@ void GoldReserveManager::Reset()
 	this->pressure_ppm = 0;
 	this->holdings_oz.fill(0);
 	this->holdings_cost.fill(0);
+	this->history_cents.clear();
 	this->spread_ppm = SPREAD_MIN_PPM;
+}
+
+/** Add the price of now to the history of the chart (one entry per game day). */
+void GoldReserveManager::PushHistory()
+{
+	if (this->price_cents <= 0) return;
+	this->history_cents.push_back(this->price_cents);
+	if (this->history_cents.size() > HISTORY_MAX_DAYS) {
+		this->history_cents.erase(this->history_cents.begin(), this->history_cents.begin() + (this->history_cents.size() - HISTORY_MAX_DAYS));
+	}
 }
 
 const char *GetCreditTierName(CreditTier tier)
@@ -67,6 +78,7 @@ bool GoldReserveManager::EnsureStarted()
 	this->market_stock_oz = MARKET_STOCK_START;
 	this->baseline_supply = supply;
 	this->bank_reserve_oz = std::max<int64_t>(1, supply * 8 / 100 / (BASE_PRICE_CENTS / 100));
+	this->PushHistory(); // The first point of the gold chart: the price at the start.
 	return true;
 }
 
@@ -230,6 +242,7 @@ void GoldReserveManager::UpdateDaily()
 	int64_t step = (target - this->price_cents) * 5 / 100;
 	if (step == 0 && target != this->price_cents) step = target > this->price_cents ? 1 : -1;
 	this->price_cents = std::max<int64_t>(1, this->price_cents + step);
+	this->PushHistory();
 
 	InvalidateWindowData(WC_STOCK_MARKET, 0);
 }

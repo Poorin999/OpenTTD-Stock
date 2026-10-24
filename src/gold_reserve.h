@@ -16,6 +16,7 @@
 #include "cargo_type.h"
 #include <array>
 #include <cstdint>
+#include <vector>
 
 /** Credit standing of the money system, from the backing of the cash by gold. */
 enum class CreditTier : uint8_t {
@@ -46,6 +47,7 @@ struct GoldReserveManager {
 	static constexpr int64_t OUNCES_PER_DELIVERED_UNIT = 10; ///< Gold or valuables delivered to a station: one unit of cargo (one bag) adds this many ounces to the market stock.
 	static constexpr int64_t MARKET_STOCK_CAP = 2 * MARKET_STOCK_START; ///< Deliveries never fill the market stock above this.
 	static constexpr int64_t SCARCITY_FLOOR_DIV = 4;        ///< The scarcity factor stops growing when the stock is 1/4 of the start stock (price x4).
+	static constexpr size_t HISTORY_MAX_DAYS = 730;         ///< Number of daily prices that are kept for the gold chart (the oldest are dropped).
 
 
 	int64_t price_cents = 0;      ///< Base market price of one ounce (the middle price) in 1/100 of a money unit. 0 = not started yet.
@@ -55,10 +57,12 @@ struct GoldReserveManager {
 	int64_t market_stock_oz = 0;  ///< Ounces that the market still has for sale. Less stock = a dearer price (scarcity).
 	int64_t pressure_ppm = 0;     ///< Demand effect of the buying and selling of the companies; fades by 3% a day.
 	std::array<int64_t, MAX_COMPANIES> holdings_oz{}; ///< Ounces of every company.
+	std::vector<int64_t> history_cents; ///< The price at the end of every game day (1/100 money units), oldest first, at most HISTORY_MAX_DAYS. Saved (SRK_GOLD_HISTORY). Drawn by the gold chart.
 	std::array<int64_t, MAX_COMPANIES> holdings_cost{}; ///< What the gold of every company cost (money units, without commission): the base of the realised profit. 0 = unknown (old savegame).
 
 	void Reset();
 	void UpdateDaily();
+	void PushHistory();
 
 	int64_t GetPriceCents() const { return this->price_cents; }
 	int64_t GetHoldings(CompanyID company) const;
