@@ -35,6 +35,7 @@ void GoldReserveManager::Reset()
 	this->pressure_ppm = 0;
 	this->holdings_oz.fill(0);
 	this->holdings_cost.fill(0);
+	this->spread_ppm = SPREAD_MIN_PPM;
 }
 
 const char *GetCreditTierName(CreditTier tier)
@@ -105,16 +106,29 @@ CreditTier GoldReserveManager::GetCreditTier() const
 	return CreditTier::C;
 }
 
-/** Price of one ounce when the company buys (spot + spread), in 1/100 of a money unit (rounded up). */
-int64_t GoldReserveManager::GetAskCents() const
+/**
+ * The total spread now, in ppm of the base price: SPREAD_MIN_PPM (0.2%) in a calm market up to SPREAD_MAX_PPM (0.5%).
+ * Stress = 60% the demand pressure of the companies (heavy buying or selling) + 40% the inflation of the game. Integer maths only.
+ */
+int64_t GoldReserveManager::ComputeSpreadPpm() const
 {
-	return (this->price_cents * (10000 + SPREAD_BP) + 9999) / 10000;
+	const int64_t pressure = std::min<int64_t>(PPM, (this->pressure_ppm < 0 ? -this->pressure_ppm : this->pressure_ppm) * PPM / PRESSURE_MAX_PPM);
+	const int64_t inflation = std::clamp<int64_t>((static_cast<int64_t>(_economy.inflation_prices) * PPM) >> 16, PPM / 2, 20 * PPM);
+	const int64_t inflation_stress = std::min<int64_t>(PPM, std::max<int64_t>(0, inflation - PPM) * 2);
+	const int64_t stress = (pressure * 6 + inflation_stress * 4) / 10;
+	return SPREAD_MIN_PPM + (SPREAD_MAX_PPM - SPREAD_MIN_PPM) * stress / PPM;
 }
 
-/** Price of one ounce when the company sells (spot - spread), in 1/100 of a money unit (rounded down). */
+/** Ask: the price at which the company buys = base price x (1 + spread / 2), in 1/100 of a money unit (rounded up). */
+int64_t GoldReserveManager::GetAskCents() const
+{
+	return (this->price_cents * (PPM + this->spread_ppm / 2) + PPM - 1) / PPM;
+}
+
+/** Bid: the price at which the company sells = base price x (1 - spread / 2), in 1/100 of a money unit (rounded down). */
 int64_t GoldReserveManager::GetBidCents() const
 {
-	return this->price_cents * (10000 - SPREAD_BP) / 10000;
+	return this->price_cents * (PPM - this->spread_ppm / 2) / PPM;
 }
 
 /** Money that buying this many ounces costs now, without the commission (rounded up). */
@@ -123,11 +137,11 @@ int64_t GoldReserveManager::GetBuyCost(int64_t ounces) const
 	return (ounces * this->GetAskCents() + 99) / 100;
 }
 
-/** Commission of a purchase or a sale of this value (rounded up). */
+/** Commission of an order of this value: 0.1% (rounded up), but at least COMMISSION_MIN. Zero for an empty order. */
 int64_t GoldReserveManager::GetCommission(int64_t value)
 {
 	if (value <= 0) return 0;
-	return (value * COMMISSION_BP + 9999) / 10000;
+	return std::max<int64_t>(COMMISSION_MIN, (value * COMMISSION_PPM + PPM - 1) / PPM);
 }
 
 /** Everything that a purchase takes from the cash: the gold and the commission. */
@@ -142,7 +156,7 @@ int64_t GoldReserveManager::GetMaxBuyOunces(int64_t cash) const
 {
 	const int64_t ask = this->GetAskCents();
 	if (cash <= 0 || ask <= 0) return 0;
-	int64_t n = cash * 100 * 10000 / (ask * (10000 + COMMISSION_BP));
+	int64_t n = cash * 100 / ask;
 	while (n > 0 && this->GetBuyTotal(n) > cash) n--;
 	while (this->GetBuyTotal(n + 1) <= cash) n++;
 	return n;
@@ -158,7 +172,7 @@ int64_t GoldReserveManager::GetSellProceeds(int64_t ounces) const
 int64_t GoldReserveManager::GetSellNet(int64_t ounces) const
 {
 	const int64_t gross = this->GetSellProceeds(ounces);
-	return gross - GetCommission(gross);
+	return std::max<int64_t>(0, gross - GetCommission(gross));
 }
 
 void GoldFromDelivery(CargoType cargo, uint count)
@@ -179,6 +193,7 @@ void GoldReserveManager::UpdateDaily()
 		if (!Company::IsValidID(CompanyID{i})) { this->holdings_oz[i] = 0; this->holdings_cost[i] = 0; }
 	}
 	if (!this->EnsureStarted()) return;
+	this->spread_ppm = this->ComputeSpreadPpm(); // Once per game day: the spread is stable inside a day.
 
 	/* 1. Inflation of the game (1.0 = 1 << 16). */
 	const int64_t inflation = std::clamp<int64_t>((static_cast<int64_t>(_economy.inflation_prices) * PPM) >> 16, PPM / 2, 20 * PPM);
@@ -237,71 +252,95 @@ static void InvalidateGoldWindows()
 	InvalidateWindowData(WC_CENTRAL_BANK, 0);
 }
 
+int64_t CalculateBuyCost(uint32_t amount)
+{
+	return _gold_reserve.GetBuyTotal(amount);
+}
+
+int64_t CalculateSellReturn(uint32_t amount)
+{
+	return _gold_reserve.GetSellNet(amount);
+}
+
+/** Why a gold trade cannot be done now, as an error; success when it can. */
+static CommandCost CheckGoldTrade(CompanyID company, bool is_buy, uint32_t amount)
+{
+	if (!Company::IsValidID(company)) return CMD_ERROR;
+	if (amount == 0 || amount > 1000000) return CommandCost(STR_GOLD_ERROR_BAD_QUANTITY);
+	if (!_gold_reserve.EnsureStarted()) return CommandCost(STR_GOLD_ERROR_NO_MARKET);
+	if (!is_buy) {
+		if (_gold_reserve.GetHoldings(company) < static_cast<int64_t>(amount)) return CommandCost(STR_GOLD_ERROR_NO_GOLD);
+		return CommandCost();
+	}
+	if (_gold_reserve.market_stock_oz < static_cast<int64_t>(amount)) return CommandCost(STR_GOLD_ERROR_NO_STOCK);
+	const int64_t total = _gold_reserve.GetBuyTotal(amount);
+	/* Fund isolation: only unborrowed cash buys gold. Money of the central bank can never be turned into gold. */
+	if (static_cast<int64_t>(Company::Get(company)->money) >= total && total > GetUnborrowedLiquidCash(company)) return CommandCost(STR_GOLD_ERROR_BORROWED);
+	if (total > GetUnborrowedLiquidCash(company)) return CommandCost(STR_GOLD_ERROR_NO_CASH);
+	return CommandCost();
+}
+
+CommandCost ExecuteGoldTrade(CompanyID company, bool is_buy, uint32_t amount, bool execute)
+{
+	CommandCost check = CheckGoldTrade(company, is_buy, amount);
+	if (check.Failed() || !execute) return check;
+
+	const int64_t ounces = amount;
+	const int i = company.base();
+	Company *c = Company::Get(company);
+	if (is_buy) {
+		const int64_t cost = _gold_reserve.GetBuyCost(ounces);
+		const int64_t commission = GoldReserveManager::GetCommission(cost);
+		c->money -= Money(cost + commission);
+		/* The spread (ask minus the base price) and the commission are the income of the central bank. */
+		_central_bank.trading_revenue_cents += (_gold_reserve.GetAskCents() - _gold_reserve.price_cents) * ounces + commission * 100;
+		RecordLedger(company, LedgerItem::GoldBuy, -cost);
+		RecordLedger(company, LedgerItem::TradeCommission, -commission);
+		_gold_reserve.holdings_cost[i] += cost;
+		_gold_reserve.holdings_oz[i] += ounces;
+		_gold_reserve.market_stock_oz -= ounces;
+		_gold_reserve.pressure_ppm = std::min<int64_t>(GoldReserveManager::PRESSURE_MAX_PPM,
+				_gold_reserve.pressure_ppm + ounces * GoldReserveManager::PPM / GoldReserveManager::DEPTH_OUNCES);
+	} else {
+		const int64_t gross = _gold_reserve.GetSellProceeds(ounces);
+		const int64_t commission = std::min(gross, GoldReserveManager::GetCommission(gross)); // Never more than the proceeds.
+		const int64_t held = _gold_reserve.GetHoldings(company);
+		int64_t &cost_base = _gold_reserve.holdings_cost[i];
+		/* The part of the cost that belongs to the ounces sold; an unknown cost (old savegame) gives no profit and no loss. */
+		const int64_t basis = cost_base > 0 ? (held == ounces ? cost_base : cost_base * ounces / held) : gross;
+		cost_base = held == ounces ? 0 : std::max<int64_t>(0, cost_base - basis);
+		c->money += Money(gross - commission);
+		_central_bank.trading_revenue_cents += (_gold_reserve.price_cents - _gold_reserve.GetBidCents()) * ounces + commission * 100;
+		RecordLedger(company, LedgerItem::GoldSell, gross);
+		RecordLedger(company, LedgerItem::TradeCommission, -commission);
+		RecordLedger(company, LedgerItem::RealizedProfit, gross - basis);
+		_gold_reserve.holdings_oz[i] -= ounces;
+		_gold_reserve.market_stock_oz += ounces;
+		_gold_reserve.pressure_ppm = std::max<int64_t>(-GoldReserveManager::PRESSURE_MAX_PPM,
+				_gold_reserve.pressure_ppm - ounces * GoldReserveManager::PPM / GoldReserveManager::DEPTH_OUNCES);
+	}
+	InvalidateGoldWindows();
+	return CommandCost();
+}
+
 /**
- * Buy gold for the reserve of the company. Strict fund isolation: the gold is paid from the unborrowed liquid cash only, so money of
- * the central bank can never be turned into gold. The money is an exchange for an asset, not an expense of the company.
+ * Buy gold for the reserve of the company (the command). Everything is in #ExecuteGoldTrade.
  * @param flags Type of operation.
  * @param ounces Number of ounces, more than zero.
  * @return Zero cost, or an error.
  */
 CommandCost CmdGoldBuy(DoCommandFlags flags, uint32_t ounces)
 {
-	if (!Company::IsValidID(_current_company)) return CMD_ERROR;
-	if (ounces == 0 || ounces > 1000000) return CommandCost(STR_GOLD_ERROR_BAD_QUANTITY);
-	if (!_gold_reserve.EnsureStarted()) return CommandCost(STR_GOLD_ERROR_NO_MARKET);
-
-	if (_gold_reserve.market_stock_oz < static_cast<int64_t>(ounces)) return CommandCost(STR_GOLD_ERROR_NO_STOCK);
-	const int64_t cost = _gold_reserve.GetBuyCost(ounces);
-	const int64_t commission = GoldReserveManager::GetCommission(cost);
-	const int64_t total = cost + commission;
-	Company *c = Company::Get(_current_company);
-	if (static_cast<int64_t>(c->money) >= total && total > GetUnborrowedLiquidCash(_current_company)) return CommandCost(STR_GOLD_ERROR_BORROWED);
-	if (total > GetUnborrowedLiquidCash(_current_company)) return CommandCost(STR_GOLD_ERROR_NO_CASH);
-
-	if (flags.Test(DoCommandFlag::Execute)) {
-		c->money -= Money(total);
-		RecordLedger(_current_company, LedgerItem::GoldBuy, -cost);
-		RecordLedger(_current_company, LedgerItem::TradeCommission, -commission);
-		_gold_reserve.holdings_cost[_current_company.base()] += cost;
-		_gold_reserve.holdings_oz[_current_company.base()] += ounces;
-		_gold_reserve.market_stock_oz -= ounces;
-		_gold_reserve.pressure_ppm = std::min<int64_t>(GoldReserveManager::PRESSURE_MAX_PPM,
-				_gold_reserve.pressure_ppm + static_cast<int64_t>(ounces) * GoldReserveManager::PPM / GoldReserveManager::DEPTH_OUNCES);
-		InvalidateGoldWindows();
-	}
-	return CommandCost();
+	return ExecuteGoldTrade(_current_company, true, ounces, flags.Test(DoCommandFlag::Execute));
 }
 
 /**
- * Sell gold of the reserve of the company. The money goes into the company cash.
+ * Sell gold of the reserve of the company (the command). The money goes into the company cash.
  * @param flags Type of operation.
  * @param ounces Number of ounces, more than zero and at most what the company holds.
  * @return Zero cost, or an error.
  */
 CommandCost CmdGoldSell(DoCommandFlags flags, uint32_t ounces)
 {
-	if (!Company::IsValidID(_current_company)) return CMD_ERROR;
-	if (ounces == 0 || ounces > 1000000) return CommandCost(STR_GOLD_ERROR_BAD_QUANTITY);
-	if (!_gold_reserve.EnsureStarted()) return CommandCost(STR_GOLD_ERROR_NO_MARKET);
-	if (_gold_reserve.GetHoldings(_current_company) < static_cast<int64_t>(ounces)) return CommandCost(STR_GOLD_ERROR_NO_GOLD);
-
-	if (flags.Test(DoCommandFlag::Execute)) {
-		const int64_t gross = _gold_reserve.GetSellProceeds(ounces);
-		const int64_t commission = GoldReserveManager::GetCommission(gross);
-		const int64_t held = _gold_reserve.GetHoldings(_current_company);
-		int64_t &cost_base = _gold_reserve.holdings_cost[_current_company.base()];
-		/* The part of the cost that belongs to the ounces sold; an unknown cost (old savegame) gives no profit and no loss. */
-		const int64_t basis = cost_base > 0 ? (held == static_cast<int64_t>(ounces) ? cost_base : cost_base * static_cast<int64_t>(ounces) / held) : gross;
-		cost_base = held == static_cast<int64_t>(ounces) ? 0 : std::max<int64_t>(0, cost_base - basis);
-		Company::Get(_current_company)->money += Money(gross - commission);
-		RecordLedger(_current_company, LedgerItem::GoldSell, gross);
-		RecordLedger(_current_company, LedgerItem::TradeCommission, -commission);
-		RecordLedger(_current_company, LedgerItem::RealizedProfit, gross - basis);
-		_gold_reserve.holdings_oz[_current_company.base()] -= ounces;
-		_gold_reserve.market_stock_oz += ounces;
-		_gold_reserve.pressure_ppm = std::max<int64_t>(-GoldReserveManager::PRESSURE_MAX_PPM,
-				_gold_reserve.pressure_ppm - static_cast<int64_t>(ounces) * GoldReserveManager::PPM / GoldReserveManager::DEPTH_OUNCES);
-		InvalidateGoldWindows();
-	}
-	return CommandCost();
+	return ExecuteGoldTrade(_current_company, false, ounces, flags.Test(DoCommandFlag::Execute));
 }

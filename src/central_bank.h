@@ -222,6 +222,7 @@ inline int64_t BankCreditPercentForPenalty(int level)
 /** The central bank: one account per company. Saved in the 'STCK' chunk together with the wallets. */
 struct CentralBank {
 	std::array<BankAccount, MAX_COMPANIES> accounts{};
+	int64_t trading_revenue_cents = 0; ///< The budget of the bank from trading: commission and spread of the gold trades, in 1/100 of a money unit. Saved (SRK_BANK_BUDGET).
 
 	void Reset();
 	void UpdateDaily(int64_t day);

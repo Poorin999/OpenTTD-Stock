@@ -38,6 +38,7 @@ void CentralBank::Reset()
 	_ledger.Reset(); // The ledger is saved and loaded together with the loans.
 	for (auto &log : _bank_log) log.clear(); // The account log is only for the display.
 	this->accounts.fill({});
+	this->trading_revenue_cents = 0;
 }
 
 /** Money that a company owes to the central bank; 0 for a company that does not exist. */

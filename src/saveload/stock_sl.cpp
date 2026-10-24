@@ -40,6 +40,7 @@ enum StockRecordKind : uint8_t {
 	SRK_TIMEFRAME_VOL = 21, ///< Traded volume of the SRK_TIMEFRAME row just before it: a = company, v1 = volume. Only written when it is not 0.
 	SRK_LEDGER = 22,  ///< Line of the account statement: a = company, b = line (LedgerItem), ym = economy year, v1 = income, v2 = expense.
 	SRK_GOLD = 24,    ///< Gold market: v1 = price in 1/100 money units, v2 = baseline cash supply, v3 = ounces of the central bank, v4 = demand pressure in ppm, v5 = ounces for sale in the market plus 1 (0 = savegame from before the stock).
+	SRK_BANK_BUDGET = 26, ///< Budget of the central bank from trading: v1 = commission and spread of the gold trades in 1/100 money units.
 	SRK_GOLD_HOLD = 25, ///< Gold of a company: a = company, v1 = ounces, v2 = what the gold cost (0 = unknown).
 	SRK_BANK = 18,    ///< Loan at the central bank: a = company, v1 = debt, v2 = interest that has been added.
 	SRK_BANK_RISK = 23, ///< Rate and penalty of the loan at the central bank: a = company, v1 = penalty level | in default << 8 | days paid on time << 16, v2 = rest of the daily interest, v3 = annual rate in bp, v4 = number of the game day charged last.
@@ -235,6 +236,13 @@ struct STCKChunkHandler : ChunkHandler {
 			r.v2 = b.carry;
 			r.v3 = b.rate_bp;
 			r.v4 = b.last_charged_day;
+			write(r);
+		}
+
+		if (_central_bank.trading_revenue_cents != 0) {
+			StockRecord r;
+			r.kind = SRK_BANK_BUDGET;
+			r.v1 = _central_bank.trading_revenue_cents;
 			write(r);
 		}
 
@@ -517,6 +525,10 @@ struct STCKChunkHandler : ChunkHandler {
 					b.last_charged_day = std::max<int64_t>(r.v4, -1);
 					break;
 				}
+
+				case SRK_BANK_BUDGET:
+					_central_bank.trading_revenue_cents = std::max<int64_t>(r.v1, 0);
+					break;
 
 				case SRK_GOLD:
 					_gold_reserve.price_cents = std::max<int64_t>(r.v1, 0);

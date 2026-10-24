@@ -39,14 +39,17 @@ struct GoldReserveManager {
 	static constexpr int64_t DEPTH_OUNCES = 20000;          ///< Market depth: buying this many ounces moves the price by +100%.
 	static constexpr int64_t PRESSURE_MAX_PPM = 300000;     ///< The demand effect never moves the price more than 30%.
 	static constexpr int64_t MARKET_STOCK_START = 200000;   ///< Ounces that the market has for sale at the start. Buying takes from it, selling gives back.
-	static constexpr int64_t SPREAD_BP = 50;                ///< The company buys at spot +0.50% (ask) and sells at spot -0.50% (bid).
-	static constexpr int64_t COMMISSION_BP = 25;            ///< Commission of 0.25% of the value of every purchase and every sale.
+	static constexpr int64_t SPREAD_MIN_PPM = 2000;         ///< Smallest total spread: 0.2% of the base price (calm market, low inflation).
+	static constexpr int64_t SPREAD_MAX_PPM = 5000;         ///< Largest total spread: 0.5% (heavy buying or selling, high inflation).
+	static constexpr int64_t COMMISSION_PPM = 1000;         ///< Commission: 0.1% of the value of the order.
+	static constexpr int64_t COMMISSION_MIN = 100;          ///< Smallest commission of one order, in money units (applies to small orders).
 	static constexpr int64_t OUNCES_PER_DELIVERED_UNIT = 10; ///< Gold or valuables delivered to a station: one unit of cargo (one bag) adds this many ounces to the market stock.
 	static constexpr int64_t MARKET_STOCK_CAP = 2 * MARKET_STOCK_START; ///< Deliveries never fill the market stock above this.
 	static constexpr int64_t SCARCITY_FLOOR_DIV = 4;        ///< The scarcity factor stops growing when the stock is 1/4 of the start stock (price x4).
 
 
-	int64_t price_cents = 0;      ///< Price of one ounce in 1/100 of a money unit. 0 = not started yet.
+	int64_t price_cents = 0;      ///< Base market price of one ounce (the middle price) in 1/100 of a money unit. 0 = not started yet.
+	int64_t spread_ppm = SPREAD_MIN_PPM; ///< Total spread (ask - bid) in ppm of the base price. Set once per game day (UpdateDaily), so it never jumps inside a day. Not saved: the minimum until the next day starts.
 	int64_t baseline_supply = 0;  ///< Cash in circulation when the market started; the supply factor is measured against it.
 	int64_t bank_reserve_oz = 0;  ///< The ounces that the central bank holds from the start.
 	int64_t market_stock_oz = 0;  ///< Ounces that the market still has for sale. Less stock = a dearer price (scarcity).
@@ -64,6 +67,8 @@ struct GoldReserveManager {
 	int64_t GetCirculatingCash() const;
 	int64_t GetBackingBp() const;
 	CreditTier GetCreditTier() const;
+	int64_t ComputeSpreadPpm() const;
+	int64_t GetSpreadPpm() const { return this->spread_ppm; }
 	int64_t GetAskCents() const;
 	int64_t GetBidCents() const;
 	int64_t GetBuyCost(int64_t ounces) const;
@@ -81,6 +86,20 @@ const char *GetCreditTierName(CreditTier tier);
 
 /** Gold (and valuables) delivered to a station feeds the stock of the gold market. Called from CargoPayment::PayFinalDelivery (economy.cpp). */
 void GoldFromDelivery(CargoType cargo, uint count);
+
+/** The total price of buying this many ounces now: ask price x amount + commission (what leaves the cash). */
+int64_t CalculateBuyCost(uint32_t amount);
+/** What selling this many ounces now puts into the cash: bid price x amount - commission. */
+int64_t CalculateSellReturn(uint32_t amount);
+/**
+ * One gold trade of a company, paid from its unborrowed cash. The commission and the spread go into the budget of the central bank.
+ * @param company The company.
+ * @param is_buy True: buy for the vault; false: sell from the vault.
+ * @param amount Ounces.
+ * @param execute False: only check, change nothing.
+ * @return Zero cost, or the error.
+ */
+CommandCost ExecuteGoldTrade(CompanyID company, bool is_buy, uint32_t amount, bool execute = true);
 
 CommandCost CmdGoldBuy(DoCommandFlags flags, uint32_t ounces);
 CommandCost CmdGoldSell(DoCommandFlags flags, uint32_t ounces);
