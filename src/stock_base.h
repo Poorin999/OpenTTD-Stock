@@ -14,8 +14,10 @@
 #include "economy_type.h"
 #include "wallet_base.h"
 #include "central_bank.h"
+#include "valuables.h"
 #include "game_time/game_time_aggregator.h"
 #include <array>
+#include <string>
 #include <vector>
 
 /** Number of (virtual) shares every company has. The mid price of one share is the company value divided by this. */
@@ -129,7 +131,7 @@ inline bool IsStockBuy(StockOrderType type)
 struct StockOrder {
 	uint32_t id = 0;                         ///< Unique number of the order.
 	uint8_t owner = 0;                       ///< Company that owns the order.
-	uint8_t target = 0;                      ///< Company whose shares (symbol) are traded.
+	uint8_t target = 0;                      ///< Symbol that is traded: a company (0 .. MAX_COMPANIES - 1) or a valuable (STOCK_FIRST_VALUABLE and up).
 	StockOrderType type = StockOrderType::Buy; ///< Buy or Sell for positions, any type for pending orders.
 	uint32_t volume = 0;                     ///< Volume in hundredths of a LOT.
 	int64_t price = 0;                       ///< Entry price of a position, or trigger price of a pending order.
@@ -165,7 +167,7 @@ enum class StockCloseReason : uint8_t {
 struct StockClosedTrade {
 	uint32_t id = 0;                              ///< Number of the trade (same as when it was open).
 	uint8_t owner = 0;                            ///< Company that made the trade.
-	uint8_t target = 0;                           ///< Company whose shares (symbol) were traded.
+	uint8_t target = 0;                           ///< Symbol that was traded: a company or a valuable.
 	StockOrderType type = StockOrderType::Buy;    ///< Buy (long) or Sell (short).
 	StockCloseReason reason = StockCloseReason::Manual; ///< Why it was closed.
 	uint32_t volume = 0;                          ///< Closed volume in hundredths of a LOT.
@@ -229,18 +231,18 @@ struct StockSummary {
 
 /** All state of the trading terminal. Saved in the 'STCK' chunk. */
 struct StockMarket {
-	std::array<std::vector<StockCandle>, MAX_COMPANIES> candles{}; ///< Closed candles per company.
-	std::array<StockCandle, MAX_COMPANIES> current{};              ///< The running candle per company.
-	std::array<bool, MAX_COMPANIES> has_current{};                 ///< Whether #current is valid.
-	std::array<int64_t, MAX_COMPANIES> price_fp{};                 ///< Current mid price per share, times #STOCK_PRICE_SCALE. 0 when unknown.
-	std::array<int64_t, MAX_COMPANIES> base_fp{};                  ///< Mid price per share according to the valuation, times #STOCK_PRICE_SCALE, refreshed once per day.
-	std::array<int64_t, MAX_COMPANIES> impact{};                   ///< Accumulated market impact of the orders, in parts per million; positive when more was bought than sold.
-	std::array<StockValuation, MAX_COMPANIES> valuation{};         ///< Valuation per company, refreshed once per day.
-	std::array<std::vector<StockCandle>, MAX_COMPANIES> daily{};   ///< Closed daily candles per company; ym holds the game day number. Only filled when #record_daily is set.
-	std::array<StockCandle, MAX_COMPANIES> daily_current{};        ///< The running daily candle per company.
-	std::array<bool, MAX_COMPANIES> has_daily_current{};           ///< Whether #daily_current is valid.
+	std::array<std::vector<StockCandle>, STOCK_SYMBOLS> candles{}; ///< Closed candles per company.
+	std::array<StockCandle, STOCK_SYMBOLS> current{};              ///< The running candle per company.
+	std::array<bool, STOCK_SYMBOLS> has_current{};                 ///< Whether #current is valid.
+	std::array<int64_t, STOCK_SYMBOLS> price_fp{};                 ///< Current mid price per share, times #STOCK_PRICE_SCALE. 0 when unknown.
+	std::array<int64_t, STOCK_SYMBOLS> base_fp{};                  ///< Mid price per share according to the valuation, times #STOCK_PRICE_SCALE, refreshed once per day.
+	std::array<int64_t, STOCK_SYMBOLS> impact{};                   ///< Accumulated market impact of the orders, in parts per million; positive when more was bought than sold.
+	std::array<StockValuation, STOCK_SYMBOLS> valuation{};         ///< Valuation per company, refreshed once per day.
+	std::array<std::vector<StockCandle>, STOCK_SYMBOLS> daily{};   ///< Closed daily candles per company; ym holds the game day number. Only filled when #record_daily is set.
+	std::array<StockCandle, STOCK_SYMBOLS> daily_current{};        ///< The running daily candle per company.
+	std::array<bool, STOCK_SYMBOLS> has_daily_current{};           ///< Whether #daily_current is valid.
 	bool record_daily = false;                                     ///< Whether daily candles are recorded; set once when the player opens the Daily view.
-	std::array<TimeframeAggregator, MAX_COMPANIES> frames;         ///< Candles of the 1h, 4h, 12h, day, week, month and year timeframes of game time per company; prices are times #STOCK_PRICE_SCALE, the volume is in shares. Closed by the clock events.
+	std::array<TimeframeAggregator, STOCK_SYMBOLS> frames;         ///< Candles of the 1h, 4h, 12h, day, week, month and year timeframes of game time per company; prices are times #STOCK_PRICE_SCALE, the volume is in shares. Closed by the clock events.
 	std::vector<StockClosedTrade> history{};                       ///< Closed trades of all companies, the oldest first.
 	std::array<StockStats, MAX_COMPANIES> stats{};                 ///< Trading results per company (the portfolio summary).
 	std::vector<StockOrder> positions{};                           ///< Open positions.
@@ -298,6 +300,9 @@ std::vector<StockRankEntry> GetStockRanking(StockRankSort sort);
 
 int64_t GetStockProfit(const StockOrder &position);
 int64_t GetStockMargin(const StockOrder &position);
+bool IsStockSymbolValid(size_t symbol);
+std::string GetStockSymbolName(size_t symbol);
+std::string GetStockSymbolShortName(size_t symbol);
 int64_t GetStockUsedMargin(CompanyID owner, uint8_t wallet);
 int64_t GetStockFloatingProfit(CompanyID owner, uint8_t wallet);
 int64_t GetStockEquity(CompanyID owner, uint8_t wallet);

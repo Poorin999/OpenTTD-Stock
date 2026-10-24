@@ -13,6 +13,7 @@
 #include "stock_gui.h"
 #include "central_bank.h"
 #include "gold_reserve.h"
+#include "valuables.h"
 #include "RetailMarketManager.h"
 #include "game_time/game_time_manager.h"
 #include "command_type.h"
@@ -49,6 +50,7 @@ void StockMarket::Reset()
 	_wallets.Reset();
 	_central_bank.Reset();
 	_gold_reserve.Reset();
+	_valuables.Reset();
 	RetailMarketManager::Get().Reset(); // The retail investors start again with every new game and every load.
 	GameTimeManager::Get().Reset();
 	for (auto &list : this->daily) list.clear();
@@ -99,10 +101,40 @@ static int64_t GetGoalFixed(size_t company)
 	return std::max<int64_t>(STOCK_MIN_PRICE * STOCK_PRICE_SCALE, base * (STOCK_PPM + _stock_market.impact[company]) / STOCK_PPM);
 }
 
-/** How far an order of this volume moves the price, in parts per million. */
-static int64_t GetImpactPpm(uint32_t volume)
+/**
+ * How far an order of this volume moves the price, in parts per million. The market of a valuable is deeper than the market of
+ * the shares of a company, so the same order moves it less.
+ * @param volume Volume of the order.
+ * @param symbol The symbol that is traded.
+ */
+static int64_t GetImpactPpm(uint32_t volume, size_t symbol)
 {
-	return static_cast<int64_t>(volume) * STOCK_IMPACT_FACTOR * STOCK_PPM / STOCK_SHARES_PER_COMPANY;
+	const int64_t depth = IsValuableSymbol(symbol) ? ValuablesManager::Info(symbol - STOCK_FIRST_VALUABLE).depth : 1;
+	return static_cast<int64_t>(volume) * STOCK_IMPACT_FACTOR * STOCK_PPM / (STOCK_SHARES_PER_COMPANY * depth);
+}
+
+/** Whether a symbol exists: a company that is in the game, or a valuable (they always exist). */
+bool IsStockSymbolValid(size_t symbol)
+{
+	if (symbol < MAX_COMPANIES) return Company::IsValidID(CompanyID{static_cast<uint8_t>(symbol)});
+	return IsValuableSymbol(symbol);
+}
+
+/** The name of a symbol for lists and titles: the name of the company, or for example "Gold (XAU)". */
+std::string GetStockSymbolName(size_t symbol)
+{
+	if (IsValuableSymbol(symbol)) {
+		const ValuableInfo &info = ValuablesManager::Info(symbol - STOCK_FIRST_VALUABLE);
+		return fmt::format("{} ({})", info.name, info.code);
+	}
+	return GetString(STR_STOCK_SYMBOL, CompanyID{static_cast<uint8_t>(std::min<size_t>(symbol, MAX_COMPANIES - 1))});
+}
+
+/** A short name of a symbol: the code of a valuable (XAU), or the name of the company. */
+std::string GetStockSymbolShortName(size_t symbol)
+{
+	if (IsValuableSymbol(symbol)) return ValuablesManager::Info(symbol - STOCK_FIRST_VALUABLE).code;
+	return GetStockSymbolName(symbol);
 }
 
 /**
@@ -166,6 +198,11 @@ static int64_t StockPriceFromValuation(const StockValuation &v)
  */
 int64_t GetStockPrice(CompanyID company)
 {
+	if (IsValuableSymbol(company.base())) {
+		/* A valuable has no valuation: until its first price is stored (the gold market has not started) there is no price. */
+		const int64_t price = _stock_market.price_fp[company.base()];
+		return price > 0 ? FixedToPrice(price) : 0;
+	}
 	if (!Company::IsValidID(company)) return 0;
 	const int64_t stored = _stock_market.price_fp[company.base()];
 	if (stored > 0) return FixedToPrice(stored);
@@ -196,6 +233,9 @@ int64_t GetStockMarketCap(CompanyID company)
  */
 static int64_t GetSpread(CompanyID company, int64_t mid)
 {
+	if (IsValuableSymbol(company.base())) {
+		return std::max<int64_t>(1, mid * ValuablesManager::Info(company.base() - STOCK_FIRST_VALUABLE).spread_ppm / STOCK_PPM);
+	}
 	const int64_t normal = std::max<int64_t>(1, mid / 200);
 
 	const int64_t book = _stock_market.valuation[company.base()].book;
@@ -238,7 +278,7 @@ int64_t GetStockExecutionPrice(CompanyID company, bool buy, uint32_t volume)
 {
 	const int64_t quote = buy ? GetStockAsk(company) : GetStockBid(company);
 	if (quote == 0) return 0;
-	const int64_t half = GetImpactPpm(volume) / 2;
+	const int64_t half = GetImpactPpm(volume, company.base()) / 2;
 	return std::max<int64_t>(1, quote * (STOCK_PPM + (buy ? half : -half)) / STOCK_PPM);
 }
 
@@ -295,7 +335,7 @@ StockSummary GetStockSummary(CompanyID company)
 /** Margin that is held for a position. */
 int64_t GetStockMargin(const StockOrder &position)
 {
-	return position.price * static_cast<int64_t>(position.volume) / STOCK_MARGIN_DIVISOR;
+	return position.price * static_cast<int64_t>(position.volume) / GetStockMarginDivisor(position.target);
 }
 
 /** Sum of the margins of the open positions in one wallet. */
@@ -313,7 +353,7 @@ int64_t GetStockFloatingProfit(CompanyID owner, uint8_t wallet)
 {
 	int64_t sum = 0;
 	for (const StockOrder &p : _stock_market.positions) {
-		if (p.owner == owner.base() && p.wallet == wallet && Company::IsValidID(CompanyID{p.target})) sum += GetStockProfit(p);
+		if (p.owner == owner.base() && p.wallet == wallet && IsStockSymbolValid(p.target)) sum += GetStockProfit(p);
 	}
 	return sum;
 }
@@ -428,7 +468,7 @@ size_t StockMarket::CountWalletOrders(CompanyID owner, uint8_t wallet) const
  */
 void StockMarket::AddTradedVolume(CompanyID target, uint32_t volume)
 {
-	if (!Company::IsValidID(target) || volume == 0) return;
+	if (!IsStockSymbolValid(target.base()) || volume == 0) return;
 	const size_t i = target.base();
 	if (this->has_current[i]) this->current[i].volume += volume;
 	if (this->record_daily && this->has_daily_current[i]) this->daily_current[i].volume += volume;
@@ -446,14 +486,14 @@ void StockMarket::AddTradedVolume(CompanyID target, uint32_t volume)
  */
 void StockMarket::ApplyImpact(CompanyID target, bool buy, uint32_t volume)
 {
-	if (!Company::IsValidID(target)) return;
+	if (!IsStockSymbolValid(target.base())) return;
 	const size_t i = target.base();
 	if (this->price_fp[i] <= 0) return;
 
 	/* Every executed order is traded volume: it goes into the running candles, where the chart shows it as bars. */
 	this->AddTradedVolume(target, volume);
 
-	const int64_t shift = buy ? GetImpactPpm(volume) : -GetImpactPpm(volume);
+	const int64_t shift = buy ? GetImpactPpm(volume, i) : -GetImpactPpm(volume, i);
 	this->impact[i] = std::clamp<int64_t>(this->impact[i] + shift, -STOCK_IMPACT_MAX_PPM, STOCK_IMPACT_MAX_PPM);
 	this->price_fp[i] = std::max<int64_t>(STOCK_MIN_PRICE * STOCK_PRICE_SCALE, this->price_fp[i] * (STOCK_PPM + shift) / STOCK_PPM);
 }
@@ -467,7 +507,7 @@ void StockMarket::HandleRemovedCompanies()
 	for (size_t i = 0; i < this->positions.size();) {
 		const StockOrder p = this->positions[i];
 		const bool owner_ok = Company::IsValidID(CompanyID{p.owner});
-		const bool target_ok = Company::IsValidID(CompanyID{p.target});
+		const bool target_ok = IsStockSymbolValid(p.target);
 		if (owner_ok && target_ok) {
 			i++;
 			continue;
@@ -484,7 +524,7 @@ void StockMarket::HandleRemovedCompanies()
 
 	for (size_t i = 0; i < this->pending.size();) {
 		const StockOrder &p = this->pending[i];
-		if (Company::IsValidID(CompanyID{p.owner}) && Company::IsValidID(CompanyID{p.target})) {
+		if (Company::IsValidID(CompanyID{p.owner}) && IsStockSymbolValid(p.target)) {
 			i++;
 		} else {
 			this->pending.erase(this->pending.begin() + i);
@@ -634,7 +674,7 @@ void StockMarket::ApplyTrailingStops()
 	for (StockOrder &p : this->positions) {
 		if (p.trail <= 0) continue;
 		const CompanyID target{p.target};
-		if (!Company::IsValidID(CompanyID{p.owner}) || !Company::IsValidID(target) || this->price_fp[p.target] <= 0) continue;
+		if (!Company::IsValidID(CompanyID{p.owner}) || !IsStockSymbolValid(target.base()) || this->price_fp[p.target] <= 0) continue;
 
 		if (IsStockBuy(p.type)) {
 			const int64_t level = GetStockBid(target) - p.trail;
@@ -705,7 +745,7 @@ void StockMarket::CheckPositions()
 		const CompanyID owner{p.owner};
 		const CompanyID target{p.target};
 		/* Positions of vanished companies are cleaned up by HandleRemovedCompanies. */
-		if (!Company::IsValidID(owner) || !Company::IsValidID(target) || this->price_fp[p.target] <= 0) {
+		if (!Company::IsValidID(owner) || !IsStockSymbolValid(target.base()) || this->price_fp[p.target] <= 0) {
 			i++;
 			continue;
 		}
@@ -730,7 +770,7 @@ void StockMarket::CheckPositions()
 
 		/* The position is removed, so the index stays the same for the next one. */
 		this->ClosePosition(i, p.volume, hit_sl ? p.sl : p.tp, hit_sl ? StockCloseReason::StopLoss : StockCloseReason::TakeProfit);
-		NotifyStockEvent(owner, fmt::format("Stock Market: Company [{}] closed Position #{} at {} price.", GetString(STR_STOCK_SYMBOL, owner), p.id, hit_sl ? "SL" : "TP"));
+		NotifyStockEvent(owner, fmt::format("Stock Market: [{}] closed Position #{} at {} price.", GetStockSymbolName(p.target), p.id, hit_sl ? "SL" : "TP"));
 	}
 }
 
@@ -759,7 +799,7 @@ void StockMarket::CheckMarginCall()
 				int64_t worst_profit = 0;
 				for (size_t k = 0; k < this->positions.size(); k++) {
 					const StockOrder &p = this->positions[k];
-					if (p.owner != owner.base() || p.wallet != wallet || !Company::IsValidID(CompanyID{p.target})) continue;
+					if (p.owner != owner.base() || p.wallet != wallet || !IsStockSymbolValid(p.target)) continue;
 					const int64_t profit = GetStockProfit(p);
 					if (worst == this->positions.size() || profit < worst_profit) {
 						worst = k;
@@ -801,7 +841,7 @@ void StockMarket::CheckPending()
 		StockOrder o = this->pending[i];
 		const CompanyID owner{o.owner};
 		const CompanyID target{o.target};
-		if (!Company::IsValidID(owner) || !Company::IsValidID(target) || this->price_fp[o.target] <= 0) {
+		if (!Company::IsValidID(owner) || !IsStockSymbolValid(target.base()) || this->price_fp[o.target] <= 0) {
 			i++;
 			continue;
 		}
@@ -857,7 +897,7 @@ void StockMarket::CheckExecutions()
 void StockMarket::ChargeSwap()
 {
 	for (const StockOrder &p : this->positions) {
-		if (!Company::IsValidID(CompanyID{p.owner}) || !Company::IsValidID(CompanyID{p.target})) continue;
+		if (!Company::IsValidID(CompanyID{p.owner}) || !IsStockSymbolValid(p.target)) continue;
 		const int64_t value = GetStockPrice(CompanyID{p.target}) * static_cast<int64_t>(p.volume);
 		PayStockProfit(CompanyID{p.owner}, p.wallet, -(value * STOCK_SWAP_PPM_PER_DAY / STOCK_PPM), LedgerItem::MarginSwap);
 	}
@@ -867,7 +907,7 @@ void StockMarket::ChargeSwap()
 static void NotifyOrderExpired(const StockOrder &order)
 {
 	if (CompanyID{order.owner} != _local_company) return;
-	AddNewsItem(GetEncodedString(STR_STOCK_NEWS_ORDER_EXPIRED, order.id, GetStockOrderTypeString(order.type), CompanyID{order.target}),
+	AddNewsItem(GetEncodedString(STR_STOCK_NEWS_ORDER_EXPIRED_SYMBOL, order.id, GetStockOrderTypeString(order.type), GetStockSymbolName(order.target)),
 			NewsType::General, NewsStyle::Small, {});
 }
 
@@ -988,13 +1028,24 @@ void StockMarket::UpdateDaily()
 {
 	const int32_t ym = GetStockCurrentMonth();
 
-	for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
-		const CompanyID cid{i};
-		if (!Company::IsValidID(cid)) continue;
+	/* The valuables take a fresh part of noise once per economy day (the drift takes its step once per game day, see valuables.cpp). */
+	_valuables.StepFast();
 
-		const StockValuation valuation = ComputeStockValuation(Company::Get(cid));
-		this->valuation[i] = valuation;
-		this->base_fp[i] = StockPriceFromValuation(valuation);
+	/* The companies first, then the valuables (see STOCK_SYMBOLS). */
+	for (size_t i = 0; i < STOCK_SYMBOLS; i++) {
+		const CompanyID cid{static_cast<uint8_t>(i)};
+		if (IsValuableSymbol(i)) {
+			/* A valuable: the price it heads to follows from the gold price, the cycle, the drift and the noise. */
+			const int64_t base = _valuables.GetBaseFixed(i - STOCK_FIRST_VALUABLE);
+			if (base <= 0) continue; // The gold market has not started yet.
+			this->base_fp[i] = base;
+		} else {
+			if (!Company::IsValidID(cid)) continue;
+
+			const StockValuation valuation = ComputeStockValuation(Company::Get(cid));
+			this->valuation[i] = valuation;
+			this->base_fp[i] = StockPriceFromValuation(valuation);
+		}
 
 		/* The impact of the orders fades away. */
 		this->impact[i] -= this->impact[i] / STOCK_IMPACT_DECAY_DIV;
@@ -1074,8 +1125,8 @@ void StockMarket::UpdateTick()
 	/* Every company has a trading wallet and a fuel reserve from the first moment. */
 	for (const Company *c : Company::Iterate()) _wallets.EnsureDefaults(c->index);
 
-	for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
-		if (!Company::IsValidID(CompanyID{i}) || this->price_fp[i] <= 0) continue;
+	for (size_t i = 0; i < STOCK_SYMBOLS; i++) {
+		if (!IsStockSymbolValid(i) || this->price_fp[i] <= 0) continue;
 
 		const int64_t glide = (GetGoalFixed(i) - this->price_fp[i]) / STOCK_GLIDE_DIV;
 		this->price_fp[i] += glide;

@@ -32,6 +32,7 @@
 
 #include "widgets/stock_widget.h"
 #include "central_bank.h"
+#include "valuables.h"
 #include "game_time/game_time_manager.h"
 
 #include "table/strings.h"
@@ -126,6 +127,15 @@ static std::string StockMonthToString(int32_t ym)
 {
 	const int month = ym % 12 + 1;
 	return fmt::format("{}-{:02}", ym / 12, month);
+}
+
+/** Whether the terminal shows Thai texts for the valuables (the same switch as the central bank window). */
+static constexpr bool STOCK_USE_THAI = true;
+
+/** A text in Thai or English, like CbText in the central bank window. */
+static std::string StockText(const char *thai, const char *english)
+{
+	return STOCK_USE_THAI ? std::string(thai) : std::string(english);
 }
 
 /** The timeframe that a timeframe button selects. All timeframes are periods of the game clock of the mod (see game_time_manager.h). */
@@ -258,7 +268,8 @@ struct StockWindow : Window {
 		Ranking,    ///< The ranking of the companies.
 	};
 
-	CompanyID selected = INVALID_OWNER; ///< Symbol (company) whose chart is shown.
+	CompanyID selected = INVALID_OWNER; ///< Symbol (a company, or a valuable: the symbol number is STOCK_FIRST_VALUABLE and up) whose chart is shown.
+	bool show_valuables = false;        ///< Whether the Market Watch lists the valuables instead of the companies.
 	Scrollbar *vscroll = nullptr;       ///< Scrollbar of the toolbox.
 	Scrollbar *watch_scroll = nullptr;  ///< Scrollbar of the Market Watch.
 	ToolView view = ToolView::Orders;   ///< What the toolbox shows.
@@ -289,6 +300,7 @@ struct StockWindow : Window {
 		this->FinishInitNested(0);
 		this->UpdateTimeframeButtons();
 		this->EnsureValidSelection();
+		this->UpdateTabButtons();
 		this->OnInvalidateData(0);
 	}
 
@@ -308,10 +320,10 @@ struct StockWindow : Window {
 	int RowHeight() const { return GetCharacterHeight(FS_NORMAL) + ScaleGUITrad(2); }
 	int HeaderHeight() const { return this->RowHeight() + ScaleGUITrad(3); }
 
-	/** Make sure #selected is a company that exists. */
+	/** Make sure #selected is a symbol that exists. */
 	void EnsureValidSelection()
 	{
-		if (Company::IsValidID(this->selected)) return;
+		if (IsStockSymbolValid(this->selected.base())) return;
 		if (Company::IsValidID(_local_company)) {
 			this->selected = _local_company;
 			return;
@@ -331,7 +343,7 @@ struct StockWindow : Window {
 	std::vector<StockCandle> GetChartCandles() const
 	{
 		std::vector<StockCandle> candles;
-		if (!Company::IsValidID(this->selected)) return candles;
+		if (!IsStockSymbolValid(this->selected.base())) return candles;
 		const TimeframeAggregator &frames = _stock_market.frames[this->selected.base()];
 
 		auto convert = [](const TimeframeBucket &b) {
@@ -510,7 +522,7 @@ struct StockWindow : Window {
 	{
 		if (!gui_scope) return;
 		this->vscroll->SetCount(this->GetViewRowCount());
-		this->watch_scroll->SetCount(Company::GetNumItems());
+		this->watch_scroll->SetCount(this->show_valuables ? VALUABLE_COUNT : Company::GetNumItems());
 		this->SetDirty();
 	}
 
@@ -712,6 +724,29 @@ struct StockWindow : Window {
 		if (changed) this->SetDirty();
 	}
 
+	/** Show the chart of a symbol and make it the symbol of the New Order window. */
+	void SelectSymbol(CompanyID symbol)
+	{
+		this->selected = symbol;
+		this->chart_scroll_offset = 0;
+		this->ResetChartVertical();
+		SetStockOrderSymbol(symbol);
+
+		/* The Market Watch shows the list that the symbol belongs to. */
+		const bool valuables = IsValuableSymbol(symbol.base());
+		if (valuables != this->show_valuables) this->watch_scroll->SetPosition(0);
+		this->show_valuables = valuables;
+		this->UpdateTabButtons();
+		this->OnInvalidateData();
+	}
+
+	/** Show which tab of the Market Watch is active. */
+	void UpdateTabButtons()
+	{
+		this->SetWidgetLoweredState(WID_ST_TAB_COMPANIES, !this->show_valuables);
+		this->SetWidgetLoweredState(WID_ST_TAB_VALUABLES, this->show_valuables);
+	}
+
 	void OnClick(Point pt, WidgetID widget, int click_count) override
 	{
 		switch (widget) {
@@ -813,19 +848,35 @@ struct StockWindow : Window {
 				break;
 			}
 
+			case WID_ST_TAB_COMPANIES:
+			case WID_ST_TAB_VALUABLES: {
+				const bool valuables = widget == WID_ST_TAB_VALUABLES;
+				if (valuables == this->show_valuables) break;
+				/* The chart follows the tab: the first valuable, or the company of the player (or the first company), is shown. */
+				if (valuables) {
+					this->SelectSymbol(CompanyID{static_cast<uint8_t>(STOCK_FIRST_VALUABLE)});
+				} else {
+					this->selected = INVALID_OWNER;
+					this->show_valuables = false;
+					this->EnsureValidSelection();
+					this->SelectSymbol(this->selected);
+				}
+				break;
+			}
+
 			case WID_ST_WATCH: {
 				const NWidgetBase *nw = this->GetWidget<NWidgetBase>(WID_ST_WATCH);
 				if (pt.y - nw->pos_y < this->HeaderHeight()) break;
 				const int row = (pt.y - nw->pos_y - this->HeaderHeight()) / this->RowHeight();
 				const size_t wanted = static_cast<size_t>(std::max(0, row)) + this->watch_scroll->GetPosition();
+				if (this->show_valuables) {
+					if (wanted < VALUABLE_COUNT) this->SelectSymbol(CompanyID{static_cast<uint8_t>(STOCK_FIRST_VALUABLE + wanted)});
+					break;
+				}
 				size_t n = 0;
 				for (const Company *c : Company::Iterate()) {
 					if (n++ == wanted) {
-						this->selected = c->index;
-						this->chart_scroll_offset = 0;
-						this->ResetChartVertical();
-						SetStockOrderSymbol(c->index);
-						this->SetDirty();
+						this->SelectSymbol(c->index);
 						break;
 					}
 				}
@@ -900,11 +951,7 @@ struct StockWindow : Window {
 		const size_t row = this->vscroll->GetScrolledRowFromWidget(pt.y, this, WID_ST_TOOLBOX, this->HeaderHeight(), this->RowHeight());
 		const std::vector<StockRankEntry> list = GetStockRanking(this->rank_sort);
 		if (row >= list.size()) return;
-		this->selected = list[row].company;
-		this->chart_scroll_offset = 0;
-		this->ResetChartVertical();
-		SetStockOrderSymbol(this->selected);
-		this->SetDirty();
+		this->SelectSymbol(list[row].company);
 	}
 
 	void DrawWidget(const Rect &r, WidgetID widget) const override
@@ -918,6 +965,12 @@ struct StockWindow : Window {
 			case WID_ST_SUMMARY: this->DrawSummary(r); break;
 			case WID_ST_CHART:   this->DrawChart(r); break;
 			case WID_ST_TOOLBOX: this->DrawToolbox(r); break;
+			case WID_ST_TAB_COMPANIES:
+				DrawString(r.left + 2, r.right - 2, CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL)), StockText("บริษัท", "Companies"), this->show_valuables ? TC_BLACK : TC_WHITE, SA_HOR_CENTER);
+				break;
+			case WID_ST_TAB_VALUABLES:
+				DrawString(r.left + 2, r.right - 2, CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL)), StockText("ทรัพย์สินมีค่า", "Valuables"), this->show_valuables ? TC_WHITE : TC_BLACK, SA_HOR_CENTER);
+				break;
 			case WID_ST_PORTFOLIO:
 				DrawString(r.left + 2, r.right - 2, CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL)), std::string("Portfolio"), TC_BLACK, SA_HOR_CENTER);
 				break;
@@ -1022,6 +1075,21 @@ struct StockWindow : Window {
 		y = r.top + this->HeaderHeight();
 		GfxDrawLine(r.left + 1, y - 2, r.right - 1, y - 2, GREY_SCALE(4));
 
+		/* The valuables: one row each, with the code of the symbol and the change since the last month. */
+		if (this->show_valuables) {
+			const size_t first_valuable = this->watch_scroll->GetPosition();
+			for (size_t k = first_valuable; k < VALUABLE_COUNT; k++) {
+				if (y + row_h > r.bottom) break;
+				const CompanyID id{static_cast<uint8_t>(STOCK_FIRST_VALUABLE + k)};
+				if (id == this->selected) GfxFillRect(r.left + 1, y - 1, r.right - 1, y + row_h - 2, GREY_SCALE(4));
+				DrawString(left, bid_right - ScaleGUITrad(74), y, GetStockSymbolShortName(id.base()), TC_WHITE, SA_LEFT);
+				DrawString(bid_right - ScaleGUITrad(70), bid_right, y, GetString(STR_JUST_CURRENCY_SHORT, GetStockBid(id)), TC_LIGHT_BLUE, SA_RIGHT);
+				DrawString(ask_right - ScaleGUITrad(70), ask_right, y, GetString(STR_JUST_CURRENCY_SHORT, GetStockAsk(id)), TC_LIGHT_BLUE, SA_RIGHT);
+				y += row_h;
+			}
+			return;
+		}
+
 		/* Companies that have been scrolled out of the top of the list are skipped. */
 		const size_t first = this->watch_scroll->GetPosition();
 		size_t n = 0;
@@ -1048,9 +1116,13 @@ struct StockWindow : Window {
 
 	void DrawTitle(const Rect &r) const
 	{
-		if (!Company::IsValidID(this->selected)) return;
+		if (!IsStockSymbolValid(this->selected.base())) return;
 		const int top = CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL));
-		DrawString(r.left + 4, r.right - 4, top, GetString(STR_STOCK_TITLE, this->selected, GetStockBid(this->selected), GetStockAsk(this->selected)), TC_FROMSTRING, SA_LEFT);
+		if (IsValuableSymbol(this->selected.base())) {
+			DrawString(r.left + 4, r.right - 4, top, GetString(STR_STOCK_TITLE_SYMBOL, GetStockSymbolName(this->selected.base()), GetStockBid(this->selected), GetStockAsk(this->selected)), TC_FROMSTRING, SA_LEFT);
+		} else {
+			DrawString(r.left + 4, r.right - 4, top, GetString(STR_STOCK_TITLE, this->selected, GetStockBid(this->selected), GetStockAsk(this->selected)), TC_FROMSTRING, SA_LEFT);
+		}
 
 		const int64_t price = GetStockPrice(this->selected);
 		const int64_t reference = this->GetReferencePrice();
@@ -1063,8 +1135,18 @@ struct StockWindow : Window {
 	/** The summary row: P/E, EPS and dividend yield of the selected symbol. */
 	void DrawSummary(const Rect &r) const
 	{
-		if (!Company::IsValidID(this->selected)) return;
+		if (!IsStockSymbolValid(this->selected.base())) return;
 		const int top = CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL));
+		if (IsValuableSymbol(this->selected.base())) {
+			/* A valuable has no earnings: show what one unit is, the leverage and the spread. */
+			const ValuableInfo &info = ValuablesManager::Info(this->selected.base() - STOCK_FIRST_VALUABLE);
+			const int64_t bid = GetStockBid(this->selected);
+			const int64_t ask = GetStockAsk(this->selected);
+			const std::string text = fmt::format("{}: 1 unit = {}   {} 1:{}   Spread {}   1 LOT = 100 units", info.name, info.unit,
+					StockText("เลเวอเรจ", "Leverage"), info.leverage, ask - bid);
+			DrawString(r.left + 4, r.right - 4, top, text, TC_LIGHT_BLUE, SA_LEFT);
+			return;
+		}
 		const StockSummary s = GetStockSummary(this->selected);
 
 		std::string text;
@@ -1080,7 +1162,7 @@ struct StockWindow : Window {
 
 	void DrawChart(const Rect &r) const
 	{
-		if (!Company::IsValidID(this->selected)) return;
+		if (!IsStockSymbolValid(this->selected.base())) return;
 
 		/* Temporary: the chart is switched off while the clock of the game is rebuilt (see GAME_TIME_DECOUPLE_CHART). The candles are still recorded. */
 		if constexpr (GameTimeManager::IsChartDecoupled()) {
@@ -1504,7 +1586,7 @@ struct StockWindow : Window {
 			const CompanyID target{t.target};
 
 			DrawString(c_id, c_symbol, y, GetString(STR_JUST_INT, t.id), TC_WHITE, SA_LEFT);
-			DrawString(c_symbol, c_type, y, Company::IsValidID(target) ? GetString(STR_STOCK_SYMBOL, target) : GetString(STR_STOCK_HISTORY_GONE), TC_WHITE, SA_LEFT);
+			DrawString(c_symbol, c_type, y, IsStockSymbolValid(target.base()) ? GetStockSymbolShortName(target.base()) : GetString(STR_STOCK_HISTORY_GONE), TC_WHITE, SA_LEFT);
 			DrawString(c_type, c_volume - ScaleGUITrad(60), y, GetStockOrderTypeString(t.type), IsStockBuy(t.type) ? TC_LIGHT_BLUE : TC_ORANGE, SA_LEFT);
 			DrawString(c_volume - ScaleGUITrad(60), c_volume, y, StockVolumeToString(t.volume), TC_WHITE, SA_RIGHT);
 			DrawString(c_volume, c_open, y, GetString(STR_JUST_CURRENCY_LONG, t.open_price), TC_WHITE, SA_RIGHT);
@@ -1688,7 +1770,7 @@ struct StockWindow : Window {
 			const bool is_position = o.type == StockOrderType::Buy || o.type == StockOrderType::Sell;
 
 			DrawString(c_id, c_symbol, y, GetString(STR_JUST_INT, o.id), TC_WHITE, SA_LEFT);
-			DrawString(c_symbol, c_type, y, GetString(STR_STOCK_SYMBOL, target), TC_WHITE, SA_LEFT);
+			DrawString(c_symbol, c_type, y, GetStockSymbolShortName(target.base()), TC_WHITE, SA_LEFT);
 			DrawString(c_type, c_volume - ScaleGUITrad(60), y, GetStockOrderTypeString(o.type), IsStockBuy(o.type) ? TC_LIGHT_BLUE : TC_ORANGE, SA_LEFT);
 			DrawString(c_volume - ScaleGUITrad(60), c_volume, y, StockVolumeToString(o.volume), TC_WHITE, SA_RIGHT);
 			/* The price of a pending order and the levels of every trade can be clicked to change them, which the colour shows. */
@@ -1751,7 +1833,16 @@ static constexpr std::initializer_list<NWidgetPart> _nested_stock_widgets = {
 		EndContainer(),
 	EndContainer(),
 	NWidget(NWID_HORIZONTAL),
-		NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_WATCH), SetMinimalSize(200, 150), SetFill(0, 1), SetScrollbar(WID_ST_WATCH_SCROLLBAR), SetToolTip(STR_STOCK_TIP_WATCH),
+		NWidget(NWID_VERTICAL),
+			/* The two tabs of the Market Watch. Panels, like the Portfolio and Ranking buttons: the text is drawn in DrawWidget. */
+			NWidget(NWID_HORIZONTAL, NWidContainerFlag::EqualSize),
+				NWidget(WWT_PANEL, COLOUR_LIGHT_BLUE, WID_ST_TAB_COMPANIES), SetMinimalSize(100, 14), SetFill(1, 0), SetToolTip(STR_STOCK_TIP_TAB_COMPANIES),
+				EndContainer(),
+				NWidget(WWT_PANEL, COLOUR_LIGHT_BLUE, WID_ST_TAB_VALUABLES), SetMinimalSize(100, 14), SetFill(1, 0), SetToolTip(STR_STOCK_TIP_TAB_VALUABLES),
+				EndContainer(),
+			EndContainer(),
+			NWidget(WWT_PANEL, COLOUR_GREY, WID_ST_WATCH), SetMinimalSize(200, 136), SetFill(0, 1), SetScrollbar(WID_ST_WATCH_SCROLLBAR), SetToolTip(STR_STOCK_TIP_WATCH),
+			EndContainer(),
 		EndContainer(),
 		NWidget(NWID_VSCROLLBAR, COLOUR_GREY, WID_ST_WATCH_SCROLLBAR),
 		NWidget(NWID_VERTICAL),

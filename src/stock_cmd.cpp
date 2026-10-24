@@ -15,6 +15,7 @@
 #include "company_func.h"
 #include "window_func.h"
 #include "central_bank.h"
+#include "valuables.h"
 
 #include "table/strings.h"
 
@@ -41,7 +42,7 @@ static bool AreStopsValid(bool buy, int64_t reference, int64_t sl, int64_t tp)
  * A pending order is only stored. Its commission is charged when it is executed, and it can get a lifetime.
  * Profit and loss are settled when the position is closed.
  * @param flags Type of operation.
- * @param target Company whose shares (symbol) are traded. Must not be the company giving the command.
+ * @param target Company whose shares (symbol) are traded, or the symbol number of a valuable (STOCK_FIRST_VALUABLE and up). Must not be the company giving the command.
  * @param type Order type.
  * @param volume Volume in hundredths of a LOT (100 = 1.00 LOT).
  * @param price Trigger price; only used for pending orders.
@@ -56,8 +57,9 @@ CommandCost CmdStockOpen(DoCommandFlags flags, CompanyID target, StockOrderType 
 	const int64_t price = price_in, sl = sl_in, tp = tp_in;
 	const Company *owner = Company::GetIfValid(_current_company);
 	if (owner == nullptr) return CMD_ERROR;
-	if (!Company::IsValidID(target)) return CMD_ERROR;
+	if (!IsStockSymbolValid(target.base())) return CMD_ERROR;
 	if (target == _current_company) return CommandCost(STR_STOCK_ERROR_OWN_COMPANY);
+	if (GetStockPrice(target) <= 0) return CommandCost(STR_GOLD_ERROR_NO_MARKET); // A valuable has no price before the gold market has started.
 	if (type >= StockOrderType::End) return CMD_ERROR;
 	if (volume == 0 || volume > STOCK_MAX_VOLUME) return CommandCost(STR_STOCK_ERROR_BAD_VOLUME);
 	if (_stock_market.CountOrders(_current_company) >= STOCK_MAX_ORDERS_PER_COMPANY) return CommandCost(STR_STOCK_ERROR_TOO_MANY);
@@ -93,6 +95,7 @@ CommandCost CmdStockOpen(DoCommandFlags flags, CompanyID target, StockOrderType 
 	int64_t commission = 0;
 	if (market) {
 		StockOrder probe;
+		probe.target = target.base(); // The leverage depends on the symbol.
 		probe.price = entry;
 		probe.volume = volume;
 		commission = GetStockCommission(entry * static_cast<int64_t>(volume));
@@ -155,7 +158,7 @@ CommandCost CmdStockClose(DoCommandFlags flags, uint32_t id, uint32_t close_volu
 	StockOrder *position = _stock_market.FindPosition(id, _current_company);
 	if (position != nullptr) {
 		if (close_volume == 0) return CommandCost(STR_STOCK_ERROR_BAD_VOLUME);
-		if (!Company::IsValidID(CompanyID{position->target})) return CMD_ERROR;
+		if (!IsStockSymbolValid(position->target)) return CMD_ERROR;
 
 		if (flags.Test(DoCommandFlag::Execute)) {
 			const uint32_t volume = std::min(close_volume, position->volume);
@@ -204,7 +207,7 @@ CommandCost CmdStockModify(DoCommandFlags flags, uint32_t id, Money sl_in, Money
 	StockOrder *position = _stock_market.FindPosition(id, _current_company);
 	if (position != nullptr) {
 		const CompanyID target{position->target};
-		if (!Company::IsValidID(target)) return CMD_ERROR;
+		if (!IsStockSymbolValid(target.base())) return CMD_ERROR;
 
 		const bool buy = IsStockBuy(position->type);
 		const int64_t reference = buy ? GetStockBid(target) : GetStockAsk(target);
@@ -223,7 +226,7 @@ CommandCost CmdStockModify(DoCommandFlags flags, uint32_t id, Money sl_in, Money
 	if (order == nullptr) return CommandCost(STR_STOCK_ERROR_NO_ORDER);
 
 	const CompanyID target{order->target};
-	if (!Company::IsValidID(target)) return CMD_ERROR;
+	if (!IsStockSymbolValid(target.base())) return CMD_ERROR;
 	if (price <= 0) return CommandCost(STR_STOCK_ERROR_BAD_PRICE);
 	if (trail != 0) return CommandCost(STR_STOCK_ERROR_BAD_STOPS); // Only an open position can trail.
 

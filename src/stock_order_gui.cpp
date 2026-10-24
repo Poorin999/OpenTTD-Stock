@@ -21,6 +21,7 @@
 #include "window_gui.h"
 #include "zoom_func.h"
 
+#include "valuables.h"
 #include "widgets/stock_widget.h"
 
 #include "table/strings.h"
@@ -33,7 +34,7 @@ struct StockOrderWindow : Window {
 		StockOrderType::BuyLimit, StockOrderType::SellLimit, StockOrderType::BuyStop, StockOrderType::SellStop,
 	};
 
-	CompanyID symbol = INVALID_OWNER; ///< Symbol (company) that is traded.
+	CompanyID symbol = INVALID_OWNER; ///< Symbol that is traded: a company, or a valuable (STOCK_FIRST_VALUABLE and up).
 	int type_index = 0;               ///< 0 = Market Execution, 1..4 = the pending order types.
 
 	QueryString volume_editbox{16}; ///< Volume in LOT.
@@ -58,10 +59,10 @@ struct StockOrderWindow : Window {
 		this->UpdateStates();
 	}
 
-	/** Whether the shares of this company may be traded: it must exist and not be the company of the local player. */
+	/** Whether this symbol may be traded: a company must exist and not be the company of the local player; a valuable can always be traded. */
 	static bool IsTradable(CompanyID company)
 	{
-		return Company::IsValidID(company) && company != _local_company;
+		return IsStockSymbolValid(company.base()) && company != _local_company;
 	}
 
 	/** Make sure #symbol is a tradable company; pick the first one when it is not. INVALID_OWNER when there is none. */
@@ -74,6 +75,8 @@ struct StockOrderWindow : Window {
 			this->symbol = c->index;
 			return;
 		}
+		/* No other company: the valuables can still be traded. */
+		this->symbol = CompanyID{static_cast<uint8_t>(STOCK_FIRST_VALUABLE)};
 	}
 
 	/** Update which buttons are pressed and usable. */
@@ -100,10 +103,12 @@ struct StockOrderWindow : Window {
 
 	void CycleSymbol(bool forward)
 	{
+		/* The companies first, then the valuables. */
 		std::vector<CompanyID> ids;
 		for (const Company *c : Company::Iterate()) {
 			if (IsTradable(c->index)) ids.push_back(c->index);
 		}
+		for (size_t k = 0; k < VALUABLE_COUNT; k++) ids.push_back(CompanyID{static_cast<uint8_t>(STOCK_FIRST_VALUABLE + k)});
 		if (ids.empty()) return;
 
 		size_t pos = 0;
@@ -199,12 +204,12 @@ struct StockOrderWindow : Window {
 
 	void DrawWidget(const Rect &r, WidgetID widget) const override
 	{
-		if (!Company::IsValidID(this->symbol)) return;
+		if (!IsStockSymbolValid(this->symbol.base())) return;
 		const int top = CentreBounds(r.top, r.bottom, GetCharacterHeight(FS_NORMAL));
 
 		switch (widget) {
 			case WID_SO_SYMBOL:
-				DrawString(r.left + 4, r.right - 4, top, GetString(STR_STOCK_SYMBOL, this->symbol), TC_WHITE, SA_HOR_CENTER);
+				DrawString(r.left + 4, r.right - 4, top, GetStockSymbolName(this->symbol.base()), TC_WHITE, SA_HOR_CENTER);
 				break;
 
 			case WID_SO_PRICES:
@@ -217,7 +222,12 @@ struct StockOrderWindow : Window {
 				const bool buy = IsStockBuy(market ? StockOrderType::Buy : PENDING_TYPES[std::clamp(this->type_index, 1, 4) - 1]);
 				const int64_t price = market ? GetStockExecutionPrice(this->symbol, buy, volume) : (buy ? GetStockAsk(this->symbol) : GetStockBid(this->symbol));
 				const int64_t value = price * static_cast<int64_t>(volume);
-				DrawString(r.left + 4, r.right - 4, top, GetString(STR_STOCK_ORDER_INFO, static_cast<int64_t>(volume), value, value / STOCK_MARGIN_DIVISOR, GetStockCommission(value)), TC_FROMSTRING, SA_LEFT);
+				const int64_t divisor = GetStockMarginDivisor(this->symbol.base());
+				if (IsValuableSymbol(this->symbol.base())) {
+					DrawString(r.left + 4, r.right - 4, top, GetString(STR_STOCK_ORDER_INFO_VALUABLE, static_cast<int64_t>(volume), value, value / divisor, GetStockCommission(value), divisor), TC_FROMSTRING, SA_LEFT);
+				} else {
+					DrawString(r.left + 4, r.right - 4, top, GetString(STR_STOCK_ORDER_INFO, static_cast<int64_t>(volume), value, value / divisor, GetStockCommission(value)), TC_FROMSTRING, SA_LEFT);
+				}
 				break;
 			}
 
@@ -308,7 +318,7 @@ void ShowStockOrderWindow(CompanyID symbol)
 {
 	StockOrderWindow *w = dynamic_cast<StockOrderWindow *>(BringWindowToFrontById(WC_STOCK_ORDER, 0));
 	if (w != nullptr) {
-		if (Company::IsValidID(symbol)) w->SetSymbol(symbol);
+		if (IsStockSymbolValid(symbol.base())) w->SetSymbol(symbol);
 		return;
 	}
 	new StockOrderWindow(_stock_order_desc, symbol);

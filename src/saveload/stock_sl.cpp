@@ -16,11 +16,12 @@
 #include "../central_bank.h"
 #include "../wallet_base.h"
 #include "../gold_reserve.h"
+#include "../valuables.h"
 #include "../game_time/game_time_manager.h"
 
 #include "../safeguards.h"
 
-/** Kinds of records in the chunk. */
+/** Kinds of records in the chunk. Where a record says company, the number can also be the symbol of a valuable (STOCK_FIRST_VALUABLE and up, see STOCK_SYMBOLS). */
 enum StockRecordKind : uint8_t {
 	SRK_CANDLE = 0,   ///< Closed candle: a = company, ym = month, v1..v4 = open/high/low/close.
 	SRK_RUNNING = 1,  ///< Running candle, same fields as SRK_CANDLE.
@@ -40,6 +41,7 @@ enum StockRecordKind : uint8_t {
 	SRK_TIMEFRAME_VOL = 21, ///< Traded volume of the SRK_TIMEFRAME row just before it: a = company, v1 = volume. Only written when it is not 0.
 	SRK_LEDGER = 22,  ///< Line of the account statement: a = company, b = line (LedgerItem), ym = economy year, v1 = income, v2 = expense.
 	SRK_GOLD = 24,    ///< Gold market: v1 = price in 1/100 money units, v2 = baseline cash supply, v3 = ounces of the central bank, v4 = demand pressure in ppm, v5 = ounces for sale in the market plus 1 (0 = savegame from before the stock).
+	SRK_VALUABLES = 29, ///< State of the price model of a valuable: a = index of the valuable, v1 = slow drift in ppm, v2 = fast noise in ppm, v3 = state of the random number generator (the same in every row).
 	SRK_POLICY = 28,  ///< Monetary policy: ym = 1 when a decision was measured, v1 = shift in bp, v2 = price index at the last decision in ppm, v3 = game day of the last decision plus 1 (0 = none), v4 = measured inflation in bp, v5 = measured growth in bp.
 	SRK_BANK_BUDGET = 26, ///< Budget of the central bank from trading: v1 = commission and spread of the gold trades in 1/100 money units.
 	SRK_GOLD_HISTORY = 27, ///< Five daily gold prices for the chart: ym = number of the record (0, 1, 2 ...), v1..v5 = prices in 1/100 money units, oldest first (0 = no price).
@@ -137,7 +139,7 @@ struct STCKChunkHandler : ChunkHandler {
 		}
 
 		/* The candles of game time (1h, 4h, 12h). Every candle is one row, with a second row for its volume when there is one. */
-		for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
+		for (uint8_t i = 0; i < STOCK_SYMBOLS; i++) {
 			for (const TimeframeRecord &tr : _stock_market.frames[i].Export()) {
 				StockRecord r;
 				r.kind = SRK_TIMEFRAME;
@@ -176,7 +178,7 @@ struct STCKChunkHandler : ChunkHandler {
 			write(on);
 		}
 
-		for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
+		for (uint8_t i = 0; i < STOCK_SYMBOLS; i++) {
 			for (const StockCandle &candle : _stock_market.candles[i]) write(CandleRecord(SRK_CANDLE, i, candle));
 			if (_stock_market.has_current[i]) write(CandleRecord(SRK_RUNNING, i, _stock_market.current[i]));
 			if (_stock_market.price_fp[i] > 0) {
@@ -190,6 +192,7 @@ struct STCKChunkHandler : ChunkHandler {
 			}
 			for (const StockCandle &candle : _stock_market.daily[i]) write(CandleRecord(SRK_DAILY, i, candle));
 			if (_stock_market.has_daily_current[i]) write(CandleRecord(SRK_DAILY_RUNNING, i, _stock_market.daily_current[i]));
+			if (i >= MAX_COMPANIES) continue; // A valuable has no valuation.
 			const StockValuation &valuation = _stock_market.valuation[i];
 			if (valuation.quarters > 0) {
 				StockRecord r;
@@ -198,6 +201,19 @@ struct STCKChunkHandler : ChunkHandler {
 				r.v1 = valuation.book;
 				r.v2 = valuation.earnings;
 				r.v3 = valuation.quarters;
+				write(r);
+			}
+		}
+
+		/* The price model of the valuables: one row each, the state of the random number generator is the same in every row. */
+		if (_valuables.rng_state != 0) {
+			for (size_t k = 0; k < VALUABLE_COUNT; k++) {
+				StockRecord r;
+				r.kind = SRK_VALUABLES;
+				r.a = static_cast<uint8_t>(k);
+				r.v1 = _valuables.drift_ppm[k];
+				r.v2 = _valuables.noise_ppm[k];
+				r.v3 = static_cast<int64_t>(_valuables.rng_state);
 				write(r);
 			}
 		}
@@ -352,7 +368,7 @@ struct STCKChunkHandler : ChunkHandler {
 		_stock_market.Reset();
 
 		bool have_stats = false;
-		std::array<std::vector<TimeframeRecord>, MAX_COMPANIES> frame_rows{}; ///< Candles of game time, imported after the last row.
+		std::array<std::vector<TimeframeRecord>, STOCK_SYMBOLS> frame_rows{}; ///< Candles of game time, imported after the last row.
 		int index;
 		while ((index = SlIterateArray()) != -1) {
 			StockRecord r;
@@ -368,7 +384,7 @@ struct STCKChunkHandler : ChunkHandler {
 
 				case SRK_CANDLE:
 				case SRK_RUNNING: {
-					if (r.a >= MAX_COMPANIES) break;
+					if (r.a >= STOCK_SYMBOLS) break;
 					StockCandle candle{r.ym, r.v1, r.v2, r.v3, r.v4};
 					candle.volume = std::max<int64_t>(r.v5, 0);
 					if (r.kind == SRK_CANDLE) {
@@ -389,7 +405,7 @@ struct STCKChunkHandler : ChunkHandler {
 					break;
 
 				case SRK_MARKET:
-					if (r.a < MAX_COMPANIES && r.v1 > 0 && r.v2 > 0) {
+					if (r.a < STOCK_SYMBOLS && r.v1 > 0 && r.v2 > 0) {
 						_stock_market.price_fp[r.a] = r.v1;
 						_stock_market.base_fp[r.a] = r.v2;
 						_stock_market.impact[r.a] = std::clamp<int64_t>(r.v3, -STOCK_IMPACT_MAX_PPM, STOCK_IMPACT_MAX_PPM);
@@ -402,7 +418,7 @@ struct STCKChunkHandler : ChunkHandler {
 
 				case SRK_DAILY:
 				case SRK_DAILY_RUNNING: {
-					if (r.a >= MAX_COMPANIES) break;
+					if (r.a >= STOCK_SYMBOLS) break;
 					StockCandle candle{r.ym, r.v1, r.v2, r.v3, r.v4};
 					candle.volume = std::max<int64_t>(r.v5, 0);
 					if (r.kind == SRK_DAILY) {
@@ -453,7 +469,7 @@ struct STCKChunkHandler : ChunkHandler {
 
 				case SRK_POSITION:
 				case SRK_PENDING: {
-					if (r.a >= MAX_COMPANIES || r.b >= MAX_COMPANIES) break;
+					if (r.a >= MAX_COMPANIES || r.b >= STOCK_SYMBOLS) break;
 					const int64_t order_type = r.v5 & 0xFF;
 					if (order_type >= static_cast<int64_t>(StockOrderType::End)) break;
 					StockOrder o;
@@ -472,7 +488,7 @@ struct STCKChunkHandler : ChunkHandler {
 				}
 
 				case SRK_HISTORY: {
-					if (r.a >= MAX_COMPANIES || r.b >= MAX_COMPANIES) break;
+					if (r.a >= MAX_COMPANIES || r.b >= STOCK_SYMBOLS) break;
 					const int64_t type = r.v5 & 0xFF;
 					const int64_t reason = (r.v5 >> 8) & 0xFF;
 					if (type != static_cast<int64_t>(StockOrderType::Buy) && type != static_cast<int64_t>(StockOrderType::Sell)) break;
@@ -513,7 +529,7 @@ struct STCKChunkHandler : ChunkHandler {
 				}
 
 				case SRK_TIMEFRAME: {
-					if (r.a >= MAX_COMPANIES) break;
+					if (r.a >= STOCK_SYMBOLS) break;
 					TimeframeRecord tr;
 					tr.timeframe = r.b & 0x7F;
 					tr.running = (r.b & 0x80) != 0;
@@ -528,7 +544,7 @@ struct STCKChunkHandler : ChunkHandler {
 				}
 
 				case SRK_TIMEFRAME_VOL:
-					if (r.a >= MAX_COMPANIES || frame_rows[r.a].empty()) break;
+					if (r.a >= STOCK_SYMBOLS || frame_rows[r.a].empty()) break;
 					frame_rows[r.a].back().bucket.volume = std::max<int64_t>(r.v1, 0);
 					break;
 
@@ -560,6 +576,13 @@ struct STCKChunkHandler : ChunkHandler {
 					p.measured = r.ym == 1;
 					break;
 				}
+
+				case SRK_VALUABLES:
+					if (r.a >= VALUABLE_COUNT) break;
+					_valuables.drift_ppm[r.a] = std::clamp<int64_t>(r.v1, -ValuablesManager::Info(r.a).drift_max_ppm, ValuablesManager::Info(r.a).drift_max_ppm);
+					_valuables.noise_ppm[r.a] = std::clamp<int64_t>(r.v2, -4 * ValuablesManager::Info(r.a).noise_ppm, 4 * ValuablesManager::Info(r.a).noise_ppm);
+					if (r.v3 != 0) _valuables.rng_state = static_cast<uint64_t>(r.v3);
+					break;
 
 				case SRK_BANK_BUDGET:
 					_central_bank.trading_revenue_cents = std::max<int64_t>(r.v1, 0);
@@ -617,7 +640,7 @@ struct STCKChunkHandler : ChunkHandler {
 		}
 
 		/* The candles of game time. A list that is not valid is dropped; the candles start again from the next price. */
-		for (size_t i = 0; i < MAX_COMPANIES; i++) {
+		for (size_t i = 0; i < STOCK_SYMBOLS; i++) {
 			if (!frame_rows[i].empty()) _stock_market.frames[i].Import(frame_rows[i]);
 		}
 
