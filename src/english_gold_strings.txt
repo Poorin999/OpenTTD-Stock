@@ -18,3 +18,4 @@ STR_GOLD_ERROR_BORROWED                                         :{WHITE}Gold can
 STR_GOLD_ERROR_NO_CASH                                          :{WHITE}Not enough unborrowed liquid cash
 STR_GOLD_ERROR_NO_STOCK                                         :{WHITE}The market does not have that much gold for sale
 STR_GOLD_ERROR_NO_GOLD                                          :{WHITE}You do not hold that much gold
+STR_GOLD_BUY_CAPTION                                            :คลังบริษัท — ซื้อทอง (Buy Gold)

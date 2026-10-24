@@ -37,7 +37,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "wallet_cmd.h": "src", "wallet_cmd.cpp": "src",
     "central_bank.h": "src", "central_bank.cpp": "src",
     "gold_reserve.h": "src", "gold_reserve.cpp": "src",
-    "gold_panel.h": "src", "gold_panel.cpp": "src",
+    "gold_panel.h": "src", "gold_panel.cpp": "src", "gold_buy_gui.cpp": "src",
     "stock_dev.h": "src", "stock_console.cpp": "src",
     "central_bank_gui.h": "src", "central_bank_gui.cpp": "src",
     "central_bank_widget.h": "src/widgets",
@@ -59,7 +59,7 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_GOLD_BUY", "buy gold for the reserve"),
     ("CMD_GOLD_SELL", "sell gold of the reserve"),
 ]
-NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "gold_reserve.cpp", "gold_reserve.h", "gold_panel.cpp", "gold_panel.h", "stock_console.cpp", "stock_dev.h",
+NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "gold_reserve.cpp", "gold_reserve.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "stock_console.cpp", "stock_dev.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
                "RetailMath.h", "RetailMarketManager.h", "RetailMarketManager.cpp",
                "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]
@@ -192,8 +192,8 @@ GOLD_STRUCT_CODE = r"""
 
 	void OnPaint() override
 	{
-		/* Buy Gold only works with unborrowed liquid cash (and stock in the market); Sell Gold only with gold that the company holds. */
-		this->SetWidgetDisabledState(WID_PHG_GOLD_BUY, !this->gold.CanBuy());
+		/* Buy Gold opens the buy window (it checks the unborrowed liquid cash and the stock of the market); Sell Gold only works with gold that the company holds. */
+		this->SetWidgetDisabledState(WID_PHG_GOLD_BUY, !this->gold.CanOpenBuyWindow());
 		this->SetWidgetDisabledState(WID_PHG_GOLD_SELL, !this->gold.CanSell());
 		this->DrawWidgets();
 	}
@@ -215,7 +215,7 @@ GOLD_STRUCT_CODE = r"""
 			case WID_PHG_GOLD_TOGGLE: this->ShowGold(!this->show_gold); return;
 			case WID_PHG_GOLD_BUY_QTY: this->gold.AskQuantity(this, true); return;
 			case WID_PHG_GOLD_SELL_QTY: this->gold.AskQuantity(this, false); return;
-			case WID_PHG_GOLD_BUY: this->gold.Buy(); this->SetDirty(); return;
+			case WID_PHG_GOLD_BUY: ShowGoldBuyWindow(this->gold.buy_qty); return;
 			case WID_PHG_GOLD_SELL: this->gold.Sell(); this->SetDirty(); return;
 			default: break;
 		}
@@ -355,8 +355,34 @@ def patch_graph_files(tree):
     print(f"graph_gui.cpp, graph_widget.h: gold panel added (base class {base}, panel colour {panel.group(1)})")
 
 
+# The operating profit graph window now holds the gold trading panel, so its name changes in every language:
+# the menu entry and the caption of the window become "Gold Investment Types" (the Thai text was กราฟแสดงผลประกอบการ).
+GOLD_WINDOW_NAME = "Gold Investment Types"
+GOLD_NAME_KEYS = {"STR_GRAPH_MENU_OPERATING_PROFIT_GRAPH": "", "STR_GRAPH_OPERATING_PROFIT_CAPTION": "{WHITE}"}
+
+
+def patch_graph_window_name(tree):
+    """Renames the operating profit graph (menu entry and window caption) in english.txt and in every other language file."""
+    lang = tree / "src" / "lang"
+    if not lang.is_dir():
+        sys.exit(f"ERROR: {lang} not found in the OpenTTD tree")
+    changed = 0
+    for f in sorted(lang.glob("*.txt")):
+        text, crlf = _read_lf(f)
+        new = text
+        for key, prefix in GOLD_NAME_KEYS.items():
+            new = re.sub(r"^(" + key + r"\s*:).*$", lambda m: m.group(1) + prefix + GOLD_WINDOW_NAME, new, flags=re.M)
+        if new != text:
+            _write_like(f, new, crlf)
+            changed += 1
+    if changed == 0:
+        sys.exit("ERROR: STR_GRAPH_MENU_OPERATING_PROFIT_GRAPH / STR_GRAPH_OPERATING_PROFIT_CAPTION not found in any src/lang/*.txt")
+    print(f"lang: the operating profit graph is now called '{GOLD_WINDOW_NAME}' ({changed} language files)")
+
+
 def main(tree):
     patch_graph_files(tree)
+    patch_graph_window_name(tree)
     patch_console_file(tree)
     for name, folder in FILES.items():
         src = find(name, folder)

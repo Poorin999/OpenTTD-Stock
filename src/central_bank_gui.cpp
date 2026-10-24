@@ -374,6 +374,7 @@ struct CentralBankWindow : Window {
 	CentralBankWindow(WindowDesc &desc) : Window(desc)
 	{
 		this->InitNested(CB_WINDOW_BANK);
+		this->UpdateSkipRow(true);
 	}
 
 	/** The most that can be repaid from the company cash now. */
@@ -387,12 +388,24 @@ struct CentralBankWindow : Window {
 	{
 		/* The button is pushed in while the statement window is open. */
 		this->SetWidgetLoweredState(WID_CB_OPEN_STATEMENT, FindWindowById(WC_CENTRAL_BANK, CB_WINDOW_STATEMENT) != nullptr);
-		this->GetWidget<NWidgetStacked>(WID_CB_SKIP_SEL)->SetDisplayedPlane(_stock_dev_tools ? 0 : 1);
 		this->DrawWidgets();
+	}
+
+	bool skip_row_shown = true; ///< Whether the test buttons row is in the layout now.
+
+	/** Show the test buttons (after 'stock_dev on') or take the row out of the layout completely: no blank line while the tools are off. */
+	void UpdateSkipRow(bool force = false)
+	{
+		const bool on = _stock_dev_tools;
+		if (!force && on == this->skip_row_shown) return;
+		this->skip_row_shown = on;
+		this->GetWidget<NWidgetStacked>(WID_CB_SKIP_SEL)->SetDisplayedPlane(on ? 0 : SZSP_NONE);
+		this->ReInit();
 	}
 
 	void OnInvalidateData([[maybe_unused]] int data = 0, [[maybe_unused]] bool gui_scope = true) override
 	{
+		if (gui_scope) this->UpdateSkipRow();
 		this->SetDirty();
 	}
 

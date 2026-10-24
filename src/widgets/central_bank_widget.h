@@ -10,7 +10,7 @@
 #ifndef WIDGETS_CENTRAL_BANK_WIDGET_H
 #define WIDGETS_CENTRAL_BANK_WIDGET_H
 
-/** Widgets of the #CentralBankWindow class (window number 0) and of the #CentralBankStatementWindow class (window number 1) and of the #CentralBankArchiveWindow class (window number 2). */
+/** Widgets of the #CentralBankWindow class (window number 0) and of the #CentralBankStatementWindow class (window number 1) and of the #CentralBankArchiveWindow class (window number 2) and of the buy gold window (window number 3). */
 enum CentralBankWidgets : WidgetID {
 	WID_CB_CAPTION,         ///< Caption of the bank window.
 	WID_CB_SUMMARY,         ///< Left panel: cash, deposits, debt, credit limit, interest rate, credit rating.
@@ -32,6 +32,8 @@ enum CentralBankWidgets : WidgetID {
 	WID_CBA_CAPTION,        ///< Caption of the past statements window.
 	WID_CBA_YEARS,          ///< Left list: the last 10 years, one row each.
 	WID_CBA_PANEL,          ///< Right panel: the statement of the chosen year, in its sections.
+	WID_GB_CAPTION,         ///< Caption of the buy gold window.
+	WID_GB_PANEL,           ///< Panel of the buy gold window: price, quantity, cost and buttons are drawn and clicked here.
 };
 
 #endif /* WIDGETS_CENTRAL_BANK_WIDGET_H */

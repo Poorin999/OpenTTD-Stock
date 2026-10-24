@@ -54,6 +54,12 @@ bool GoldPanel::CanBuy() const
 	return GetGoldBuyBlock(this->buy_qty) == GoldBuyBlock::Ok;
 }
 
+/** The Buy Gold button opens the buy window; the window itself checks cash, stock and borrowed money. */
+bool GoldPanel::CanOpenBuyWindow() const
+{
+	return Company::IsValidID(_local_company) && _gold_reserve.GetPriceCents() > 0;
+}
+
 bool GoldPanel::CanSell() const
 {
 	return Company::IsValidID(_local_company) && this->sell_qty > 0 && _gold_reserve.GetHoldings(_local_company) >= this->sell_qty;

@@ -23,6 +23,7 @@ struct GoldPanel {
 
 	bool CanBuy() const;
 	bool CanSell() const;
+	bool CanOpenBuyWindow() const;
 	void Buy() const;
 	void Sell() const;
 	void AskQuantity(Window *parent, bool buy);
@@ -30,5 +31,8 @@ struct GoldPanel {
 	void DrawInfo(const Rect &r) const;
 	void DrawQuantity(const Rect &r, bool buy) const;
 };
+
+/** Open the Buy gold window of the company vault (gold_buy_gui.cpp). start_qty is the number of ounces in its field. */
+void ShowGoldBuyWindow(int64_t start_qty);
 
 #endif /* GOLD_PANEL_H */

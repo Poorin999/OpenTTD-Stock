@@ -11,6 +11,7 @@ A mod of OpenTTD (the build uses OpenTTD 15.x, Windows MSVC, GitHub Actions `bui
 - **Past statements window** (`central_bank_gui.cpp`): 10 years, years on the left, the statement of the chosen year on the right.
 - **Gold reserve** (`gold_reserve.{h,cpp}`): organic gold price, limited market stock, gold held by companies, backing ratio, credit standing.
 - **Gold panel** (`gold_panel.{h,cpp}`): drawing and Buy/Sell actions. It is shown in the **operating profit graph window** (OpenTTD `graph_gui.cpp`), in the place of the graph; the Gold / Graph button in the title bar switches back to the graph. It is NOT in the Trading Terminal any more.
+- **Buy gold window** (`gold_buy_gui.cpp`, window number 3 of `WC_CENTRAL_BANK`, widgets `WID_GB_*`): the Buy Gold button of the gold panel opens it (company vault - buy gold). Price per ounce, market state and stock, quantity with - / + / Max / 10 / 50 / 100 oz and click-to-type, value, fee (0 for now), total, usable (unborrowed) cash, cash after the purchase, Cancel / Confirm. All drawn in one panel; the rectangles come from `GbMakeLayout` (used for drawing and clicks). The GOLD badge opens the Gold Investment Types window (there is no price history chart yet, see Planned 8). `GB_USE_THAI` at the top switches Thai / English.
 - **Game clock** (`game_time/`): the game has an HH:MM clock; days, candles and timeframes are derived from one number.
 - Retail investors (`RetailMarketManager.*`), stock AI (`stock_ai.cpp`).
 
@@ -32,9 +33,11 @@ History: a first version replaced the whole files with copies of a newer OpenTTD
 The CI workflow (.github/workflows/build-windows.yml) also refuses to copy any file from `src/` of this repository that OpenTTD 15.3 already has, so files of OpenTTD must never be put in `src/` here.
 The CI order is: checkout OpenTTD 15.3, `git apply stock-market.patch`, copy `src/` (no clashes allowed), `python3 mod/apply_overlay.py openttd`, build.
 
+The operating profit graph is renamed **Gold Investment Types** (menu entry `STR_GRAPH_MENU_OPERATING_PROFIT_GRAPH` and caption `STR_GRAPH_OPERATING_PROFIT_CAPTION`) in every `src/lang/*.txt` by `patch_graph_window_name` in `apply_overlay.py` (the Thai file had its own text, so english.txt alone is not enough).
+
 ## 2c. Test tools (remove before a release)
 Off at every start. In the OpenTTD console (key `` ` ``):
-- `stock_dev on` / `stock_dev off`: switch the tools (`_stock_dev_tools`, `stock_dev.h`). While on, the Central Bank window shows a row of buttons `+1 hour`, `+1 day`, `+7 days`, `+30 days`, `+90 days` (`WID_CB_SKIP_*`, in a selection `WID_CB_SKIP_SEL`, plane 0 = buttons, plane 1 = nothing; the hidden row still leaves a blank line).
+- `stock_dev on` / `stock_dev off`: switch the tools (`_stock_dev_tools`, `stock_dev.h`). While on, the Central Bank window shows a row of buttons `+1 hour`, `+1 day`, `+7 days`, `+30 days`, `+90 days` (`WID_CB_SKIP_*`, in a selection `WID_CB_SKIP_SEL`, plane 0 = buttons, plane 1 = nothing; the row is taken out of the layout with SZSP_NONE and ReInit, so no blank line while the tools are off).
 - `stock_skip <days>` or `stock_skip <hours>h` (for example `stock_skip 30`, `stock_skip 12h`; at most 400 days): move the clock forward from the console. It needs `stock_dev on`.
 - Both call `SkipGameMinutes` (`stock_console.cpp`) -> `GameTimeManager::AdvanceMilliseconds`, so every system that listens to the clock runs its events in time order: central bank interest, retail investors (daily), candles of all timeframes, gold price, the 90-day quarter close. Single player only (`_networking` is refused). Only the clock moves: vehicles and the economy of OpenTTD do not, and the calendar date catches up one day per tick afterwards.
 - A game day is 24 real minutes at normal speed, a quarter 36 real hours: without the skip, the retail investors (they need 30 days of price) and the dividends (they need 3 profitable quarters) cannot be tested.
@@ -65,6 +68,7 @@ Source of gold: a world market with a limited stock. It is **not** connected to 
 
 ## 5. Done
 - [x] Cleanup: deleted duplicate/stale files (`src/stock_sl.cpp`, `src/stock_widget.h`, `saveload_and_overlay.patch`, `apply_wallet_fix.py`, root `CMakeLists.txt`, `build/`), added `.gitignore`.
+- [x] Buy gold window (`gold_buy_gui.cpp`) as in the design; Buy Gold button opens it. The operating profit graph is renamed Gold Investment Types in all languages. Checked by compiling `gold_buy_gui.cpp`, `gold_panel.cpp`, `graph_gui.cpp` on a real OpenTTD 15.3 tree with the overlay applied (not run in the game).
 - [x] Build fix 6: `graph_gui.cpp` and `graph_widget.h` are no longer copied from a newer OpenTTD. They are patched in place by `patch_graph_files` in `apply_overlay.py`, which reads the base class and colour names from the real 15.3 file. This makes build fixes 3-5 and the `replace/` folder unnecessary (they were all caused by the copy). The compile errors were `Normal`/`Black`/`Brown` illegal qualified name at graph_gui.cpp(82).
 - [x] Build fix 5: `replace/src/graph_gui.cpp` line 24 was an empty `#include` (C2006/C1083 at graph_gui.cpp(24)); now `#include "currency.h"`. Rule: never write `<...>` includes in chat-copied text without checking the line is not empty.
 - [x] Central bank, loans, interest, account log, ledger and account statement.
