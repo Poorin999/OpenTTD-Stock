@@ -11,6 +11,7 @@ It looks for the mod files by name anywhere next to this script, so it does not 
   - the original loan is removed: no interest or overdraft charge (economy.cpp), CmdIncreaseLoan and CmdDecreaseLoan refused, a new company starts without a loan;
     old loans are moved to the central bank by central_bank.cpp; bankruptcy and the loan score count the central bank debt
   - window_type.h / widgets: the Central Bank window class (WC_CENTRAL_BANK)
+  - town_gui.cpp, widgets/town_widget.h: the Finances button of the town window opens the town finance window (town_finance_gui.cpp)
   - ShowCompanyFinances() (company_gui.cpp), statusbar_gui.cpp: the finances menu and the statusbar button open ShowCentralBankWindow()
   - script_company.hpp/.cpp: ScriptCompany::GetCentralBankDebt and GetCentralBankAvailable, so that AIs can see the central bank debt;
     ScriptCompany::GetGoldHoldings and GetGoldPrice, so that AIs and game scripts can see the gold market
@@ -45,6 +46,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "gold_reserve.h": "src", "gold_reserve.cpp": "src", "gold_industry.cpp": "src",
     "valuables.h": "src", "valuables.cpp": "src",
     "gold_panel.h": "src", "gold_panel.cpp": "src", "gold_buy_gui.cpp": "src",
+    "town_finance_gui.h": "src", "town_finance_gui.cpp": "src",
     "economy_news.h": "src", "economy_news.cpp": "src",
     "market_events.h": "src", "market_events.cpp": "src", "market_news_ai.h": "src", "market_news_gui.h": "src", "market_news_gui.cpp": "src",
     "game_calendar.h": "src", "game_calendar.cpp": "src",
@@ -70,12 +72,12 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_GOLD_BUY", "buy gold for the reserve"),
     ("CMD_GOLD_SELL", "sell gold of the reserve"),
 ]
-NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "gold_market_math.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
+NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "gold_market_math.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
                "RetailMath.h", "RetailMarketManager.h", "RetailMarketManager.cpp",
                "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]
 REPLACE_KEYS = {"STR_STOCK_TIP_TOOLBOX", "STR_STOCK_TIP_SUMMARY", "STR_STOCK_ORDER_INFO", "STR_STOCK_TIP_DEPOSIT", "STR_STOCK_TIP_WITHDRAW"}
-STRING_FILES = ["english_stock_strings.txt", "english_wallet_strings.txt", "english_round8_strings.txt", "english_timeframe_strings.txt", "english_central_bank_strings.txt", "english_gold_strings.txt", "english_valuables_strings.txt", "english_news_strings.txt"]
+STRING_FILES = ["english_stock_strings.txt", "english_wallet_strings.txt", "english_round8_strings.txt", "english_timeframe_strings.txt", "english_central_bank_strings.txt", "english_gold_strings.txt", "english_town_finance_strings.txt", "english_valuables_strings.txt", "english_news_strings.txt"]
 ANCHORS = ["STR_STOCK_ERROR_NO_ORDER", "STR_STOCK_NEWS_ORDER_EXPIRED"]
 
 
@@ -757,8 +759,61 @@ def patch_company_yearly(tree):
     print(f"{f.name}: company yearly work ({m.group(1)}) runs on the game year")
 
 
+TOWN_FINANCE_MARKER = "TOWN_FINANCE_PATCH"
+
+
+def patch_town_gui(tree):
+    """Adds the Finances button to the town window: widget WID_TV_FINANCE (widgets/town_widget.h), the button after the cargo graph button
+    of the game layout, the click handler and the include (town_gui.cpp). It opens ShowTownFinanceWindow() of town_finance_gui.cpp."""
+    gui = tree / "src" / "town_gui.cpp"
+    wid = tree / "src" / "widgets" / "town_widget.h"
+    for f in (gui, wid):
+        if not f.is_file():
+            sys.exit(f"ERROR: {f} not found in the OpenTTD tree")
+    g, g_crlf = _read_lf(gui)
+    w, w_crlf = _read_lf(wid)
+    if TOWN_FINANCE_MARKER in g and "WID_TV_FINANCE" in w:
+        print("town_gui.cpp, town_widget.h: finance button already there")
+        return
+    if TOWN_FINANCE_MARKER in g or "WID_TV_FINANCE" in w:
+        sys.exit("ERROR: only one of town_gui.cpp and town_widget.h has the finance button patch; restore both from OpenTTD and run again")
+
+    # 1. the widget number (plain ASCII comment, see ROADMAP rule 1)
+    m = re.search(r"^([ \t]*)WID_TV_GRAPH,[^\n]*\n", w, re.M)
+    if not m:
+        sys.exit("ERROR: WID_TV_GRAPH not found in widgets/town_widget.h (anchor of the finance button patch)")
+    w = w[:m.end()] + m.group(1) + "WID_TV_FINANCE, ///< Show the finance window of this town.\n" + w[m.end():]
+
+    # 2. the include
+    incs = list(re.finditer(r'^#include "widgets/town_widget\.h"[^\n]*\n', g, re.M))
+    if not incs:
+        sys.exit('ERROR: #include "widgets/town_widget.h" not found in town_gui.cpp (anchor of the finance button patch)')
+    g = g[:incs[-1].end()] + '#include "town_finance_gui.h" /* TOWN_FINANCE_PATCH */\n' + g[incs[-1].end():]
+
+    # 3. the click handler, in front of the cargo graph case
+    m = re.search(r"^([ \t]*)case WID_TV_GRAPH: \{\n", g, re.M)
+    if not m:
+        sys.exit("ERROR: case WID_TV_GRAPH not found in town_gui.cpp (anchor of the finance button patch)")
+    ind = m.group(1)
+    g = g[:m.start()] + f"{ind}case WID_TV_FINANCE: // TOWN_FINANCE_PATCH\n{ind}\tShowTownFinanceWindow(static_cast<uint32_t>(this->window_number));\n{ind}\tbreak;\n\n" + g[m.start():]
+
+    # 4. the button: after the cargo graph button of the game layout (the scenario editor layout has none)
+    btns = list(re.finditer(r"^([ \t]*)NWidget\(WWT_PUSHTXTBTN, ([\w:]+), WID_TV_GRAPH\)[^\n]*\n", g, re.M))
+    if len(btns) != 1:
+        sys.exit(f"ERROR: expected one WID_TV_GRAPH button in town_gui.cpp, found {len(btns)} (anchor of the finance button patch)")
+    b = btns[0]
+    line = (f"{b.group(1)}NWidget(WWT_PUSHTXTBTN, {b.group(2)}, WID_TV_FINANCE), SetFill(1, 0), SetResize(1, 0), "
+            f"SetStringTip(STR_TOWN_FINANCE_BUTTON, STR_TOWN_FINANCE_TIP),\n")
+    g = g[:b.end()] + line + g[b.end():]
+
+    _write_like(gui, g, g_crlf)
+    _write_like(wid, w, w_crlf)
+    print("town_gui.cpp, town_widget.h: Finances button added to the town window")
+
+
 def main(tree):
     patch_graph_files(tree)
+    patch_town_gui(tree)
     patch_graph_window_name(tree)
     patch_income_graph_to_news(tree)
     patch_cargo_delivery(tree)
