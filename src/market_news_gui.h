@@ -15,7 +15,8 @@
 
 /** State of the news panel (which story is open). One per window. */
 struct MarketNewsPanel {
-	uint32_t selected_id = 0; ///< Id of the story that is open; 0 or an id that is gone = the newest.
+	uint32_t selected_id = 0; ///< Id of the story that is open; 0 or an id that is not in the tab = the newest of the tab.
+	uint8_t tab = 0;          ///< The tab: 0 economy, 1 weather, 2 other (towns).
 
 	/** Draw the panel in a rectangle. */
 	void Draw(const Rect &r) const;
