@@ -102,6 +102,47 @@ int main()
 		CHECK(a.price_ppm == b.price_ppm);
 	}
 
+	/* 12. Local demand: the town of the delivery. */
+	{
+		CHECK(LocalFactor(LOCAL_WEIGHT_PEOPLE_PPM, 0, PROSPERITY_NEUTRAL_PPM) == PPM);              // average town, no boost = plain price
+		CHECK(LocalFactor(0, 150'000, PPM) == PPM);                                                  // weight 0 (gold): never changes
+		CHECK(LocalFactor(LOCAL_WEIGHT_PEOPLE_PPM, 0, PPM) == PPM + 100'000);                        // richest town +10%
+		CHECK(LocalFactor(LOCAL_WEIGHT_PEOPLE_PPM, 0, 0) == PPM - 100'000);                          // tiny town -10%
+		CHECK(LocalFactor(LOCAL_WEIGHT_PEOPLE_PPM, 100'000, PROSPERITY_NEUTRAL_PPM) == PPM + 100'000); // boost +10% counts fully for people
+		CHECK(LocalFactor(LOCAL_WEIGHT_OTHER_PPM, 100'000, PROSPERITY_NEUTRAL_PPM) == PPM + 25'000);   // raw material: a quarter
+		CHECK(LocalFactor(LOCAL_WEIGHT_PEOPLE_PPM, 150'000, PPM) == LOCAL_MAX_PPM);                  // 15% + 10% = 25%, limited to +20%
+		CHECK(LocalFactor(LOCAL_WEIGHT_PEOPLE_PPM, 0, 0) >= LOCAL_MIN_PPM);
+		CHECK(LocalFactor(LOCAL_WEIGHT_PEOPLE_PPM, INT64_MAX / 4, 5 * PPM) == LOCAL_MAX_PPM);         // absurd input stays limited, no overflow
+		CHECK(LocalFactor(10 * PPM, -5, -PPM) >= LOCAL_MIN_PPM);                                     // weight and negative boost are clamped
+		/* Monotonic in the boost and in the prosperity; consumer cargo between people and raw material. */
+		int64_t last = 0; bool mono = true;
+		for (int64_t b = 0; b <= 200'000; b += 10'000) { const int64_t f = LocalFactor(LOCAL_WEIGHT_PEOPLE_PPM, b, 700'000); if (f < last) mono = false; last = f; }
+		CHECK(mono);
+		last = 0; mono = true;
+		for (int64_t pr = 0; pr <= PPM; pr += 50'000) { const int64_t f = LocalFactor(LOCAL_WEIGHT_CONSUMER_PPM, 50'000, pr); if (f < last) mono = false; last = f; }
+		CHECK(mono);
+		CHECK(LocalFactor(LOCAL_WEIGHT_OTHER_PPM, 100'000, PPM) < LocalFactor(LOCAL_WEIGHT_CONSUMER_PPM, 100'000, PPM));
+		CHECK(LocalFactor(LOCAL_WEIGHT_CONSUMER_PPM, 100'000, PPM) < LocalFactor(LOCAL_WEIGHT_PEOPLE_PPM, 100'000, PPM));
+		/* Global price x local factor stays inside a known band: 0.5 x 0.9 .. 2.0 x 1.2 of the plain pay. */
+		CHECK(ApplyPrice(ApplyPrice(1000, PRICE_MIN_PPM), LOCAL_MIN_PPM) == 450);
+		CHECK(ApplyPrice(ApplyPrice(1000, PRICE_MAX_PPM), LOCAL_MAX_PPM) == 2400);
+	}
+
+	/* 13. SupplyState (display only). */
+	{
+		CHECK(SupplyState(100'000, 10'000, 5) == 0);              // still measuring
+		CHECK(SupplyState(20'000, 10'000, 100) == 1);             // double the normal = glut
+		CHECK(SupplyState(2'000, 10'000, 100) == -1);             // a fifth of the normal = shortage
+		CHECK(SupplyState(10'500, 10'000, 100) == 0);             // +5% is inside the band
+		CHECK(SupplyState(300, 100, 100) == 0);                   // tiny trade: the floor of the normal level keeps it quiet
+		CHECK(SupplyState(INT64_MAX / 4, 10'000, 100) == 1);      // no overflow (levels are capped)
+		CHECK(SupplyState(INT64_MAX / 4, INT64_MAX / 4, 100) == 0);
+		CHECK(ExcessPpm(INT64_MAX, 0) == PPM);
+		CHECK(ExcessPpm(-5, INT64_MAX) == -PPM);
+		CHECK(ExcessPpm(LEVEL_CAP_X100, LEVEL_CAP_X100) == 0);
+		CHECK(SupplyFactor(INT64_MAX, 0, PPM) == SUPPLY_MIN_PPM);  // the old code overflowed here
+	}
+
 	std::printf("%d checks, %d failed\n", _checks, _fail);
 	return _fail == 0 ? 0 : 1;
 }

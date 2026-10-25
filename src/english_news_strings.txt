@@ -1,2 +1,5 @@
 STR_PAYROLL_NEWS_CAPTION                                        :ข่าวเศรษฐกิจ (TRANSPORT PAYROLLS)
 STR_MARKET_NEWS_CAPTION                                         :Market News
+STR_CARGO_PRICES_CAPTION                                      :Cargo Prices
+STR_MARKET_NEWS_CARGO_BUTTON                                    :Cargo Prices
+STR_MARKET_NEWS_CARGO_TIP                                       :{BLACK}Show what each cargo pays now, and which towns pay most

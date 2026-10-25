@@ -41,6 +41,9 @@ enum CentralBankWidgets : WidgetID {
 	WID_PN_PANEL,           ///< Panel of the news window: the reports of the Transport Payrolls and their effect on gold.
 	WID_MN_CAPTION,         ///< Caption of the market news window.
 	WID_MN_PANEL,           ///< Panel of the market news window: the lead story and the list of the latest events.
+	WID_MN_CARGO,           ///< Button of the market news window: opens the cargo prices window.
+	WID_CP_CAPTION,         ///< Caption of the cargo prices window.
+	WID_CP_PANEL,           ///< Panel of the cargo prices window: the price of each cargo and the towns that pay most and least.
 };
 
 #endif /* WIDGETS_CENTRAL_BANK_WIDGET_H */

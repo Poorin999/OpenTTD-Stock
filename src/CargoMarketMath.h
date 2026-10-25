@@ -19,6 +19,10 @@
  *   - Demand: the outside factor (mood of the market from the news events, and the money in circulation) moves the price of all the cargo.
  *   - The price moves a part of the way to its goal every game day (like the gold price) and stays between MIN and MAX.
  * The income of a delivery is the income that OpenTTD calculates, multiplied by this price.
+ *   - Local demand (step 2): the town that the cargo is delivered to makes the price a little higher or lower. A town that the retail
+ *     investors have made rich (the demand boost) and a big town pay more; a tiny, poor town pays less. How much depends on the cargo:
+ *     people and consumer goods follow the town, raw material hardly does. The factor is limited, so the loop retail wealth ->
+ *     demand -> income -> dividends -> retail wealth stays stable.
  */
 
 #ifndef CARGO_MARKET_MATH_H
@@ -44,6 +48,16 @@ static constexpr int64_t PRICE_MAX_PPM = 2'000'000;      ///< ... or above 200%.
 static constexpr int64_t SENTIMENT_DIV = 3;              ///< The mood of the market (+-15% at most) moves the cargo price by a third of it (+-5%).
 static constexpr int64_t MONEY_WEIGHT_PERCENT = 25;      ///< A quarter of the change of the money factor of the price index goes into the cargo price ...
 static constexpr int64_t MONEY_MAX_PPM = 100'000;        ///< ... and at most +-10%.
+static constexpr int64_t LEVEL_CAP_X100 = 1'000'000'000'000; ///< No level of deliveries counts above 10^10 units a day (x100), so level x PPM can never overflow an int64.
+static constexpr int64_t STATE_BAND_PPM = 100'000;       ///< For the display only: recent deliveries more than 10% above / below the normal level count as a glut / a shortage.
+static constexpr int64_t LOCAL_MIN_PPM = 900'000;        ///< The town of the delivery never lowers the pay by more than 10% ...
+static constexpr int64_t LOCAL_MAX_PPM = 1'200'000;      ///< ... or raises it by more than 20%.
+static constexpr int64_t LOCAL_BOOST_MAX_PPM = 150'000;  ///< The demand boost of a town counts up to +15% (the retail maximum 30% growth boost x 50%).
+static constexpr int64_t PROSPERITY_NEUTRAL_PPM = 500'000; ///< A town of this prosperity (half of the 5,000 people of the retail rules) pays the plain price.
+static constexpr int64_t PROSPERITY_SPREAD_PERCENT = 20; ///< The prosperity away from neutral counts 20%: the richest town +10%, a tiny town -10% (for a cargo of weight 1).
+static constexpr int64_t LOCAL_WEIGHT_PEOPLE_PPM = 1'000'000; ///< Passengers and mail follow the town fully.
+static constexpr int64_t LOCAL_WEIGHT_CONSUMER_PPM = 800'000; ///< Goods and food are bought by the town.
+static constexpr int64_t LOCAL_WEIGHT_OTHER_PPM = 250'000;    ///< Raw material goes to industries: the town matters little.
 
 /** What is known about one cargo. Saved: price_ppm, ref_x100, fast_x100, days. delivered_today is not saved (a load starts the day again). */
 struct CargoState {
@@ -62,6 +76,15 @@ inline int64_t OutsideFactor(int64_t sentiment_ppm, int64_t money_factor_ppm)
 	return std::clamp<int64_t>(PPM + mood + money, PPM / 2, 2 * PPM);
 }
 
+/** How far the recent deliveries are above (+) or below (-) the normal level, -PPM .. +PPM. The levels are capped first, so the product cannot overflow. */
+inline int64_t ExcessPpm(int64_t fast_x100, int64_t ref_x100)
+{
+	const int64_t fast = std::clamp<int64_t>(fast_x100, 0, LEVEL_CAP_X100);
+	const int64_t ref = std::clamp<int64_t>(ref_x100, 0, LEVEL_CAP_X100);
+	const int64_t base = std::max(ref, REF_FLOOR_X100);
+	return std::clamp<int64_t>((fast - ref) * PPM / base, -PPM, PPM);
+}
+
 /**
  * The goal of the supply side: more delivered than normal pushes it below 1.0, less than normal above 1.0.
  * @param fast_x100 Recent deliveries per day x 100.
@@ -70,15 +93,13 @@ inline int64_t OutsideFactor(int64_t sentiment_ppm, int64_t money_factor_ppm)
  */
 inline int64_t SupplyFactor(int64_t fast_x100, int64_t ref_x100, int64_t elasticity_ppm)
 {
-	const int64_t base = std::max(ref_x100, REF_FLOOR_X100);
-	const int64_t excess = std::clamp<int64_t>((fast_x100 - ref_x100) * PPM / base, -PPM, PPM); // -100% .. +100%
-	return std::clamp<int64_t>(PPM - excess * elasticity_ppm / PPM, SUPPLY_MIN_PPM, SUPPLY_MAX_PPM);
+	return std::clamp<int64_t>(PPM - ExcessPpm(fast_x100, ref_x100) * elasticity_ppm / PPM, SUPPLY_MIN_PPM, SUPPLY_MAX_PPM);
 }
 
 /** One game day of one cargo: the averages are updated, the price goes a part of the way to the goal, the day's counter is cleared. */
 inline void UpdateDay(CargoState &s, int64_t elasticity_ppm, int64_t outside_ppm)
 {
-	const int64_t today_x100 = std::min<int64_t>(s.delivered_today, INT64_MAX / 1000) * 100;
+	const int64_t today_x100 = std::min<int64_t>(s.delivered_today, LEVEL_CAP_X100 / 100) * 100;
 	s.delivered_today = 0;
 	if (s.days < BASELINE_DAYS + 1) s.days++;
 
@@ -94,6 +115,30 @@ inline void UpdateDay(CargoState &s, int64_t elasticity_ppm, int64_t outside_ppm
 	}
 	const int64_t goal = std::clamp<int64_t>(supply * outside_ppm / PPM, PRICE_MIN_PPM, PRICE_MAX_PPM);
 	s.price_ppm = std::clamp<int64_t>(s.price_ppm + (goal - s.price_ppm) * PRICE_STEP_PPM / PPM, PRICE_MIN_PPM, PRICE_MAX_PPM);
+}
+
+/**
+ * The local factor of a delivery: the demand of the town of the destination station.
+ * @param weight_ppm How much this cargo follows the town, 0 .. PPM (0 = not at all).
+ * @param demand_boost_ppm The demand boost of the town (RetailMarketManager::GetTownDemandBoostPpm), 0 and up.
+ * @param prosperity_ppm How prosperous the town is, 0 .. PPM (retail::TownProsperityPpm).
+ * @return PPM + weight x (boost + prosperity effect), between LOCAL_MIN_PPM and LOCAL_MAX_PPM.
+ */
+inline int64_t LocalFactor(int64_t weight_ppm, int64_t demand_boost_ppm, int64_t prosperity_ppm)
+{
+	const int64_t weight = std::clamp<int64_t>(weight_ppm, 0, PPM);
+	if (weight == 0) return PPM;
+	const int64_t boost = std::clamp<int64_t>(demand_boost_ppm, 0, LOCAL_BOOST_MAX_PPM);
+	const int64_t prosperity = (std::clamp<int64_t>(prosperity_ppm, 0, PPM) - PROSPERITY_NEUTRAL_PPM) * PROSPERITY_SPREAD_PERCENT / 100;
+	return std::clamp<int64_t>(PPM + weight * (boost + prosperity) / PPM, LOCAL_MIN_PPM, LOCAL_MAX_PPM);
+}
+
+/** For the display only: +1 = glut (more delivered than normal), -1 = shortage, 0 = normal or still measuring (the baseline days). */
+inline int SupplyState(int64_t fast_x100, int64_t ref_x100, int32_t days)
+{
+	if (days <= BASELINE_DAYS) return 0;
+	const int64_t excess = ExcessPpm(fast_x100, ref_x100);
+	return excess > STATE_BAND_PPM ? 1 : (excess < -STATE_BAND_PPM ? -1 : 0);
 }
 
 /** Income times price. Split in two parts so a big income cannot overflow. */

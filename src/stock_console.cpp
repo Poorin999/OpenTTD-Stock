@@ -28,6 +28,7 @@
 #include "town_treasury.h"
 #include "valuables.h"
 #include "cargotype.h"
+#include "town.h"
 #include "strings_func.h"
 
 #include "safeguards.h"
@@ -117,8 +118,23 @@ static bool ConStockSkip(std::span<std::string_view> argv)
 static bool ConCargoPrices(std::span<std::string_view> argv)
 {
 	if (argv.empty()) {
-		IConsolePrint(CC_HELP, "Show the cargo prices of the mod. Usage: 'cargo_prices'. Per cargo: price now (100% = the normal pay of OpenTTD), normal and recent deliveries per day, game days counted. Then the push of the news on each group of cargo.");
+		IConsolePrint(CC_HELP, "Show the cargo prices of the mod. Usage: 'cargo_prices [town id]'. Per cargo: price now (100% = the normal pay of OpenTTD), normal and recent deliveries per day, game days counted. Then the push of the news on each group of cargo. With a town id: also the local factor of that town for each cargo (the demand of the town of the destination station) and the price a delivery there pays.");
 		return true;
+	}
+	/* Optional town id: show the local factor of that town too. */
+	bool with_town = false;
+	TownID town{};
+	if (argv.size() >= 2) {
+		const std::string_view text = argv[1];
+		uint32_t value = 0;
+		const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+		if (error != std::errc() || end != text.data() + text.size() || value >= 0xFFFF || !Town::IsValidID(TownID{static_cast<uint16_t>(value)})) {
+			IConsolePrint(CC_ERROR, "'{}' is not a town id of this game.", text);
+			return true;
+		}
+		town = TownID{static_cast<uint16_t>(value)};
+		with_town = true;
+		IConsolePrint(CC_DEFAULT, "Local factor of the town {} (people follow the town fully, raw material little):", GetString(STR_TOWN_NAME, town));
 	}
 	for (const CargoSpec *cs : CargoSpec::Iterate()) {
 		const size_t i = static_cast<size_t>(cs->Index());
@@ -126,6 +142,11 @@ static bool ConCargoPrices(std::span<std::string_view> argv)
 		const cargomarket::CargoState &c = _cargo_market.cargo[i];
 		IConsolePrint(CC_DEFAULT, "{}: price {}.{:02}%  normal {}.{:02}/day  recent {}.{:02}/day  days {}", GetString(cs->name),
 				c.price_ppm / 10000, c.price_ppm % 10000 / 100, c.ref_x100 / 100, c.ref_x100 % 100, c.fast_x100 / 100, c.fast_x100 % 100, c.days);
+		if (with_town) {
+			const int64_t local = CargoMarketLocalFactorPpm(cs->Index(), town);
+			const int64_t total = c.price_ppm * local / cargomarket::PPM;
+			IConsolePrint(CC_DEFAULT, "    local {}.{:02}%  paid there {}.{:02}%", local / 10000, local % 10000 / 100, total / 10000, total % 10000 / 100);
+		}
 	}
 	/* The push of the news on the price goal of each group of cargo (coal shortage, bad harvest ...), now. */
 	const int64_t minute = static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes());

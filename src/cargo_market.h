@@ -9,6 +9,7 @@
  * @file cargo_market.h The price of cargo follows supply and demand (see CargoMarketMath.h for the rules).
  * Two hooks in economy.cpp (apply_overlay.py, patch_cargo_market): every final delivery is counted (CargoMarketOnDelivery), and the income
  * that OpenTTD calculates for a delivery is multiplied by the price of the cargo (CargoMarketAdjustIncome). Once per game day the prices move.
+ * A third hook (patch_cargo_local) multiplies the income of a final delivery by the demand of the town of the destination station (CargoMarketAdjustLocalIncome).
  * Gold and valuables are NOT touched: their price is the gold market.
  */
 
@@ -19,6 +20,8 @@
 #include "CargoMarketMath.h"
 #include "cargo_type.h"
 #include "economy_type.h"
+#include "station_type.h"
+#include "town_type.h"
 #include <array>
 
 /** The state of the cargo prices: one entry per cargo type of OpenTTD. Saved in the 'STCK' chunk (SRK_CARGO_MARKET). */
@@ -37,5 +40,17 @@ void CargoMarketOnDelivery(CargoType cargo_type, uint count);
 
 /** The income of a delivery times the price of the cargo. Same result on every client. */
 Money CargoMarketAdjustIncome(CargoType cargo_type, Money income);
+
+/** The local factor of a delivery to a town (1.0 = no change): the demand boost and the prosperity of the town, weighted by the kind of cargo. See CargoMarketMath.h. */
+int64_t CargoMarketLocalFactorPpm(CargoType cargo_type, TownID town);
+
+/** The income of a FINAL delivery times the local factor of the town of the destination station. Transfers and the estimates in windows do not use it. */
+Money CargoMarketAdjustLocalIncome(CargoType cargo_type, StationID dest, Money income);
+
+/** For the windows: true for the cargo that the gold market prices (it has no cargo price of its own). */
+bool CargoMarketIsGoldCargo(CargoType cargo_type);
+
+/** For the windows: the push of the news on the price goal of this cargo now, in ppm (0 when no news moves this cargo). */
+int64_t CargoMarketNewsPushPpm(CargoType cargo_type);
 
 #endif /* CARGO_MARKET_H */

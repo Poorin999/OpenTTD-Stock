@@ -12,6 +12,10 @@
 #include "central_bank.h"
 #include "market_events.h"
 #include "cargotype.h"
+#include "station_base.h"
+#include "town.h"
+#include "RetailMarketManager.h"
+#include "RetailMath.h"
 #include "economy_func.h"
 #include "game_time/game_time_manager.h"
 #include "safeguards.h"
@@ -47,6 +51,16 @@ MarketCargoGroup NewsGroupOf(const CargoSpec *cs)
 			l == CargoLabel{'FRUT'} || l == CargoLabel{'FOOD'} || l == CargoLabel{'FISH'}) return MarketCargoGroup::Farm;
 	if (l == CargoLabel{'WOOD'} || l == CargoLabel{'STEL'} || l == CargoLabel{'IORE'} || l == CargoLabel{'CORE'}) return MarketCargoGroup::Build;
 	return MarketCargoGroup::None;
+}
+
+/** How much a cargo follows the town that it is delivered to, in ppm: people fully, goods and food a lot, raw material a little, gold and valuables not at all. */
+int64_t LocalWeightPpm(const CargoSpec *cs)
+{
+	if (IsGoldMarketCargo(cs)) return 0;
+	const CargoLabel l = cs->label;
+	if (l == CargoLabel{'PASS'} || l == CargoLabel{'MAIL'}) return cargomarket::LOCAL_WEIGHT_PEOPLE_PPM;
+	if (l == CargoLabel{'GOOD'} || l == CargoLabel{'FOOD'}) return cargomarket::LOCAL_WEIGHT_CONSUMER_PPM;
+	return cargomarket::LOCAL_WEIGHT_OTHER_PPM;
 }
 
 /** The money factor of the price index (cash in circulation against the start), without the inflation of the game: OpenTTD pays inflated cargo already. */
@@ -90,6 +104,34 @@ void CargoMarketOnDelivery(CargoType cargo_type, uint count)
 Money CargoMarketAdjustIncome(CargoType cargo_type, Money income)
 {
 	return static_cast<Money>(cargomarket::ApplyPrice(static_cast<int64_t>(income), _cargo_market.GetPricePpm(cargo_type)));
+}
+
+int64_t CargoMarketLocalFactorPpm(CargoType cargo_type, TownID town)
+{
+	if (!IsValidCargoType(cargo_type) || !Town::IsValidID(town)) return cargomarket::PPM;
+	const int64_t weight = LocalWeightPpm(CargoSpec::Get(cargo_type));
+	if (weight == 0) return cargomarket::PPM;
+	const Town *t = Town::Get(town);
+	const int64_t boost = RetailMarketManager::Get().GetTownDemandBoostPpm(town);
+	const int64_t prosperity = retail::TownProsperityPpm(t->cache.population);
+	return cargomarket::LocalFactor(weight, boost, prosperity);
+}
+
+Money CargoMarketAdjustLocalIncome(CargoType cargo_type, StationID dest, Money income)
+{
+	if (!Station::IsValidID(dest)) return income;
+	return static_cast<Money>(cargomarket::ApplyPrice(static_cast<int64_t>(income), CargoMarketLocalFactorPpm(cargo_type, Station::Get(dest)->town->index)));
+}
+
+bool CargoMarketIsGoldCargo(CargoType cargo_type)
+{
+	return IsValidCargoType(cargo_type) && IsGoldMarketCargo(CargoSpec::Get(cargo_type));
+}
+
+int64_t CargoMarketNewsPushPpm(CargoType cargo_type)
+{
+	if (!IsValidCargoType(cargo_type)) return 0;
+	return _market_events.CargoPushPpm(NewsGroupOf(CargoSpec::Get(cargo_type)), static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes()));
 }
 
 static const GameTimeSubscription _cargo_market_daily(GameTimeEvent::Day, [](const GameTimeSnapshot &) { _cargo_market.UpdateDaily(); }, 25);
