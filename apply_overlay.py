@@ -41,6 +41,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "valuables.h": "src", "valuables.cpp": "src",
     "gold_panel.h": "src", "gold_panel.cpp": "src", "gold_buy_gui.cpp": "src",
     "economy_news.h": "src", "economy_news.cpp": "src",
+    "game_calendar.h": "src", "game_calendar.cpp": "src",
     "stock_dev.h": "src", "stock_console.cpp": "src",
     "central_bank_gui.h": "src", "central_bank_gui.cpp": "src",
     "central_bank_widget.h": "src/widgets",
@@ -63,7 +64,7 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_GOLD_BUY", "buy gold for the reserve"),
     ("CMD_GOLD_SELL", "sell gold of the reserve"),
 ]
-NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "gold_reserve.cpp", "gold_reserve.h", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "economy_news.cpp", "economy_news.h", "stock_console.cpp", "stock_dev.h",
+NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "gold_reserve.cpp", "gold_reserve.h", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "economy_news.cpp", "economy_news.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
                "RetailMath.h", "RetailMarketManager.h", "RetailMarketManager.cpp",
                "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]
@@ -593,7 +594,7 @@ def main(tree):
         p.write_text(s2, encoding="utf-8")
         print("statusbar_gui.cpp: the finance button opens the Central Bank window")
 
-    # statusbar_gui.cpp: the clock of the mod is shown as HH:MM in front of the date, and the date panel is wider.
+    # statusbar_gui.cpp: the clock panel of the mod (weekday badge, HH:MM, date: game_calendar.cpp) replaces the date text, and the panel is wider.
     p = tree / "src" / "statusbar_gui.cpp"
     s = p.read_text(encoding="utf-8")
     if "GameTimeManager" in s:
@@ -601,11 +602,11 @@ def main(tree):
     else:
         edits = [
             ("d = GetStringBoundingBox(GetString(STR_JUST_DATE_LONG, GetParamMaxValue(TimerGameCalendar::DateAtStartOfYear(CalendarTime::MAX_YEAR).base())));",
-             "d = GetStringBoundingBox(GetString(STR_JUST_DATE_LONG, GetParamMaxValue(TimerGameCalendar::DateAtStartOfYear(CalendarTime::MAX_YEAR).base())));\n\t\t\t\td.width += GetStringBoundingBox(std::string(\"00:00 \")).width; // HH:MM and a space in front of the date"),
+             "d = GetStringBoundingBox(GetString(STR_JUST_DATE_LONG, GetParamMaxValue(TimerGameCalendar::DateAtStartOfYear(CalendarTime::MAX_YEAR).base())));\n\t\t\t\td.width += GameClockExtraWidth(); // the weekday badge, HH:MM and the gaps in front of the date"),
             ("DrawString(tr, GetString(STR_JUST_DATE_LONG, TimerGameCalendar::date), TC_WHITE, SA_HOR_CENTER);",
-             "DrawString(tr, fmt::format(\"{:02}:{:02} {}\", GameTimeManager::Get().GetCurrentGameHour(), GameTimeManager::Get().GetCurrentGameMinute(), GetString(STR_JUST_DATE_LONG, TimerGameCalendar::date)), TC_WHITE, SA_HOR_CENTER);"),
+             "DrawGameClock(tr, GetString(STR_JUST_DATE_LONG, TimerGameCalendar::date));"),
             ("NWidget(WWT_PANEL, COLOUR_GREY, WID_S_LEFT), SetMinimalSize(140, 12), EndContainer(),",
-             "NWidget(WWT_PANEL, COLOUR_GREY, WID_S_LEFT), SetMinimalSize(190, 12), EndContainer(),"),
+             "NWidget(WWT_PANEL, COLOUR_GREY, WID_S_LEFT), SetMinimalSize(300, 12), EndContainer(),"),
             ("\tconst IntervalTimer<TimerGameCalendar> daily_interval = {",
              "\tint last_clock_minute = -1; ///< The game minute that is drawn in the date panel.\n\n\t/** The date panel shows HH:MM, so it is drawn again every time the game minute changes. */\n\tconst IntervalTimer<TimerGameTick> clock_interval = {{TimerGameTick::Priority::NONE, 1}, [this](auto) {\n\t\tconst int minute = GameTimeManager::Get().GetCurrentGameMinute();\n\t\tif (minute == this->last_clock_minute) return;\n\t\tthis->last_clock_minute = minute;\n\t\tthis->SetWidgetDirty(WID_S_LEFT);\n\t}};\n\n\tconst IntervalTimer<TimerGameCalendar> daily_interval = {"),
         ]
@@ -616,6 +617,7 @@ def main(tree):
         s = ensure_include(s, '#include "3rdparty/fmt/format.h"', ['#include "stdafx.h"'])
         s = ensure_include(s, '#include "timer/timer_game_tick.h"', ['#include "timer/timer_game_calendar.h"'])
         s = ensure_include(s, '#include "game_time/game_time_manager.h"', ['#include "timer/timer_window.h"'])
+        s = ensure_include(s, '#include "game_calendar.h"', ['#include "game_time/game_time_manager.h"'])
         p.write_text(s, encoding="utf-8")
         print("statusbar_gui.cpp: HH:MM is shown in front of the date")
 
