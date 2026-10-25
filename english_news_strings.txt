@@ -1,0 +1,2 @@
+STR_PAYROLL_NEWS_CAPTION                                        :ข่าวเศรษฐกิจ (TRANSPORT PAYROLLS)
+STR_MARKET_NEWS_CAPTION                                         :Market News

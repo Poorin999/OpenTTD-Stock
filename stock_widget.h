@@ -1,0 +1,73 @@
+/*
+ * This file is part of OpenTTD.
+ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
+ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
+ */
+
+/** @file stock_widget.h Types related to the trading terminal widgets. */
+
+#ifndef WIDGETS_STOCK_WIDGET_H
+#define WIDGETS_STOCK_WIDGET_H
+
+/** Widgets of the #StockWindow class (the terminal). */
+enum StockWidgets : WidgetID {
+	WID_ST_NEW_ORDER,        ///< Button that opens the New Order window.
+	WID_ST_HISTORY,          ///< Toggle button: show the history of closed trades instead of the open trades.
+	WID_ST_DEPOSIT,          ///< Button: move money from the company cash to the trading balance.
+	WID_ST_WITHDRAW,         ///< Button: move money from the trading balance back to the company cash.
+	WID_ST_TF_DAY,           ///< Toggle button: chart with 1h candles (1 game hour = 1 real minute).
+	WID_ST_TF_MONTH,         ///< Toggle button: chart with 4h candles (4 real minutes).
+	WID_ST_TF_YEAR,          ///< Toggle button: chart with 12h candles (12 real minutes).
+	WID_ST_ACCOUNT,          ///< Balance, equity, margin and free margin.
+	WID_ST_WATCH,            ///< Market Watch: symbols with Bid and Ask.
+	WID_ST_TITLE,            ///< Selected symbol with its Bid, Ask and change.
+	WID_ST_SUMMARY,          ///< Summary row of the selected symbol: P/E, EPS and dividend yield.
+	WID_ST_CHART,            ///< The candlestick chart.
+	WID_ST_TOOLBOX,          ///< Toolbox: open positions and pending orders.
+	WID_ST_TOOL_SCROLLBAR,   ///< Scrollbar of the toolbox.
+	WID_ST_CLOSE_ALL,        ///< Button: close all open positions of the selected wallet at once.
+	WID_ST_WALLET,           ///< Panel: the selected wallet with its balance; click to switch to the next wallet.
+	WID_ST_WALLET_NEW,       ///< Button: create a new trading wallet.
+	WID_ST_WALLET_DELETE,    ///< Button: delete the selected trading wallet.
+	WID_ST_PORTFOLIO,        ///< Toggle: the toolbox shows the portfolio summary (profit and loss, win rate, profit per month).
+	WID_ST_RANKING,          ///< Toggle: the toolbox shows the ranking of the companies.
+	WID_ST_WATCH_SCROLLBAR,  ///< Scrollbar of the Market Watch.
+	WID_ST_TF_D1,            ///< Toggle button: chart with one candle per day.
+	WID_ST_TF_W1,            ///< Toggle button: chart with one candle per week.
+	WID_ST_TF_MN,            ///< Toggle button: chart with one candle per month.
+	WID_ST_TF_Y1,            ///< Toggle button: chart with one candle per year.
+	WID_ST_WALLET_DROPDOWN,  ///< Dropdown: the wallet that is shown and traded with.
+	WID_ST_LEVERAGE,         ///< Dropdown: the leverage (LV) of the wallet that is shown.
+	WID_ST_PNL,              ///< Panel: floating and realised profit of the selected wallet.
+	WID_ST_RISK,             ///< Panel: margin usage and the margin call warning.
+	WID_ST_CHART_EXPAND,     ///< Button: enlarge the window to (nearly) the whole screen so that the chart gets bigger; press again to restore.
+	WID_ST_TF_M5,            ///< Toggle button: chart with 5m candles (5 game minutes = 5 real seconds). It is shown before the 1h button.
+	WID_ST_TAB_COMPANIES,     ///< Tab of the Market Watch: the companies.
+	WID_ST_TAB_VALUABLES,    ///< Tab of the Market Watch: the valuables (gold, silver, platinum, diamonds).
+};
+
+/** Widgets of the #StockOrderWindow class. */
+enum StockOrderWidgets : WidgetID {
+	WID_SO_PREV,             ///< Select the previous symbol.
+	WID_SO_SYMBOL,           ///< Name of the selected symbol.
+	WID_SO_NEXT,             ///< Select the next symbol.
+	WID_SO_PRICES,           ///< Current Bid and Ask.
+	WID_SO_TYPE_MARKET,      ///< Order type: Market Execution. The type buttons must stay in this order.
+	WID_SO_TYPE_BUY_LIMIT,   ///< Order type: Buy Limit.
+	WID_SO_TYPE_SELL_LIMIT,  ///< Order type: Sell Limit.
+	WID_SO_TYPE_BUY_STOP,    ///< Order type: Buy Stop.
+	WID_SO_TYPE_SELL_STOP,   ///< Order type: Sell Stop.
+	WID_SO_VOLUME,           ///< Edit box: volume in LOT.
+	WID_SO_PRICE,            ///< Edit box: price of a pending order.
+	WID_SO_SL,               ///< Edit box: Stop Loss.
+	WID_SO_TP,               ///< Edit box: Take Profit.
+	WID_SO_EXPIRY,           ///< Edit box: lifetime of a pending order in days.
+	WID_SO_INFO,             ///< Value and margin of the order.
+	WID_SO_SELL,             ///< Sell by market.
+	WID_SO_BUY,              ///< Buy by market.
+	WID_SO_PLACE,            ///< Place a pending order.
+};
+
+#endif /* WIDGETS_STOCK_WIDGET_H */
+

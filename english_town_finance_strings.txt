@@ -1,0 +1,3 @@
+STR_TOWN_FINANCE_BUTTON                                         :Finances
+STR_TOWN_FINANCE_TIP                                            :{BLACK}Show the treasury of this town and the gold of its citizens
+STR_TOWN_FINANCE_CAPTION                                        :{WHITE}{TOWN} - Finances
