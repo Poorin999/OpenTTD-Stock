@@ -10,6 +10,7 @@
 #include "stdafx.h"
 #include "3rdparty/fmt/format.h"
 #include "gold_panel.h"
+#include "economy_news.h"
 #include "gold_reserve.h"
 #include "central_bank.h"
 #include "stock_gui.h"
@@ -20,6 +21,7 @@
 #include "palette_func.h"
 #include "strings_func.h"
 #include "textbuf_gui.h"
+#include "window_func.h"
 #include "zoom_func.h"
 #include <algorithm>
 #include <vector>
@@ -143,6 +145,7 @@ struct GpLayout {
 	Rect icon;      ///< The gold bar icon.
 	Rect title;     ///< The title text.
 	Rect badge;     ///< The GOLD button: switches between the panel and the price chart.
+	Rect news;      ///< The NEWS button: opens the news window (Transport Payrolls).
 	Rect spot;      ///< Card: spot price per oz and per ton, buy / sell price.
 	Rect table;     ///< Card: the five rows of the gold reserve and the credit standing.
 	Rect mine;      ///< Card: the gold and the cash of the company.
@@ -166,7 +169,9 @@ static GpLayout GpMakeLayout(int w, int h)
 	l.icon = {m, y, m + head_h, y + head_h};
 	const int badge_w = ScaleGUITrad(108);
 	l.badge = {w - m - badge_w, y, w - m, y + head_h};
-	l.title = {l.icon.right + ScaleGUITrad(10), y, l.badge.left - gap, y + head_h};
+	const int news_w = ScaleGUITrad(84);
+	l.news = {l.badge.left - gap - news_w, y, l.badge.left - gap, y + head_h};
+	l.title = {l.icon.right + ScaleGUITrad(10), y, l.news.left - gap, y + head_h};
 	y += head_h + gap + ScaleGUITrad(2);
 
 	l.spot = {m, y, w - m, y + 2 * l.big_h + l.row_h + ScaleGUITrad(6)};
@@ -300,6 +305,14 @@ static void DrawHeader(const GpLayout &l, int dx, int dy, bool chart, const GpCo
 	const int ix = b.left + ScaleGUITrad(12);
 	DrawChartIcon(ix + shift, CentreBounds(b.top, b.bottom + 1, icon_h) + shift, icon_w, icon_h, c.ink);
 	DrawString(ix + icon_w + ScaleGUITrad(8), b.right - ScaleGUITrad(4), CentreBounds(b.top, b.bottom + 1, GetCharacterHeight(FS_NORMAL)) + shift, GpText("ทอง", "GOLD"), TC_BLACK, SA_LEFT);
+
+	/* The NEWS button: lowered while the news window is open. */
+	const Rect n = GpOffset(l.news, dx, dy);
+	const bool news_open = IsPayrollNewsWindowOpen();
+	FrameFlags news_flags{};
+	if (news_open) news_flags.Set(FrameFlag::Lowered);
+	DrawFrameRect(n.left, n.top, n.right, n.bottom, COLOUR_BROWN, news_flags);
+	DrawString(n.left + 2, n.right - 2, CentreBounds(n.top, n.bottom + 1, GetCharacterHeight(FS_NORMAL)) + (news_open ? 1 : 0), GpText("ข่าว", "NEWS"), TC_BLACK, SA_HOR_CENTER);
 }
 
 /** The price chart: last / high / low / change of the chosen range, and the line with the area under it. */
@@ -504,7 +517,7 @@ void GoldPanel::DrawInfo(const Rect &r) const
 	}
 }
 
-/** The GOLD button and the range buttons of the chart. @return true when the click was on one of them (the area has to be redrawn). */
+/** The GOLD button, the NEWS button and the range buttons of the chart. @return true when the click was on one of them (the area has to be redrawn). */
 bool GoldPanel::ClickInfo(const Rect &panel, Point pt)
 {
 	const GpLayout l = GpMakeLayout(panel.right - panel.left + 1, panel.bottom - panel.top + 1);
@@ -512,6 +525,10 @@ bool GoldPanel::ClickInfo(const Rect &panel, Point pt)
 	const int y = pt.y - panel.top;
 	if (GpHit(l.badge, x, y)) {
 		this->show_chart = !this->show_chart;
+		return true;
+	}
+	if (GpHit(l.news, x, y)) {
+		if (IsPayrollNewsWindowOpen()) CloseWindowById(WC_CENTRAL_BANK, 5); else ShowPayrollNewsWindow();
 		return true;
 	}
 	if (this->show_chart) {

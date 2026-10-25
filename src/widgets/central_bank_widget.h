@@ -10,7 +10,7 @@
 #ifndef WIDGETS_CENTRAL_BANK_WIDGET_H
 #define WIDGETS_CENTRAL_BANK_WIDGET_H
 
-/** Widgets of the #CentralBankWindow class (window number 0) and of the #CentralBankStatementWindow class (window number 1) and of the #CentralBankArchiveWindow class (window number 2) and of the buy gold window (window number 3) and of the monetary policy window (window number 4). */
+/** Widgets of the #CentralBankWindow class (window number 0) and of the #CentralBankStatementWindow class (window number 1) and of the #CentralBankArchiveWindow class (window number 2) and of the buy gold window (window number 3) and of the monetary policy window (window number 4) and of the news window (window number 5). */
 enum CentralBankWidgets : WidgetID {
 	WID_CB_CAPTION,         ///< Caption of the bank window.
 	WID_CB_SUMMARY,         ///< Left panel: cash, deposits, debt, credit limit, interest rate, credit rating.
@@ -37,6 +37,8 @@ enum CentralBankWidgets : WidgetID {
 	WID_GB_PANEL,           ///< Panel of the buy gold window: price, quantity, cost and buttons are drawn and clicked here.
 	WID_CBP_CAPTION,        ///< Caption of the monetary policy window.
 	WID_CBP_PANEL,          ///< Panel of the monetary policy window: price index, inflation, policy shift and the loan rates.
+	WID_PN_CAPTION,         ///< Caption of the news window (Transport Payrolls).
+	WID_PN_PANEL,           ///< Panel of the news window: the reports of the Transport Payrolls and their effect on gold.
 };
 
 #endif /* WIDGETS_CENTRAL_BANK_WIDGET_H */

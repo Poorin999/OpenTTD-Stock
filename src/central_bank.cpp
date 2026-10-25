@@ -23,6 +23,12 @@
 #include "timer/timer_game_economy.h"
 #include "timer/timer_game_tick.h"
 #include "news_func.h"
+#include "vehicle_base.h"
+#include "vehicle_func.h"
+#include "train.h"
+#include "station_base.h"
+#include "rail.h"
+#include <vector>
 #include "strings_func.h"
 #include "core/format.hpp"
 
@@ -41,7 +47,10 @@ void CentralBank::Reset()
 	for (auto &log : _bank_log) log.clear(); // The account log is only for the display.
 	this->accounts.fill({});
 	this->policy.Reset();
-	this->trading_revenue_cents = 0;
+	this->trading_revenue_cents = BANK_START_CAPITAL * 100;
+	this->written_off = 0;
+	this->uncovered_loss = 0;
+	this->auction_infra.fill(0);
 	this->gold_log.clear();
 }
 
@@ -161,14 +170,20 @@ void CentralBank::TradeGold(int64_t day)
 	if (backing < BANK_GOLD_BUY_BELOW_BP) {
 		price_cents = _gold_reserve.GetAskCents();
 		if (price_cents <= 0) return;
-		const int64_t missing = std::max<int64_t>(0, cash / 10'000 * BANK_GOLD_BUY_BELOW_BP + cash % 10'000 * BANK_GOLD_BUY_BELOW_BP / 10'000 - value); // Money units to reach the target.
+		int64_t missing = std::max<int64_t>(0, cash / 10'000 * BANK_GOLD_BUY_BELOW_BP + cash % 10'000 * BANK_GOLD_BUY_BELOW_BP / 10'000 - value); // Money units to reach the target if the cash stayed the same.
+		if (BANK_GOLD_MOVES_CASH) missing = missing * 10'000 / (10'000 - BANK_GOLD_BUY_BELOW_BP); // The money that the bank creates is cash in circulation too.
 		ounces = (missing * 100 + price_cents - 1) / price_cents;
-		ounces = std::min({ounces, BANK_GOLD_MAX_DAILY_OZ, _gold_reserve.market_stock_oz, this->trading_revenue_cents / price_cents});
+		ounces = std::min({ounces, BANK_GOLD_MAX_DAILY_OZ, _gold_reserve.market_stock_oz});
+		if (BANK_GOLD_MOVES_CASH) {
+			ounces = std::min(ounces, (cash / 100 * BANK_GOLD_CREATE_MAX_PERCENT) * 100 / price_cents); // Never more money created than the daily limit.
+		} else {
+			ounces = std::min(ounces, this->trading_revenue_cents / price_cents); // Only what its own money pays.
+		}
 		if (ounces <= 0) return;
 		if (BANK_GOLD_MOVES_CASH) {
-			/* The money that the bank pays comes into circulation: the companies get it. The budget gives exactly what was paid out. */
+			/* The bank creates the money that it pays: it comes into circulation, the companies get it. Its own money is not used. */
 			cash_moved = BankInjectCash(ounces * price_cents / 100);
-			this->trading_revenue_cents -= cash_moved * 100;
+			if (cash_moved <= 0) return; // No company to pay to.
 		} else {
 			this->trading_revenue_cents -= ounces * price_cents;
 		}
@@ -179,17 +194,17 @@ void CentralBank::TradeGold(int64_t day)
 	} else if (backing > BANK_GOLD_SELL_ABOVE_BP) {
 		price_cents = _gold_reserve.GetBidCents();
 		if (price_cents <= 0) return;
-		const int64_t excess = std::max<int64_t>(0, value - (cash / 10'000 * BANK_GOLD_SELL_ABOVE_BP + cash % 10'000 * BANK_GOLD_SELL_ABOVE_BP / 10'000));
+		int64_t excess = std::max<int64_t>(0, value - (cash / 10'000 * BANK_GOLD_SELL_ABOVE_BP + cash % 10'000 * BANK_GOLD_SELL_ABOVE_BP / 10'000));
+		if (BANK_GOLD_MOVES_CASH) excess = excess * 10'000 / (10'000 - BANK_GOLD_SELL_ABOVE_BP); // The money that leaves circulation makes the cash smaller.
 		ounces = excess * 100 / price_cents;
 		ounces = std::min({ounces, BANK_GOLD_MAX_DAILY_OZ, _gold_reserve.bank_reserve_oz});
 		if (BANK_GOLD_MOVES_CASH) ounces = std::min(ounces, BankWithdrawCapacity() * 100 / price_cents); // The buyers can only pay with their unborrowed cash.
 		if (ounces <= 0) return;
 		if (BANK_GOLD_MOVES_CASH) {
-			/* The money that the bank receives leaves circulation: it is taken from the companies. The budget gets what was really taken. */
+			/* The money that the bank receives leaves circulation: it is taken from the companies and destroyed. Its own money is not used. */
 			const int64_t taken = BankWithdrawCash(ounces * price_cents / 100);
 			if (taken <= 0) return;
 			cash_moved = -taken;
-			this->trading_revenue_cents += taken * 100;
 		} else {
 			this->trading_revenue_cents += ounces * price_cents;
 		}
@@ -546,6 +561,214 @@ static const IntervalTimer<TimerGameTick> _bank_move_original_loans({TimerGameTi
 });
 
 /**
+ * Take money for the debt from the free margin of the trading wallets of a company. Only the free margin is taken (as in CmdBankRepay), so the
+ * open positions stay covered.
+ * @param company The company.
+ * @param need Money units that are still owed, more than 0.
+ * @return The money units that were taken, 0 .. need.
+ */
+static int64_t BankSeizeWallets(CompanyID company, int64_t need)
+{
+	int64_t taken = 0;
+	for (uint8_t id : _wallets.GetIds(company)) {
+		if (taken >= need) break;
+		if (GetWalletKind(company, id) != WalletKind::Trading) continue;
+		const int64_t amount = std::min({need - taken, GetWalletBalance(company, id), GetStockFreeMargin(company, id)});
+		if (amount <= 0) continue;
+		AddToWallet(company, id, -amount);
+		taken += amount;
+	}
+	return taken;
+}
+
+/**
+ * Sell the gold of a company at the bid price (no commission) to pay a debt. Just enough ounces are sold; the gold goes back to the market
+ * stock and pushes the price down like a sale of a company does. A rest of less than one ounce of value goes into the cash of the company.
+ * @param company The company.
+ * @param need Money units that are still owed.
+ * @return The money units that went to the debt, 0 .. need.
+ */
+static int64_t BankSellGoldForDebt(CompanyID company, int64_t need)
+{
+	if (need <= 0 || _gold_reserve.GetPriceCents() <= 0) return 0;
+	const int64_t held = _gold_reserve.GetHoldings(company);
+	const int64_t bid = _gold_reserve.GetBidCents();
+	if (held <= 0 || bid <= 0) return 0;
+
+	const int64_t ounces = std::min(held, (need * 100 + bid - 1) / bid);
+	const int64_t proceeds = ounces * bid / 100;
+	if (ounces <= 0 || proceeds <= 0) return 0;
+	const int64_t applied = std::min(proceeds, need);
+
+	const int64_t cost = _gold_reserve.holdings_cost[company.base()];
+	if (cost > 0) _gold_reserve.holdings_cost[company.base()] -= std::min(cost, cost / held * ounces + (cost % held) * ounces / held);
+	_gold_reserve.holdings_oz[company.base()] -= ounces;
+	_gold_reserve.market_stock_oz += ounces;
+	_gold_reserve.pressure_ppm = std::max<int64_t>(-GoldReserveManager::PRESSURE_MAX_PPM,
+			_gold_reserve.pressure_ppm - ounces * GoldReserveManager::PPM / GoldReserveManager::DEPTH_OUNCES);
+	if (proceeds > applied) {
+		Company *c = Company::GetIfValid(company);
+		if (c != nullptr) c->money += Money(proceeds - applied);
+	}
+	return applied;
+}
+
+/** The price in percent of the value that the bank pays now: its credit standing, lower at the auction. */
+static int64_t BankRepoPercentNow(bool auction)
+{
+	const int64_t percent = _gold_reserve.GetPriceCents() <= 0 ? BANK_REPO_PERCENT_NO_MARKET : BankRepoPercent(static_cast<int>(_gold_reserve.GetCreditTier()));
+	return auction ? percent * BANK_AUCTION_PERCENT_OF_REPO / 100 : percent;
+}
+
+/**
+ * Repossess vehicles of a company to pay a debt. See the comment at BANK_REPO_ENABLED. The vehicle that is taken is the cheapest one that covers
+ * what is still owed; when none does, the most valuable one. The vehicle chain is deleted at once (trains free their reservation first).
+ * @param company The company.
+ * @param need Money units that are still owed.
+ * @param keep_one The company keeps the vehicle with the highest profit of last year.
+ * @param auction True: auction price.
+ * @return The money units that went to the debt, 0 .. need.
+ */
+static int64_t BankSellVehiclesForDebt(CompanyID company, int64_t need, bool keep_one, bool auction)
+{
+	if (!BANK_REPO_ENABLED || need <= 0) return 0;
+	const int64_t percent = BankRepoPercentNow(auction);
+
+	struct Candidate {
+		VehicleID id;       ///< The front vehicle of the chain.
+		int64_t proceeds;   ///< What the bank pays for the whole chain.
+		int64_t profit;     ///< Profit of last year of the front vehicle.
+	};
+	std::vector<Candidate> list;
+	for (const Vehicle *v : Vehicle::Iterate()) {
+		if (v->owner != company || v->Previous() != nullptr || !v->IsPrimaryVehicle() || !IsCompanyBuildableVehicleType(v->type)) continue;
+		int64_t value = 0;
+		for (const Vehicle *u = v; u != nullptr; u = u->Next()) value += static_cast<int64_t>(u->value);
+		if (value <= 0) continue;
+		list.push_back({v->index, value / 100 * percent + value % 100 * percent / 100, static_cast<int64_t>(v->profit_last_year)});
+	}
+	if (keep_one && !list.empty()) {
+		size_t best = 0;
+		for (size_t i = 1; i < list.size(); i++) {
+			if (list[i].profit > list[best].profit || (list[i].profit == list[best].profit && list[i].id.base() < list[best].id.base())) best = i;
+		}
+		list.erase(list.begin() + best);
+	}
+	/* A fixed order, the same on every client: by price, then by number. */
+	std::sort(list.begin(), list.end(), [](const Candidate &x, const Candidate &y) {
+		return x.proceeds != y.proceeds ? x.proceeds < y.proceeds : x.id.base() < y.id.base();
+	});
+
+	int64_t applied = 0;
+	while (applied < need && !list.empty()) {
+		const int64_t remaining = need - applied;
+		size_t pick = list.size() - 1; // None covers it: the most valuable one.
+		for (size_t i = 0; i < list.size(); i++) {
+			if (list[i].proceeds >= remaining) { pick = i; break; }
+		}
+		const Candidate cand = list[pick];
+		list.erase(list.begin() + pick);
+
+		Vehicle *v = Vehicle::GetIfValid(cand.id);
+		if (v == nullptr || v->owner != company) continue;
+		if (v->type == VEH_TRAIN) FreeTrainTrackReservation(Train::From(v));
+		delete v; // The whole chain.
+
+		const int64_t used = std::min(cand.proceeds, remaining);
+		applied += used;
+		if (cand.proceeds > used) {
+			Company *c = Company::GetIfValid(company);
+			if (c != nullptr) c->money += Money(cand.proceeds - used); // More than the debt: the rest is the company's.
+		}
+	}
+	return applied;
+}
+
+/**
+ * What the stations and the infrastructure of a company are worth at the auction (money units): the OpenTTD formula for stations
+ * (facilities x station value x 25), the build price for rails, roads, signals and canals, all at the auction price.
+ */
+static int64_t BankInfrastructureValue(const Company *c)
+{
+	int64_t facilities = 0;
+	for (const Station *st : Station::Iterate()) {
+		if (st->owner == c->index) facilities += static_cast<int64_t>(st->facilities.Count());
+	}
+	int64_t value = facilities * static_cast<int64_t>(_price[PR_STATION_VALUE]) * 25;
+	for (uint i = 0; i < RAILTYPE_END; i++) value += static_cast<int64_t>(c->infrastructure.rail[i]) * static_cast<int64_t>(RailBuildCost(static_cast<RailType>(i)));
+	for (uint32_t count : c->infrastructure.road) value += static_cast<int64_t>(count) * static_cast<int64_t>(_price[PR_BUILD_ROAD]);
+	value += static_cast<int64_t>(c->infrastructure.signal) * static_cast<int64_t>(_price[PR_BUILD_SIGNALS]);
+	value += static_cast<int64_t>(c->infrastructure.water) * static_cast<int64_t>(_price[PR_BUILD_CANAL]);
+	const int64_t percent = BankRepoPercentNow(true);
+	return value / 100 * percent + value % 100 * percent / 100;
+}
+
+/**
+ * Liquidation of a company that is in default at the highest penalty level, or (auction) in the last months before OpenTTD removes it
+ * (see BANK_LIQUIDATION_ENABLED, BANK_REPO_ENABLED). In this order: the free margin of the trading wallets, the gold, the vehicles. The money repays
+ * the debt. Integer only, game state only.
+ * @param company The company.
+ * @param auction True when called for the auction of a company in bankruptcy: every vehicle goes (the company that OpenTTD never removes keeps one),
+ *                at the auction price, and the value of the stations and infrastructure is worked out for the day the company is removed.
+ */
+void CentralBank::Liquidate(CompanyID company, bool auction)
+{
+	if (!BANK_LIQUIDATION_ENABLED) return;
+	BankAccount &a = this->accounts[company.base()];
+	Company *c = Company::GetIfValid(company);
+	if (c == nullptr || a.debt <= 0) { this->auction_infra[company.base()] = 0; return; }
+
+	if (auction) this->auction_infra[company.base()] = BankInfrastructureValue(c);
+
+	int64_t repaid = BankSeizeWallets(company, a.debt);
+	repaid += BankSellGoldForDebt(company, a.debt - repaid);
+	const bool keep_one = !auction || (!_networking && company == _local_company); // OpenTTD never removes the company of a single player.
+	if (repaid < a.debt) repaid += BankSellVehiclesForDebt(company, a.debt - repaid, keep_one, auction);
+	repaid = std::min(repaid, a.debt);
+	if (repaid <= 0) return;
+
+	a.debt -= repaid;
+	RecordLedger(company, LedgerItem::BankLoan, -repaid); // Shown as a repayment in the statement and in the account log.
+	if (company == _local_company) {
+		AddNewsItem(GetEncodedString(STR_JUST_RAW_STRING, fmt::format("{} {} was taken from your trading wallets, your gold and your vehicles, and repaid on your debt.",
+				auction ? "The central bank auctioned your assets because of the bankruptcy." : "The central bank liquidated your assets because of the default.",
+				GetString(STR_JUST_CURRENCY_LONG, repaid))), NewsType::General, NewsStyle::Small, {});
+	}
+	InvalidateBankWindows();
+}
+
+/**
+ * The debt of a company that does not exist any more (bankruptcy). The budget of the bank pays for it as far as it goes; the rest is an
+ * uncovered loss. The debt becomes 0, so calling this again does nothing. Called from the daily update and from the cleanup of the market.
+ * @param company The company that is gone.
+ */
+void CentralBank::WriteOffRemoved(CompanyID company)
+{
+	BankAccount &a = this->accounts[company.base()];
+	if (a.debt <= 0) return;
+	/* The auction of the stations and the infrastructure that OpenTTD removed together with the company lowers the debt first. */
+	const int64_t auction = BANK_REPO_ENABLED ? std::min(a.debt, this->auction_infra[company.base()]) : 0;
+	this->auction_infra[company.base()] = 0;
+	a.debt -= auction;
+	const int64_t loss = a.debt;
+	if (loss <= 0) {
+		a.debt = 0;
+		AddNewsItem(GetEncodedString(STR_JUST_RAW_STRING, fmt::format("A company went bankrupt. The central bank sold its stations and infrastructure at the auction for {} and its debt is paid.",
+				GetString(STR_JUST_CURRENCY_LONG, auction))), NewsType::General, NewsStyle::Small, {});
+		InvalidateBankWindows();
+		return;
+	}
+	const int64_t covered = BANK_LIQUIDATION_ENABLED ? std::min(loss, this->trading_revenue_cents / 100) : loss;
+	if (BANK_LIQUIDATION_ENABLED) this->trading_revenue_cents -= covered * 100;
+	this->written_off += loss;
+	this->uncovered_loss += loss - covered;
+	a.debt = 0;
+	AddNewsItem(GetEncodedString(STR_JUST_RAW_STRING, fmt::format("A company went bankrupt. The central bank sold its stations and infrastructure at the auction for {} and wrote off the rest of its debt, {}.",
+			GetString(STR_JUST_CURRENCY_LONG, auction), GetString(STR_JUST_CURRENCY_LONG, loss))), NewsType::General, NewsStyle::Small, {});
+	InvalidateBankWindows();
+}
+
+/**
  * Once per game day, at 00:00 game time, the interest of the day is taken from the cash of every company that has a debt.
  * See BankSettleDay() for the rules: risk rate (3.5% .. 12%) from the debt-to-equity ratio; if the cash is not enough, the
  * penalty rate (15% .. 18%), the cash that exists is taken, the rest is added to the debt, and the penalty level goes up
@@ -560,6 +783,7 @@ void CentralBank::UpdateDaily(int64_t day)
 		BankAccount &a = this->accounts[i];
 		Company *c = Company::GetIfValid(company);
 		if (c == nullptr) {
+			this->WriteOffRemoved(company);
 			a = {};
 			_ledger.years[i].clear();
 			_bank_log[i].clear();
@@ -574,8 +798,14 @@ void CentralBank::UpdateDaily(int64_t day)
 			AutoRestoreBackup cur_company(_current_company, company);
 			SubtractMoneyFromCompany(CommandCost(EXPENSES_LOAN_INTEREST, Money(r.paid_from_cash)));
 		}
+		/* The interest that was paid in cash is income of the bank: it goes into the own money of the bank (not the part added to the debt). */
+		if (r.paid_from_cash > 0) this->trading_revenue_cents += r.paid_from_cash * 100;
 		/* The ledger shows all the interest of the day: the part that was paid and the part that was added to the debt. */
 		RecordLedger(company, LedgerItem::BankInterest, -r.interest_due);
+
+		/* Default at the highest penalty level: the bank takes what it can reach (trading wallets, gold). */
+		if (c->months_of_bankruptcy >= BANK_AUCTION_MONTHS) this->Liquidate(company, true);
+		else if (r.defaulted && a.penalty_level >= BANK_PENALTY_LEVEL_MAX) this->Liquidate(company);
 
 	}
 

@@ -19,9 +19,6 @@
 #include <deque>
 #include <map>
 
-/** OLD flat rate (about 10% a year). No longer used by the interest; kept only because central_bank_gui.cpp still shows an estimate with it. */
-static constexpr int64_t CENTRAL_BANK_RATE_PPM_PER_DAY = 274;
-
 /** A company can borrow as long as its debt stays below this percentage of its net equity (company value plus wallets minus the debt). */
 static constexpr int64_t CENTRAL_BANK_CREDIT_PERCENT = 50;
 
@@ -66,6 +63,41 @@ static constexpr int BANK_PENALTY_LEVEL_MAX = 8;
 static constexpr int64_t BANK_PENALTY_CREDIT_STEP_PERCENT = 10;
 /** Days in a row of interest paid on time that lower the penalty level by one. */
 static constexpr int BANK_PENALTY_RECOVERY_DAYS = 30;
+
+/*
+ * ---- Liquidation and write-off ---------------------------------------------------------------------------------------
+ * A company that is in default at the highest penalty level (BANK_PENALTY_LEVEL_MAX) is liquidated at every midnight on which it
+ * cannot pay: the bank takes the free margin of its trading wallets, then sells its gold at the bid price (no commission), and the
+ * money repays the debt. Open positions stay covered (only the free margin is taken) and borrowed money is not involved. A company
+ * that has gone (bankruptcy) with a debt left: the debt is written off. The budget of the bank (trading_revenue_cents) pays for it
+ * as far as it goes, the rest is counted as an uncovered loss. Set BANK_LIQUIDATION_ENABLED to false for the old behaviour (debt just vanishes).
+ */
+static constexpr bool BANK_LIQUIDATION_ENABLED = true;
+
+/*
+ * Repossession of vehicles (third step of the liquidation) and the auction at bankruptcy.
+ *   - Before bankruptcy (default at the highest penalty level): after the wallets and the gold, the bank takes VEHICLES of the company, the
+ *     most valuable one that is still needed first, and pays BankRepoPercent(credit standing of the bank) of the value of the vehicle (40% .. 80%,
+ *     60% before the gold market has started). The money repays the debt; a rest that is more than the debt goes into the cash of the company.
+ *     The company keeps its best vehicle (highest profit last year) so that it can still earn. A vehicle is deleted where it is (as OpenTTD does it
+ *     for a bankrupt company), trains first free their track reservation. Companies of the AI are treated like the others.
+ *   - Auction: from BANK_AUCTION_MONTHS months of bankruptcy (OpenTTD removes the company after 10) the bank also sells every vehicle (the single-player
+ *     company that OpenTTD never removes still keeps one), at BANK_AUCTION_PERCENT_OF_REPO percent of the repossession price. Stations, rails, roads,
+ *     signals and canals cannot be sold without removing them, so they are valued each day (the OpenTTD formula for stations, the build price for the
+ *     rest, at the auction price) and paid only when the company is really removed: that money lowers the debt that is written off.
+ * Set BANK_REPO_ENABLED to false and build again to take wallets and gold only.
+ */
+static constexpr bool BANK_REPO_ENABLED = true;
+static constexpr int BANK_AUCTION_MONTHS = 9;                ///< Months of bankruptcy (Company::months_of_bankruptcy) from which the auction runs.
+static constexpr int64_t BANK_AUCTION_PERCENT_OF_REPO = 75;  ///< The auction price is this percent of the repossession price.
+static constexpr int64_t BANK_REPO_PERCENT_NO_MARKET = 60;   ///< Repossession price in percent of the value before the gold market has started (credit standing A).
+
+/** Percent of the value of a vehicle that the bank pays when it repossesses it, by its own credit standing: C 40%, B 50%, A 60%, AA 70%, AAA 80%. @param tier 0 = C ... 4 = AAA. */
+inline int64_t BankRepoPercent(int tier)
+{
+	static constexpr int64_t PERCENT[] = {40, 50, 60, 70, 80};
+	return PERCENT[std::clamp(tier, 0, 4)];
+}
 
 /**
  * Debt-to-equity ratio in ppm. Equity of 0 or less (or any ratio above the top of the curve) gives the top of the curve.
@@ -338,49 +370,62 @@ inline int64_t BankCreditPercentForPenalty(int level)
 }
 
 /*
- * ---- The bank trades gold with its budget ------------------------------------------------------------------------
- * Once per game day the bank looks at the backing ratio (value of all gold reserves / cash in circulation). Below
- * BANK_GOLD_BUY_BELOW_BP it buys gold for its reserve, at the ask price, with its budget (the commission and the spread of the
- * gold trades of the companies, CentralBank::trading_revenue_cents); it never spends more than the budget. Above
- * BANK_GOLD_SELL_ABOVE_BP it sells gold of its own reserve at the bid price, and the proceeds go into the budget. It never sells
- * the gold of the companies. At most BANK_GOLD_MAX_DAILY_OZ ounces a day. Integer only, no random numbers. Its trades move the
- * price like the trades of the companies do (the market stock and the demand pressure); they do not move the cash of the companies.
+ * ---- The bank trades gold like a central bank (open market operation) --------------------------------------------
+ * Once per game day the bank looks at the backing ratio (value of all gold reserves / cash in circulation).
+ *   - Below BANK_GOLD_BUY_BELOW_BP it BUYS gold at the ask price. It pays with money that it creates: the money goes into the
+ *     cash of the companies (money comes into circulation), in proportion to the company value of the last finished quarter
+ *     (equally when no value is known). So a purchase raises the price index and the inflation. The money that it may create
+ *     is at most BANK_GOLD_CREATE_MAX_PERCENT of the cash in circulation per day.
+ *   - Above BANK_GOLD_SELL_ABOVE_BP it SELLS gold of its own reserve at the bid price. The buyers pay with their UNBORROWED
+ *     liquid cash, at most BANK_GOLD_CASH_MAX_PERCENT of the total of it per day; the money is destroyed (money leaves circulation).
+ *   - The bank never sells the gold of the companies. At most BANK_GOLD_MAX_DAILY_OZ ounces a day. Integer only, no random numbers.
+ *     The trades also move the gold price like the trades of the companies do (the market stock and the demand pressure).
+ * The bank has its own money too (CentralBank::trading_revenue_cents, 1/100 of a money unit), separate from the cash of the companies:
+ * the start capital BANK_START_CAPITAL, plus the commission and the spread of the gold trades of the companies, plus the loan
+ * interest that the companies pay in cash. It is the capital of the bank and it pays for the loans that are lost: when a company
+ * disappears (bankruptcy, bought) with a debt, the debt is written off against the own money (CentralBank::WriteOffRemoved). The own
+ * money never goes below 0; what it cannot cover is simply lost. The gold trade does not use it.
  */
 static constexpr int64_t BANK_GOLD_BUY_BELOW_BP = 1200;   ///< Buy while the backing is below 12% (credit standing A).
 static constexpr int64_t BANK_GOLD_SELL_ABOVE_BP = 3000;  ///< Sell while the backing is above 30% (credit standing AAA).
 static constexpr int64_t BANK_GOLD_MAX_DAILY_OZ = 500;    ///< At most this many ounces per game day.
+static constexpr int64_t BANK_GOLD_CREATE_MAX_PERCENT = 1; ///< The bank never creates more than 1% of the cash in circulation in one day.
+static constexpr int64_t BANK_GOLD_CASH_MAX_PERCENT = 5;  ///< The bank never takes more than 5% of the unborrowed liquid cash of all companies in one day.
+static constexpr int64_t BANK_START_CAPITAL = 75'000;     ///< Own money of the bank at the start of a game, in money units (5% of the 1,500,000 that a company starts with).
 static constexpr size_t BANK_GOLD_LOG_MAX = 6;            ///< How many trades the log keeps (not saved).
 
 /*
- * The gold trade of the bank moves the cash of the companies (open market operation):
- *   - the bank BUYS gold: the money that it pays goes into the cash of the companies (money comes into circulation),
- *     in proportion to the company value of the last finished quarter (equally when no value is known);
- *   - the bank SELLS gold: the money is taken out of the UNBORROWED liquid cash of the companies (money leaves circulation),
- *     in proportion to that cash, at most BANK_GOLD_CASH_MAX_PERCENT of the total of it per day. Borrowed money is never touched.
- * Set BANK_GOLD_MOVES_CASH to false and build again to get the old behaviour (only the gold price and the budget move).
+ * Option: BANK_GOLD_MOVES_CASH false makes the bank trade only with its OWN money, without moving the cash of the companies
+ * (buys only what its own money pays, the proceeds of a sale go into its own money). The default is true.
  */
 static constexpr bool BANK_GOLD_MOVES_CASH = true;
-static constexpr int64_t BANK_GOLD_CASH_MAX_PERCENT = 5;  ///< The bank never takes more than 5% of the unborrowed liquid cash of all companies in one day.
 
 /** One gold trade of the bank, for the policy window. */
 struct BankGoldTrade {
 	int64_t day = 0;          ///< Game day.
 	int64_t ounces = 0;       ///< Positive: bought, negative: sold.
 	int64_t price_cents = 0;  ///< Price per ounce of the trade, in 1/100 of a money unit.
-	int64_t cash = 0;         ///< Money units that went into (positive) or came out of (negative) the cash of the companies. 0 when BANK_GOLD_MOVES_CASH is false.
+	int64_t cash = 0;         ///< Money units that were created into (positive) or destroyed out of (negative) the cash of the companies. 0 when BANK_GOLD_MOVES_CASH is false.
 };
 
 /** The central bank: one account per company. Saved in the 'STCK' chunk together with the wallets. */
 struct CentralBank {
 	std::array<BankAccount, MAX_COMPANIES> accounts{};
 	MonetaryPolicy policy;             ///< Price index and the shift of the interest curve (monetary policy).
-	int64_t trading_revenue_cents = 0; ///< The budget of the bank from trading: commission and spread of the gold trades, in 1/100 of a money unit. Saved (SRK_BANK_BUDGET).
+	int64_t written_off = 0;           ///< Debt of companies that went bankrupt, written off by the bank, money units, total. Saved (SRK_BANK_LOSS).
+	int64_t uncovered_loss = 0;        ///< The part of #written_off that the budget could not pay, money units, total. Saved (SRK_BANK_LOSS).
+	int64_t trading_revenue_cents = BANK_START_CAPITAL * 100; ///< The own money of the bank, separate from the cash of the companies: start capital, commission and spread of the gold trades, loan interest paid in cash. In 1/100 of a money unit. Saved (SRK_BANK_BUDGET).
 
 	std::deque<BankGoldTrade> gold_log{}; ///< The latest gold trades of the bank, the newest in front. Not saved: empty after a load.
 
 	void Reset();
 	void UpdateDaily(int64_t day);
 	void TradeGold(int64_t day);
+	/** Auction value of the stations and infrastructure of a company in bankruptcy (money units, at the auction price). Not saved. */
+	std::array<int64_t, MAX_COMPANIES> auction_infra{};
+
+	void Liquidate(CompanyID company, bool auction = false);
+	void WriteOffRemoved(CompanyID company);
 };
 
 extern CentralBank _central_bank;

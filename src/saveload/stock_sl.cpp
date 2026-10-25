@@ -14,6 +14,7 @@
 
 #include "../stock_base.h"
 #include "../central_bank.h"
+#include "../economy_news.h"
 #include "../wallet_base.h"
 #include "../gold_reserve.h"
 #include "../valuables.h"
@@ -43,6 +44,8 @@ enum StockRecordKind : uint8_t {
 	SRK_GOLD = 24,    ///< Gold market: v1 = price in 1/100 money units, v2 = baseline cash supply, v3 = ounces of the central bank, v4 = demand pressure in ppm, v5 = ounces for sale in the market plus 1 (0 = savegame from before the stock).
 	SRK_VALUABLES = 29, ///< State of the price model of a valuable: a = index of the valuable, v1 = slow drift in ppm, v2 = fast noise in ppm, v3 = state of the random number generator (the same in every row).
 	SRK_POLICY = 28,  ///< Monetary policy: ym = bit 0 set when a decision was measured, bit 1 set in emergency mode, v1 = shift in bp, v2 = price index at the last decision in ppm, v3 = game day of the last decision plus 1 (0 = none), v4 = measured inflation in bp, v5 = measured growth in bp.
+	SRK_PAYROLL = 31, ///< Transport Payrolls report: ym = bit 0 set for the baseline, v1 = game day, v2 = average vehicles x100, v3 = actual x100, v4 = forecast x100, v5 = push on the gold demand in ppm. Written oldest first.
+	SRK_BANK_LOSS = 30, ///< Debts that the central bank wrote off (bankruptcy): v1 = total written off, v2 = the part that the budget could not pay, money units.
 	SRK_BANK_BUDGET = 26, ///< Budget of the central bank from trading: v1 = commission and spread of the gold trades in 1/100 money units.
 	SRK_GOLD_HISTORY = 27, ///< Five daily gold prices for the chart: ym = number of the record (0, 1, 2 ...), v1..v5 = prices in 1/100 money units, oldest first (0 = no price).
 	SRK_GOLD_HOLD = 25, ///< Gold of a company: a = company, v1 = ounces, v2 = what the gold cost (0 = unknown).
@@ -271,7 +274,28 @@ struct STCKChunkHandler : ChunkHandler {
 			write(r);
 		}
 
-		if (_central_bank.trading_revenue_cents != 0) {
+		for (auto it = _payroll_news.releases.rbegin(); it != _payroll_news.releases.rend(); ++it) {
+			StockRecord r;
+			r.kind = SRK_PAYROLL;
+			r.ym = it->baseline ? 1 : 0;
+			r.v1 = it->day;
+			r.v2 = it->avg_x100;
+			r.v3 = it->actual_x100;
+			r.v4 = it->forecast_x100;
+			r.v5 = it->gold_ppm;
+			write(r);
+		}
+
+		if (_central_bank.written_off != 0 || _central_bank.uncovered_loss != 0) {
+			StockRecord r;
+			r.kind = SRK_BANK_LOSS;
+			r.v1 = _central_bank.written_off;
+			r.v2 = _central_bank.uncovered_loss;
+			write(r);
+		}
+
+		{
+			/* Always written: a savegame without this record is from before the bank had its own money and gets the start capital. */
 			StockRecord r;
 			r.kind = SRK_BANK_BUDGET;
 			r.v1 = _central_bank.trading_revenue_cents;
@@ -586,6 +610,25 @@ struct STCKChunkHandler : ChunkHandler {
 					_valuables.drift_ppm[r.a] = std::clamp<int64_t>(r.v1, -ValuablesManager::Info(r.a).drift_max_ppm, ValuablesManager::Info(r.a).drift_max_ppm);
 					_valuables.noise_ppm[r.a] = std::clamp<int64_t>(r.v2, -4 * ValuablesManager::Info(r.a).noise_ppm, 4 * ValuablesManager::Info(r.a).noise_ppm);
 					if (r.v3 != 0) _valuables.rng_state = static_cast<uint64_t>(r.v3);
+					break;
+
+				case SRK_PAYROLL: {
+					PayrollRelease rel;
+					rel.baseline = (r.ym & 1) != 0;
+					rel.day = std::max<int64_t>(r.v1, 0);
+					rel.avg_x100 = std::max<int64_t>(r.v2, 0);
+					rel.actual_x100 = r.v3;
+					rel.forecast_x100 = r.v4;
+					rel.gold_ppm = std::clamp<int64_t>(r.v5, -PAYROLL_GOLD_MAX_PPM, PAYROLL_GOLD_MAX_PPM);
+					_payroll_news.releases.push_front(rel); // Records come oldest first: the newest ends up in front.
+					if (_payroll_news.releases.size() > PAYROLL_KEEP) _payroll_news.releases.pop_back();
+					_payroll_news.last_day = _payroll_news.releases.front().day;
+					break;
+				}
+
+				case SRK_BANK_LOSS:
+					_central_bank.written_off = std::max<int64_t>(r.v1, 0);
+					_central_bank.uncovered_loss = std::clamp<int64_t>(r.v2, 0, _central_bank.written_off);
 					break;
 
 				case SRK_BANK_BUDGET:

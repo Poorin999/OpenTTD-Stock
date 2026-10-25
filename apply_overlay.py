@@ -22,7 +22,7 @@ from pathlib import Path
 
 # True: the game writes money_trace.log (next to openttd.exe) with every change of company cash, to find out where money goes.
 # Set to False and build again to remove it.
-MONEY_TRACE = True
+MONEY_TRACE = False
 
 # True: the fixed fee that OpenTTD takes from every company (about 1/4 of the base station price, 99 pounds at the start) is removed.
 # The money trace showed it is taken about once per game hour. Set to False and build again to keep the fee.
@@ -40,6 +40,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "gold_reserve.h": "src", "gold_reserve.cpp": "src",
     "valuables.h": "src", "valuables.cpp": "src",
     "gold_panel.h": "src", "gold_panel.cpp": "src", "gold_buy_gui.cpp": "src",
+    "economy_news.h": "src", "economy_news.cpp": "src",
     "stock_dev.h": "src", "stock_console.cpp": "src",
     "central_bank_gui.h": "src", "central_bank_gui.cpp": "src",
     "central_bank_widget.h": "src/widgets",
@@ -62,12 +63,12 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_GOLD_BUY", "buy gold for the reserve"),
     ("CMD_GOLD_SELL", "sell gold of the reserve"),
 ]
-NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "gold_reserve.cpp", "gold_reserve.h", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "stock_console.cpp", "stock_dev.h",
+NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "gold_reserve.cpp", "gold_reserve.h", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "economy_news.cpp", "economy_news.h", "stock_console.cpp", "stock_dev.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
                "RetailMath.h", "RetailMarketManager.h", "RetailMarketManager.cpp",
                "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]
 REPLACE_KEYS = {"STR_STOCK_TIP_TOOLBOX", "STR_STOCK_TIP_SUMMARY", "STR_STOCK_ORDER_INFO", "STR_STOCK_TIP_DEPOSIT", "STR_STOCK_TIP_WITHDRAW"}
-STRING_FILES = ["english_stock_strings.txt", "english_wallet_strings.txt", "english_round8_strings.txt", "english_timeframe_strings.txt", "english_central_bank_strings.txt", "english_gold_strings.txt", "english_valuables_strings.txt"]
+STRING_FILES = ["english_stock_strings.txt", "english_wallet_strings.txt", "english_round8_strings.txt", "english_timeframe_strings.txt", "english_central_bank_strings.txt", "english_gold_strings.txt", "english_valuables_strings.txt", "english_news_strings.txt"]
 ANCHORS = ["STR_STOCK_ERROR_NO_ORDER", "STR_STOCK_NEWS_ORDER_EXPIRED"]
 
 

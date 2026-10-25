@@ -832,7 +832,10 @@ static void DrawMonetaryPolicy(const Rect &r)
 		const int64_t backing = _gold_reserve.GetBackingBp();
 		row(CbText("สำรองทองต่อเงินสดในระบบ (ซื้อ-ขาย)", "Gold backing (buy .. sell band)"), fmt::format("{}.{:02}%  ({} .. {})", backing / 100, backing % 100,
 				pct(BANK_GOLD_BUY_BELOW_BP), pct(BANK_GOLD_SELL_ABOVE_BP)));
-		row(CbText("งบซื้อทองของธนาคาร", "Gold budget of the bank"), GetString(STR_JUST_CURRENCY_LONG, _central_bank.trading_revenue_cents / 100), TC_GREEN);
+		row(CbText("เงินของธนาคารเอง (ทุน + กำไร)", "Own money of the bank (capital + profit)"), GetString(STR_JUST_CURRENCY_LONG, _central_bank.trading_revenue_cents / 100), TC_GREEN);
+		row(CbText("หนี้สูญที่ตัดแล้ว (เกินงบ)", "Bad debt written off (beyond budget)"),
+				GetString(STR_JUST_CURRENCY_LONG, _central_bank.written_off) + " (" + GetString(STR_JUST_CURRENCY_LONG, _central_bank.uncovered_loss) + ")",
+				_central_bank.uncovered_loss > 0 ? TC_RED : TC_GREY);
 		DrawString(left, right, y, CbText("ธนาคารซื้อขายทองล่าสุด", "Latest gold trades of the bank"), TC_LIGHT_BLUE, SA_LEFT);
 		y += row_h;
 		for (size_t i = 0; i < 3; i++) {
@@ -857,7 +860,7 @@ static void DrawMonetaryPolicy(const Rect &r)
 
 /** The monetary policy window: its own window, so it can stay open next to the bank window. */
 struct CentralBankPolicyWindow : Window {
-	static constexpr int POLICY_ROWS = 30; ///< Rows of the panel: 15 of the policy, 3 of the credit limit, the decision log (a heading and 5 lines), the gold of the bank (2 rows, a heading and 3 lines).
+	static constexpr int POLICY_ROWS = 31; ///< Rows of the panel: 15 of the policy, 3 of the credit limit, the decision log (a heading and 5 lines), the gold of the bank (3 rows, a heading and 3 lines).
 	static constexpr int POLICY_SEPARATORS = 7;
 
 	/** Redraw regularly: the numbers change all the time. */

@@ -14,6 +14,7 @@
 #include "central_bank.h"
 #include "gold_reserve.h"
 #include "valuables.h"
+#include "economy_news.h"
 #include "RetailMarketManager.h"
 #include "game_time/game_time_manager.h"
 #include "command_type.h"
@@ -51,6 +52,7 @@ void StockMarket::Reset()
 	_central_bank.Reset();
 	_gold_reserve.Reset();
 	_valuables.Reset();
+	_payroll_news.Reset();
 	RetailMarketManager::Get().Reset(); // The retail investors start again with every new game and every load.
 	GameTimeManager::Get().Reset();
 	for (auto &list : this->daily) list.clear();
@@ -554,6 +556,7 @@ void StockMarket::HandleRemovedCompanies()
 		this->has_daily_current[i] = false;
 		this->stats[i] = {};
 		this->session_realized[i].fill(0);
+		_central_bank.WriteOffRemoved(CompanyID{i});
 		_central_bank.accounts[i] = {};
 		std::erase_if(this->history, [i](const StockClosedTrade &t) { return t.owner == i; });
 	}
