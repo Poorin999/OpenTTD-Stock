@@ -12,6 +12,7 @@
 #include "town_treasury.h"
 #include "central_bank.h"
 #include "gold_reserve.h"
+#include "stock_base.h"
 #include <chrono>
 #include <string>
 #include "window_func.h"
@@ -173,8 +174,55 @@ struct TownFinanceWindow : Window {
 		DrawString(c_gold, c_cash, y, TfMoney(sum_cash), TC_LIGHT_BLUE, SA_RIGHT);
 		DrawString(c_cost, c_prof, y, TfMoney(sum_profit), sum_profit >= 0 ? TC_GREEN : TC_RED, SA_RIGHT);
 		y += row + ScaleGUITrad(4);
+
+		/* The open positions of the Trading Terminal (speculators and overtraders). */
+		int64_t floating = 0;
+		for (const citizengold::TermPos &p : a.positions) {
+			if (p.symbol < STOCK_SYMBOLS && IsStockSymbolValid(p.symbol)) {
+				const CompanyID c{p.symbol};
+				floating += p.is_long ? (GetStockBid(c) - p.entry) * p.volume : (p.entry - GetStockAsk(c)) * p.volume;
+			}
+		}
 		if (y + row > bottom) return;
-		pair(left, right, y, TfText("ทรัพย์สินรวมของพลเมือง (เงินสด + ทองที่ราคารับซื้อ)", "Total wealth of the citizens (cash + gold at the bid price)"), TfMoney(sum_wealth), TC_WHITE);
+		pair(left, right, y, TfText("ทรัพย์สินรวมของพลเมือง (เงินสด + ทอง + กำไรลอยตัวใน terminal)", "Total wealth of the citizens (cash + gold + floating profit in the terminal)"), TfMoney(sum_wealth + floating), TC_WHITE);
+		y += row + ScaleGUITrad(6);
+		if (y + row > bottom) return;
+		DrawString(left, right, y, TfText("ตำแหน่งที่เปิดอยู่ใน Trading Terminal", "Open positions in the Trading Terminal"), TC_LIGHT_BLUE, SA_LEFT);
+		y += row;
+		if (a.positions.empty()) {
+			if (y + row > bottom) return;
+			DrawString(left, right, y, TfText("ไม่มี (เก็งกำไรและเทรดถี่เปิดเมื่อเห็นสัญญาณ)", "None (speculators and overtraders open when they see a signal)"), TC_GREY, SA_LEFT);
+			return;
+		}
+		const int p_sym = left + w * 40 / 100;
+		const int p_dir = left + w * 50 / 100;
+		const int p_vol = left + w * 63 / 100;
+		const int p_ent = left + w * 80 / 100;
+		DrawString(left, c_name, y, TfText("กลุ่ม", "Group"), TC_GREY, SA_LEFT);
+		DrawString(c_name, p_sym, y, TfText("สัญลักษณ์", "Symbol"), TC_GREY, SA_LEFT);
+		DrawString(p_sym, p_dir, y, TfText("ทิศทาง", "Side"), TC_GREY, SA_LEFT);
+		DrawString(p_dir, p_vol, y, TfText("ปริมาณ", "Volume"), TC_GREY, SA_RIGHT);
+		DrawString(p_vol, p_ent, y, TfText("ราคาเข้า", "Entry"), TC_GREY, SA_RIGHT);
+		DrawString(p_ent, right, y, TfText("กำไร/ขาดทุน", "P/L"), TC_GREY, SA_RIGHT);
+		y += row;
+		for (const citizengold::TermPos &p : a.positions) {
+			if (y + row > bottom) return;
+			int64_t pl = 0;
+			std::string sym = "?";
+			if (p.symbol < STOCK_SYMBOLS && IsStockSymbolValid(p.symbol)) {
+				const CompanyID c{p.symbol};
+				pl = p.is_long ? (GetStockBid(c) - p.entry) * p.volume : (p.entry - GetStockAsk(c)) * p.volume;
+				sym = GetStockSymbolShortName(p.symbol);
+			}
+			const size_t si = static_cast<size_t>(p.style);
+			DrawString(left, c_name, y, TfText(names_th[si], names_en[si]), TC_WHITE, SA_LEFT);
+			DrawString(c_name, p_sym, y, sym, TC_WHITE, SA_LEFT);
+			DrawString(p_sym, p_dir, y, p.is_long ? TfText("ซื้อ (long)", "Long") : TfText("ขาย (short)", "Short"), p.is_long ? TC_GREEN : TC_RED, SA_LEFT);
+			DrawString(p_dir, p_vol, y, fmt::format("{}", p.volume), TC_WHITE, SA_RIGHT);
+			DrawString(p_vol, p_ent, y, TfMoney(p.entry), TC_WHITE, SA_RIGHT);
+			DrawString(p_ent, right, y, TfMoney(pl), pl >= 0 ? TC_GREEN : TC_RED, SA_RIGHT);
+			y += row;
+		}
 	}
 };
 
@@ -186,7 +234,7 @@ static constexpr std::initializer_list<NWidgetPart> _nested_town_finance_widgets
 		NWidget(WWT_DEFSIZEBOX, COLOUR_BROWN),
 		NWidget(WWT_STICKYBOX, COLOUR_BROWN),
 	EndContainer(),
-	NWidget(WWT_PANEL, COLOUR_BROWN, WID_TFN_PANEL), SetMinimalSize(520, 220), SetFill(1, 1), SetResize(1, 1),
+	NWidget(WWT_PANEL, COLOUR_BROWN, WID_TFN_PANEL), SetMinimalSize(560, 340), SetFill(1, 1), SetResize(1, 1),
 	EndContainer(),
 	NWidget(NWID_HORIZONTAL),
 		NWidget(NWID_SPACER), SetFill(1, 0), SetResize(1, 0),

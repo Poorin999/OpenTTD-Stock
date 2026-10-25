@@ -96,7 +96,7 @@ struct Book {
 	int64_t turnover = 0;      ///< Money that went through the orders (buys + sells).
 };
 
-struct Order {
+struct GoldOrder {
 	bool buy = false;
 	int64_t cz = 0;
 };
@@ -196,9 +196,9 @@ inline Fill ApplySell(Book &b, int64_t cz, int64_t bid_cents)
 inline int64_t AverageCostCents(const Book &b) { return b.gold_cz > 0 ? b.cost * 10'000 / b.gold_cz : 0; }
 
 /** What a group wants to do in this game hour. @param dice The hash of this group in this hour (see Mix). */
-inline Order Decide(Style style, const Book &b, const MarketView &m, uint64_t dice)
+inline GoldOrder Decide(Style style, const Book &b, const MarketView &m, uint64_t dice)
 {
-	Order o;
+	GoldOrder o;
 	if (m.price_cents <= 0 || m.ask_cents <= 0 || m.bid_cents <= 0) return o;
 	const bool have_avg = m.avg30_cents > 0 && m.avg7_cents > 0;
 	const int64_t dev30 = m.avg30_cents > 0 ? (m.price_cents - m.avg30_cents) * PPM / m.avg30_cents : 0;

@@ -63,6 +63,7 @@ enum StockRecordKind : uint8_t {
 	SRK_HISTORY = 8,  ///< Closed trade: a = owner, b = target, ym = id, v1 = volume, v2 = open price, v3 = close price, v4 = profit, v5 = type | reason << 8 | closed month << 16.
 	SRK_CARGO_MARKET = 35, ///< Price of one cargo: a = cargo type, ym = game days counted (0 .. 31), v1 = price in ppm, v2 = normal deliveries per day x100, v3 = recent deliveries per day x100. Written only for a cargo with a state.
 	SRK_TOWN = 34,    ///< Account of a town: ym = index of the town, b = 1 when the groups have their start wealth, v4 = treasury, v5 = spent on development. v1..v3 (ounces, cost, savings) are only read from older savegames and go to the balanced group. Taxes collected are not saved.
+	SRK_TOWN_POS = 37, ///< Open terminal position of a citizen group: a = group (citizengold::Style), b = symbol | 0x80 when long, ym = index of the town, v1 = volume, v2 = entry price, v3 = stop loss, v4 = take profit.
 	SRK_TOWN_BOOK = 36, ///< One group of citizens of a town: a = group (citizengold::Style), ym = index of the town, v1 = gold in hundredths of an ounce, v2 = what it cost, v3 = cash, v4 = profit of closed sales, v5 = wins | losses << 24 | cooldown << 48.
 };
 
@@ -364,6 +365,18 @@ struct STCKChunkHandler : ChunkHandler {
 				br.v5 = (static_cast<int64_t>(std::clamp<int32_t>(bk.wins, 0, 0xFFFFFF))) | (static_cast<int64_t>(std::clamp<int32_t>(bk.losses, 0, 0xFFFFFF)) << 24) |
 						(static_cast<int64_t>(std::clamp<int32_t>(bk.cooldown, 0, 255)) << 48);
 				write(br);
+			}
+			for (const citizengold::TermPos &tp : a.positions) {
+				StockRecord pr;
+				pr.kind = SRK_TOWN_POS;
+				pr.a = static_cast<uint8_t>(tp.style);
+				pr.b = static_cast<uint8_t>((tp.symbol & 0x7F) | (tp.is_long ? 0x80 : 0));
+				pr.ym = static_cast<int32_t>(key);
+				pr.v1 = tp.volume;
+				pr.v2 = tp.entry;
+				pr.v3 = tp.sl;
+				pr.v4 = tp.tp;
+				write(pr);
 			}
 		}
 
@@ -772,6 +785,20 @@ struct STCKChunkHandler : ChunkHandler {
 					bk.wins = static_cast<int32_t>(r.v5 & 0xFFFFFF);
 					bk.losses = static_cast<int32_t>((r.v5 >> 24) & 0xFFFFFF);
 					bk.cooldown = static_cast<int32_t>((r.v5 >> 48) & 0xFF);
+					break;
+				}
+
+				case SRK_TOWN_POS: {
+					if (r.ym < 0 || r.ym > 0xFFFF || r.a >= citizengold::STYLE_COUNT || (r.b & 0x7F) >= STOCK_SYMBOLS || r.v1 <= 0 || r.v2 <= 0) break;
+					citizengold::TermPos tp;
+					tp.style = static_cast<citizengold::Style>(r.a);
+					tp.symbol = r.b & 0x7F;
+					tp.is_long = (r.b & 0x80) != 0;
+					tp.volume = r.v1;
+					tp.entry = r.v2;
+					tp.sl = std::max<int64_t>(r.v3, 0);
+					tp.tp = std::max<int64_t>(r.v4, 0);
+					_town_treasury.accounts[static_cast<uint32_t>(r.ym)].positions.push_back(tp);
 					break;
 				}
 

@@ -12,6 +12,7 @@
 #include "3rdparty/fmt/format.h"
 #include "openttd.h"
 #include "central_bank.h"
+#include "stock_base.h"
 #include "gold_reserve.h"
 #include "game_time/game_time_manager.h"
 #include "settings_type.h"
@@ -71,13 +72,12 @@ static int64_t HistoryAverage(size_t n, size_t min_days)
 /** Give the four groups of a town their start wealth: a part is cash, a part is already gold (bought from the market stock at the middle price). */
 static void EndowTown(TownAccount &a, uint32_t town, int64_t population, int64_t index_ppm)
 {
-	using namespace citizengold;
-	const auto share = GroupSharePpm(CitizenSeed(), town);
+	const auto share = citizengold::GroupSharePpm(CitizenSeed(), town);
 	const int64_t price = _gold_reserve.price_cents;
-	for (size_t i = 0; i < STYLE_COUNT; i++) {
-		const int64_t wealth = population * START_WEALTH_PER_CAPITA * share[i] / PPM * index_ppm / PPM;
-		const int64_t gold_money = wealth * START_GOLD_SHARE_PPM / PPM;
-		Book &b = a.books[i];
+	for (size_t i = 0; i < citizengold::STYLE_COUNT; i++) {
+		const int64_t wealth = population * citizengold::START_WEALTH_PER_CAPITA * share[i] / citizengold::PPM * index_ppm / citizengold::PPM;
+		const int64_t gold_money = wealth * citizengold::START_GOLD_SHARE_PPM / citizengold::PPM;
+		citizengold::Book &b = a.books[i];
 		b.cash += wealth - gold_money;
 		if (price > 0 && gold_money > 0) {
 			const int64_t cz = gold_money * 10'000 / price;
@@ -108,6 +108,169 @@ static void SettleCarries(int64_t net_bought_cz)
 	_gold_reserve.pressure_ppm = std::clamp<int64_t>(_gold_reserve.pressure_ppm + ppm, -GoldReserveManager::PRESSURE_MAX_PPM, GoldReserveManager::PRESSURE_MAX_PPM);
 }
 
+/* The citizens use the rules of the terminal (citizen_terminal.h repeats them so that it can be tested alone): they must stay equal. */
+static_assert(citizengold::TERM_COMMISSION_PPM == STOCK_COMMISSION_PPM, "citizen_terminal.h: commission differs from stock_base.h");
+static_assert(citizengold::TERM_SWAP_PPM_PER_DAY == STOCK_SWAP_PPM_PER_DAY, "citizen_terminal.h: swap differs from stock_base.h");
+static_assert(citizengold::TERM_STOP_OUT_PERCENT == STOCK_STOP_OUT_LEVEL, "citizen_terminal.h: stop out level differs from stock_base.h");
+static_assert(STOCK_SYMBOLS <= citizengold::TERM_MAX_SYMBOLS, "citizen_terminal.h: too many symbols");
+
+using TermQuotes = std::array<citizengold::TermQuote, STOCK_SYMBOLS>;
+
+/** The terminal as the citizens see it this hour: prices, the 3 and 10 day averages of the daily closes, the leverage. */
+static void BuildTermQuotes(TermQuotes &qs)
+{
+	for (size_t s = 0; s < STOCK_SYMBOLS; s++) {
+		citizengold::TermQuote &q = qs[s];
+		q = citizengold::TermQuote{};
+		if (!IsStockSymbolValid(s)) continue;
+		const CompanyID c{static_cast<uint8_t>(s)};
+		q.mid = GetStockPrice(c);
+		q.bid = GetStockBid(c);
+		q.ask = GetStockAsk(c);
+		if (q.mid <= 0 || q.bid <= 0 || q.ask <= 0) continue;
+		q.valid = true;
+		q.divisor = GetStockMarginDivisor(s);
+		const auto &closed = _stock_market.frames[s].Closed(GameTimeframe::D1);
+		if (closed.size() >= 10) {
+			int64_t sum3 = 0, sum10 = 0;
+			for (size_t i = 0; i < 10; i++) {
+				const int64_t v = closed[closed.size() - 1 - i].close;
+				sum10 += v;
+				if (i < 3) sum3 += v;
+			}
+			q.fast = sum3 / 3 / STOCK_PRICE_SCALE;
+			q.slow = sum10 / 10 / STOCK_PRICE_SCALE;
+		}
+	}
+}
+
+/** Close a position of a group at the price of the terminal (with the market impact of a market order): the result goes into the cash and the book, a gain pays the town gains tax. */
+static void CloseTermPosition(TownAccount &a, size_t index, const TermQuotes &qs)
+{
+	const citizengold::TermPos p = a.positions[index];
+	a.positions.erase(a.positions.begin() + static_cast<ptrdiff_t>(index));
+	citizengold::Book &b = a.books[static_cast<size_t>(p.style)];
+
+	int64_t price = 0;
+	if (p.symbol < STOCK_SYMBOLS && qs[p.symbol].valid) {
+		price = GetStockExecutionPrice(CompanyID{p.symbol}, !p.is_long, static_cast<uint32_t>(p.volume));
+		if (price > 0) _stock_market.ApplyImpact(CompanyID{p.symbol}, !p.is_long, static_cast<uint32_t>(p.volume));
+	}
+	if (price <= 0) price = p.entry; // the symbol is gone (a company that disappeared): closed flat
+	const int64_t profit = p.is_long ? (price - p.entry) * p.volume : (p.entry - price) * p.volume;
+	b.cash = std::max<int64_t>(0, b.cash + profit); // a loss is never more than the cash of the group
+	b.profit += profit;
+	b.turnover += price * p.volume;
+	if (profit > 0) b.wins++; else if (profit < 0) b.losses++;
+	if (profit > 0) {
+		const int64_t tax = std::min(b.cash, profit * TOWN_GAINS_TAX_PERCENT / 100);
+		b.cash -= tax;
+		a.treasury += tax;
+		a.taxed += tax;
+	}
+	bool any = false;
+	for (const citizengold::TermPos &o : a.positions) any = any || o.style == p.style;
+	if (!any && p.style == citizengold::Style::Speculator) b.cooldown = static_cast<int32_t>(citizengold::SPEC_COOLDOWN_HOURS);
+}
+
+/** Margin used and floating profit of the open positions of one group. */
+static void TermTotals(const TownAccount &a, citizengold::Style style, const TermQuotes &qs, int64_t &used, int64_t &floating)
+{
+	used = floating = 0;
+	for (const citizengold::TermPos &p : a.positions) {
+		if (p.style != style || p.symbol >= STOCK_SYMBOLS) continue;
+		const citizengold::TermQuote &q = qs[p.symbol];
+		used += citizengold::TermMargin(p, q.divisor);
+		if (q.valid) floating += citizengold::TermProfit(p, q);
+	}
+}
+
+/** One game hour of the terminal trade of one group (speculators and overtraders): stop loss, take profit, stop out, then a new decision. */
+static void TermStep(TownAccount &a, citizengold::Style style, uint64_t dice, const TermQuotes &qs)
+{
+	citizengold::Book &b = a.books[static_cast<size_t>(style)];
+
+	/* Levels of the positions; a position of a symbol that is gone is closed. */
+	for (size_t i = a.positions.size(); i-- > 0;) {
+		const citizengold::TermPos &p = a.positions[i];
+		if (p.style != style) continue;
+		if (p.symbol >= STOCK_SYMBOLS || !qs[p.symbol].valid || citizengold::TermLevelHit(p, qs[p.symbol])) CloseTermPosition(a, i, qs);
+	}
+
+	/* Stop out: when the equity is under half of the used margin, the worst position is closed by force. */
+	int64_t used = 0, floating = 0;
+	for (;;) {
+		TermTotals(a, style, qs, used, floating);
+		if (used <= 0 || (b.cash + floating) * 100 >= used * citizengold::TERM_STOP_OUT_PERCENT) break;
+		size_t worst = a.positions.size();
+		int64_t worst_profit = INT64_MAX;
+		for (size_t i = 0; i < a.positions.size(); i++) {
+			const citizengold::TermPos &p = a.positions[i];
+			if (p.style != style || p.symbol >= STOCK_SYMBOLS) continue;
+			const int64_t pr = citizengold::TermProfit(p, qs[p.symbol]);
+			if (pr < worst_profit) { worst_profit = pr; worst = i; }
+		}
+		if (worst == a.positions.size()) break;
+		CloseTermPosition(a, worst, qs);
+	}
+
+	/* The decision. */
+	std::vector<citizengold::TermPos> mine;
+	std::vector<size_t> where;
+	for (size_t i = 0; i < a.positions.size(); i++) {
+		if (a.positions[i].style == style) { mine.push_back(a.positions[i]); where.push_back(i); }
+	}
+	TermTotals(a, style, qs, used, floating);
+	const int64_t free_margin = b.cash + floating - used;
+	const citizengold::TermAction act = citizengold::DecideTerminal(style, mine, free_margin, b.cooldown, qs.data(), qs.size(), dice);
+	if (act.kind == citizengold::TermAction::Kind::Close) {
+		if (act.close_index < where.size()) CloseTermPosition(a, where[act.close_index], qs);
+		return;
+	}
+	if (act.kind != citizengold::TermAction::Kind::Open || act.symbol >= STOCK_SYMBOLS || !qs[act.symbol].valid) return;
+
+	const CompanyID target{act.symbol};
+	const int64_t price = GetStockExecutionPrice(target, act.is_long, static_cast<uint32_t>(act.units));
+	if (price <= 0) return;
+	const int64_t value = price * act.units;
+	const int64_t commission = GetStockCommission(value);
+	const int64_t margin = qs[act.symbol].divisor > 0 ? value / qs[act.symbol].divisor : 0;
+	if (b.cash < commission || free_margin < margin + commission) return;
+	b.cash -= commission;
+	b.turnover += value;
+	_central_bank.trading_revenue_cents += commission * 100;
+	_stock_market.ApplyImpact(target, act.is_long, static_cast<uint32_t>(act.units));
+
+	citizengold::TermPos p;
+	p.style = style;
+	p.symbol = act.symbol;
+	p.is_long = act.is_long;
+	p.volume = act.units;
+	p.entry = price;
+	const int64_t sl_d = std::max<int64_t>(1, price * act.sl_ppm / citizengold::PPM);
+	const int64_t tp_d = std::max<int64_t>(1, price * act.tp_ppm / citizengold::PPM);
+	if (act.sl_ppm > 0) p.sl = act.is_long ? std::max<int64_t>(1, price - sl_d) : price + sl_d;
+	if (act.tp_ppm > 0) p.tp = act.is_long ? price + tp_d : std::max<int64_t>(1, price - tp_d);
+	a.positions.push_back(p);
+}
+
+/** Swap: every game day a position costs a small part of its value. */
+static void TermSwap(TownAccount &a)
+{
+	for (const citizengold::TermPos &p : a.positions) {
+		int64_t price = p.entry;
+		if (p.symbol < STOCK_SYMBOLS && IsStockSymbolValid(p.symbol)) {
+			const int64_t mid = GetStockPrice(CompanyID{p.symbol});
+			if (mid > 0) price = mid;
+		}
+		const int64_t swap = price * p.volume * citizengold::TERM_SWAP_PPM_PER_DAY / citizengold::PPM;
+		citizengold::Book &b = a.books[static_cast<size_t>(p.style)];
+		const int64_t paid = std::min(b.cash, swap);
+		b.cash -= paid;
+		_central_bank.trading_revenue_cents += paid * 100;
+	}
+}
+
 /**
  * One game hour: every group of every town looks at the market and decides (citizen_gold.h). Orders are filled at the ask / bid price with a
  * commission; the spread and the commission are income of the central bank, the profit of a sale pays the town gains tax. The dice are a hash of the
@@ -115,12 +278,11 @@ static void SettleCarries(int64_t net_bought_cz)
  */
 static void TownsHourly(const GameTimeSnapshot &now)
 {
-	using namespace citizengold;
 	if (_game_mode != GM_NORMAL) return;
 	if (!_gold_reserve.EnsureStarted()) return;
 
 	const uint64_t hour = now.total_minutes / 60;
-	MarketView m;
+	citizengold::MarketView m;
 	m.price_cents = _gold_reserve.price_cents;
 	m.ask_cents = _gold_reserve.GetAskCents();
 	m.bid_cents = _gold_reserve.GetBidCents();
@@ -129,7 +291,10 @@ static void TownsHourly(const GameTimeSnapshot &now)
 	m.prev_close_cents = _gold_reserve.GetDayStartCents();
 	m.pressure_ppm = _gold_reserve.pressure_ppm;
 	const int64_t floor_oz = GoldReserveManager::MARKET_STOCK_START * TOWN_STOCK_FLOOR_PERCENT / 100;
-	m.stock_cz = std::max<int64_t>(0, _gold_reserve.market_stock_oz - floor_oz) * CZ_PER_OZ;
+	m.stock_cz = std::max<int64_t>(0, _gold_reserve.market_stock_oz - floor_oz) * citizengold::CZ_PER_OZ;
+
+	TermQuotes term_quotes;
+	BuildTermQuotes(term_quotes);
 
 	int64_t net_bought_cz = 0;
 	for (Town *t : Town::Iterate()) {
@@ -137,24 +302,29 @@ static void TownsHourly(const GameTimeSnapshot &now)
 		auto it = _town_treasury.accounts.find(t->index.base());
 		if (it == _town_treasury.accounts.end() || !it->second.started) continue;
 		TownAccount &a = it->second;
-		for (size_t i = 0; i < STYLE_COUNT; i++) {
-			Book &b = a.books[i];
+		for (size_t i = 0; i < citizengold::STYLE_COUNT; i++) {
+			citizengold::Book &b = a.books[i];
 			if (b.cooldown > 0) b.cooldown--;
-			const Order o = Decide(static_cast<Style>(i), b, m, Mix(CitizenSeed(), t->index.base(), i, hour));
+			/* The speculators and the overtraders trade in the Trading Terminal (positions), the others buy physical gold. */
+			if (static_cast<citizengold::Style>(i) == citizengold::Style::Speculator || static_cast<citizengold::Style>(i) == citizengold::Style::Overtrader) {
+				TermStep(a, static_cast<citizengold::Style>(i), citizengold::Mix(CitizenSeed() ^ 0x7E2D, t->index.base(), i, hour), term_quotes);
+				continue;
+			}
+			const citizengold::GoldOrder o = citizengold::Decide(static_cast<citizengold::Style>(i), b, m, citizengold::Mix(CitizenSeed(), t->index.base(), i, hour));
 			if (o.cz <= 0) continue;
 			if (o.buy) {
-				const Fill f = ApplyBuy(b, o.cz, m.ask_cents, m.stock_cz);
+				const citizengold::Fill f = citizengold::ApplyBuy(b, o.cz, m.ask_cents, m.stock_cz);
 				if (f.cz <= 0) continue;
 				m.stock_cz -= f.cz;
 				net_bought_cz += f.cz;
-				_central_bank.trading_revenue_cents += (m.ask_cents - m.price_cents) * f.cz / CZ_PER_OZ + f.commission * 100;
+				_central_bank.trading_revenue_cents += (m.ask_cents - m.price_cents) * f.cz / citizengold::CZ_PER_OZ + f.commission * 100;
 			} else {
-				const Fill f = ApplySell(b, o.cz, m.bid_cents);
+				const citizengold::Fill f = citizengold::ApplySell(b, o.cz, m.bid_cents);
 				if (f.cz <= 0) continue;
 				m.stock_cz += f.cz;
 				net_bought_cz -= f.cz;
-				_central_bank.trading_revenue_cents += (m.price_cents - m.bid_cents) * f.cz / CZ_PER_OZ + f.commission * 100;
-				if (static_cast<Style>(i) == Style::Speculator && b.gold_cz == 0) b.cooldown = static_cast<int32_t>(SPEC_COOLDOWN_HOURS);
+				_central_bank.trading_revenue_cents += (m.price_cents - m.bid_cents) * f.cz / citizengold::CZ_PER_OZ + f.commission * 100;
+				if (static_cast<citizengold::Style>(i) == citizengold::Style::Speculator && b.gold_cz == 0) b.cooldown = static_cast<int32_t>(citizengold::SPEC_COOLDOWN_HOURS);
 				/* The town gains tax on the profit of the sale. */
 				if (f.gain > 0) {
 					const int64_t tax = std::min(b.cash, f.gain * TOWN_GAINS_TAX_PERCENT / 100);
@@ -204,7 +374,8 @@ static void TownsDaily(const GameTimeSnapshot &now)
 		a.treasury += tax;
 		a.taxed += tax;
 
-		/* The gold trade of the citizens runs every game hour (TownsHourly). */
+		/* The gold trade and the terminal trade of the citizens run every game hour (TownsHourly); the swap of their positions is paid here. */
+		TermSwap(a);
 
 		/* Development: fund new buildings for 3 months, once the treasury can pay for it. */
 		const int64_t cost = (TOWN_DEVELOP_BASE_COST + pop * TOWN_DEVELOP_COST_PER_CAPITA) * index_ppm / 1'000'000;
@@ -226,7 +397,7 @@ static void TownsDaily(const GameTimeSnapshot &now)
 		using citizengold::Style;
 		auto result = [](Style st) { return GetString(STR_JUST_CURRENCY_LONG, _town_treasury.GetStyleTotals(st).profit); };
 		AddNewsItem(GetEncodedString(STR_JUST_RAW_STRING, fmt::format(
-				"Towns: citizens hold {} oz of gold, the treasuries hold {}. Gold trading result so far: hoarders {}, speculators {}, overtraders {}, balanced savers {}.",
+				"Towns: citizens hold {} oz of gold, the treasuries hold {}. Trading result so far (gold and terminal): hoarders {}, speculators {}, overtraders {}, balanced savers {}.",
 				_town_treasury.GetTotalCitizenGold(), GetString(STR_JUST_CURRENCY_LONG, _town_treasury.GetTotalTreasury()),
 				result(Style::Hoarder), result(Style::Speculator), result(Style::Overtrader), result(Style::Balanced))),
 				NewsType::General, NewsStyle::Small, {});

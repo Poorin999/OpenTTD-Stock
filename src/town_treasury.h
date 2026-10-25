@@ -26,9 +26,11 @@
 
 #include "stdafx.h"
 #include "citizen_gold.h"
+#include "citizen_terminal.h"
 #include <array>
 #include <cstdint>
 #include <map>
+#include <vector>
 
 /* Rates. Change here and build again. Money amounts are in the base currency at price index 1.0. */
 static constexpr int64_t TOWN_MIN_POPULATION = 200;          ///< Towns below this have no treasury and no gold trade.
@@ -50,6 +52,7 @@ struct TownAccount {
 	int64_t treasury = 0;    ///< Cash of the town.
 	int64_t spent = 0;       ///< Everything the town has spent on development so far.
 	int64_t taxed = 0;       ///< Everything the town has collected so far (income tax and gains tax). Not saved.
+	std::vector<citizengold::TermPos> positions{}; ///< Open Trading Terminal positions of the speculators and the overtraders (citizen_terminal.h). Saved (SRK_TOWN_POS).
 
 	int64_t GoldCz() const { int64_t t = 0; for (const auto &b : this->books) t += b.gold_cz; return t; }
 };
