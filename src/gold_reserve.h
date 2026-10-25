@@ -48,10 +48,12 @@ struct GoldReserveManager {
 	static constexpr int64_t MARKET_STOCK_CAP = MARKET_STOCK_START * 3 / 2; ///< Deliveries never fill the market stock above this (1.5 x the start stock, was 2 x).
 	static constexpr int64_t MINE_DAILY_INTAKE_MAX_OZ = 400; ///< The market takes at most this many ounces from mines per game day (0.2% of the start stock); more is not added.
 	static constexpr int64_t SCARCITY_FLOOR_DIV = 4;        ///< The scarcity factor stops growing when the stock is 1/4 of the start stock (price x4).
+	static constexpr int64_t GLIDE_PERCENT_PER_DAY = 5;     ///< The price moves this share of the way to its target in one game day (it glides there minute by minute, not in one jump at midnight).
+	static constexpr int64_t GLIDE_EVERY_MINUTES = 2;       ///< The live price is updated every this many game minutes (same pace as the Terminal).
 	static constexpr size_t HISTORY_MAX_DAYS = 730;         ///< Number of daily prices that are kept for the gold chart (the oldest are dropped).
 
 
-	int64_t price_cents = 0;      ///< Base market price of one ounce (the middle price) in 1/100 of a money unit. 0 = not started yet.
+	int64_t price_cents = 0;      ///< Live base price of one ounce (the middle price) in 1/100 of a money unit. 0 = not started yet. Glides during the day (UpdateGlide); at midnight it is the last point of history_cents.
 	int64_t spread_ppm = SPREAD_MIN_PPM; ///< Total spread (ask - bid) in ppm of the base price. Set once per game day (UpdateDaily), so it never jumps inside a day. Not saved: the minimum until the next day starts.
 	int64_t baseline_supply = 0;  ///< Cash in circulation when the market started; the supply factor is measured against it.
 	int64_t bank_reserve_oz = 0;  ///< The ounces that the central bank holds from the start.
@@ -64,6 +66,10 @@ struct GoldReserveManager {
 
 	void Reset();
 	void UpdateDaily();
+	void UpdateGlide(uint64_t total_minutes);
+	int64_t ComputeTargetCents() const;
+	int64_t GetDayStartCents() const;
+	static int64_t GlideCents(int64_t day_start, int64_t target, int64_t minute_of_day);
 
 	/**
 	 * How much of the normal yield a mine delivery adds, in ppm. Full while the stock is at or below the start stock; it falls in a

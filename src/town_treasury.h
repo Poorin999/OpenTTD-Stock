@@ -38,6 +38,7 @@ static constexpr int64_t TOWN_GOLD_SELL_ABOVE_PPM = 30'000;  ///< Sell when the 
 static constexpr int64_t TOWN_GOLD_BUY_SHARE_PERCENT = 50;   ///< A purchase uses at most this share of the savings.
 static constexpr int64_t TOWN_GOLD_SELL_SHARE_PERCENT = 25;  ///< A sale gives at most this share of the gold (at least 1 ounce).
 static constexpr int64_t TOWN_GOLD_DAILY_STOCK_DIV = 10'000; ///< One town trades at most 1/10000 of the market stock per day (at least 1 ounce).
+static constexpr int64_t TOWN_GOLD_TRADES_PER_DAY = 24;      ///< The citizens look at the gold price every game hour and trade 1/24 of the daily share, so their orders are spread over the day.
 static constexpr int64_t TOWN_DEVELOP_BASE_COST = 4'000;     ///< Cost of the development in the treasury, at price index 1.0 ...
 static constexpr int64_t TOWN_DEVELOP_COST_PER_CAPITA = 1;   ///< ... plus this much per citizen.
 static constexpr int64_t TOWN_DEVELOP_NEWS_MIN_POPULATION = 500; ///< Only towns of this size make a news item when they fund buildings.

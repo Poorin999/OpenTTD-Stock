@@ -206,27 +206,24 @@ void GoldFromDelivery(CargoType cargo, uint count)
 	_gold_reserve.mine_intake_today_oz += ounces;
 }
 
-/** One day of the gold market: the price moves 5% of the way to the target that the economy of the game gives. */
-void GoldReserveManager::UpdateDaily()
+/** The price at the start of today's glide: the last point of the chart (the price at midnight); the live price when the chart is empty (old savegame). Needs no saved value. */
+int64_t GoldReserveManager::GetDayStartCents() const
 {
-	/* The gold of a company that does not exist any more is gone. */
-	for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
-		if (!Company::IsValidID(CompanyID{i})) { this->holdings_oz[i] = 0; this->holdings_cost[i] = 0; }
-	}
-	if (!this->EnsureStarted()) return;
-	this->spread_ppm = this->ComputeSpreadPpm(); // Once per game day: the spread is stable inside a day.
-	this->mine_intake_today_oz = 0;               // A new day: the mines may add gold again.
+	return this->history_cents.empty() ? this->price_cents : this->history_cents.back();
+}
 
+/** The price that the economy of the game asks for now: base price x inflation x cash x demand x scarcity x safe haven. Pure function of the state, the same on every client. */
+int64_t GoldReserveManager::ComputeTargetCents() const
+{
 	/* 1. Inflation of the game (1.0 = 1 << 16). */
 	const int64_t inflation = std::clamp<int64_t>((static_cast<int64_t>(_economy.inflation_prices) * PPM) >> 16, PPM / 2, 20 * PPM);
 
 	/* 2. Cash in circulation against the cash at the start: half of the change goes into the price. */
 	const int64_t supply = this->GetCirculatingCash();
-	const int64_t supply_factor = std::clamp<int64_t>(PPM + (supply - this->baseline_supply) * PPM / this->baseline_supply / 2, PPM / 2, 3 * PPM);
+	const int64_t supply_factor = this->baseline_supply > 0 ? std::clamp<int64_t>(PPM + (supply - this->baseline_supply) * PPM / this->baseline_supply / 2, PPM / 2, 3 * PPM) : PPM;
 
-	/* 3. Demand of the reserve: what the companies bought (and sold) moves the price, and the effect fades. */
-	this->pressure_ppm = std::clamp<int64_t>(this->pressure_ppm - this->pressure_ppm * 3 / 100, -PRESSURE_MAX_PPM, PRESSURE_MAX_PPM);
-	const int64_t demand_factor = PPM + this->pressure_ppm;
+	/* 3. Demand of the reserve: what the companies, the citizens and the news bought (and sold). */
+	const int64_t demand_factor = PPM + std::clamp<int64_t>(this->pressure_ppm, -PRESSURE_MAX_PPM, PRESSURE_MAX_PPM);
 
 	/* 3b. Scarcity: the market has a limited stock. Half of the stock left = twice the price, down to a quarter (x4). Stock above the start makes it cheaper. */
 	const int64_t stock_floor = MARKET_STOCK_START / SCARCITY_FLOOR_DIV;
@@ -247,12 +244,51 @@ void GoldReserveManager::UpdateDaily()
 	target = target * demand_factor / PPM;
 	target = target * scarcity_factor / PPM;
 	target = target * haven_factor / PPM;
-	target = std::max<int64_t>(target, BASE_PRICE_CENTS / 10);
+	return std::max<int64_t>(target, BASE_PRICE_CENTS / 10);
+}
 
-	int64_t step = (target - this->price_cents) * 5 / 100;
-	if (step == 0 && target != this->price_cents) step = target > this->price_cents ? 1 : -1;
-	this->price_cents = std::max<int64_t>(1, this->price_cents + step);
+/**
+ * The price at a minute of the day. Over a whole game day it moves GLIDE_PERCENT_PER_DAY of the way from the price at midnight to the target
+ * (the same distance per day as before), but in a straight line through the day instead of one jump at midnight.
+ * @param day_start Price at the start of the day.
+ * @param target The price that the economy asks for.
+ * @param minute_of_day 0 .. MINUTES_PER_DAY.
+ */
+int64_t GoldReserveManager::GlideCents(int64_t day_start, int64_t target, int64_t minute_of_day)
+{
+	int64_t step = (target - day_start) * GLIDE_PERCENT_PER_DAY / 100;
+	if (step == 0 && target != day_start) step = target > day_start ? 1 : -1;
+	const int64_t m = std::clamp<int64_t>(minute_of_day, 0, GameTimeManager::MINUTES_PER_DAY);
+	return std::max<int64_t>(1, day_start + step * m / GameTimeManager::MINUTES_PER_DAY);
+}
+
+/** Every few game minutes: the live price glides on towards the end of the day. Buying, selling and news move the target, so they are felt at once (a little), not only at midnight. */
+void GoldReserveManager::UpdateGlide(uint64_t total_minutes)
+{
+	if (this->price_cents <= 0) return;
+	if (total_minutes % GLIDE_EVERY_MINUTES != 0) return;
+	const int64_t minute_of_day = static_cast<int64_t>(total_minutes % GameTimeManager::MINUTES_PER_DAY);
+	if (minute_of_day == 0) return; // Midnight belongs to UpdateDaily, which writes the end of the day.
+	this->price_cents = GlideCents(this->GetDayStartCents(), this->ComputeTargetCents(), minute_of_day);
+}
+
+/** One game day of the gold market: the glide reaches its end value, the day goes into the chart, and the demand effect fades. */
+void GoldReserveManager::UpdateDaily()
+{
+	/* The gold of a company that does not exist any more is gone. */
+	for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
+		if (!Company::IsValidID(CompanyID{i})) { this->holdings_oz[i] = 0; this->holdings_cost[i] = 0; }
+	}
+	if (!this->EnsureStarted()) return;
+	this->spread_ppm = this->ComputeSpreadPpm(); // Once per game day: the spread is stable inside a day.
+	this->mine_intake_today_oz = 0;               // A new day: the mines may add gold again.
+
+	/* The end of the day: the same formula as the glide, with a whole day. The new price is the start of the next glide (last point of the chart). */
+	this->price_cents = GlideCents(this->GetDayStartCents(), this->ComputeTargetCents(), GameTimeManager::MINUTES_PER_DAY);
 	this->PushHistory();
+
+	/* The demand effect of the buying and selling fades by 3% a day. */
+	this->pressure_ppm = std::clamp<int64_t>(this->pressure_ppm - this->pressure_ppm * 3 / 100, -PRESSURE_MAX_PPM, PRESSURE_MAX_PPM);
 
 	InvalidateWindowData(WC_STOCK_MARKET, 0);
 }
@@ -368,3 +404,9 @@ CommandCost CmdGoldSell(DoCommandFlags flags, uint32_t ounces)
 {
 	return ExecuteGoldTrade(_current_company, false, ounces, flags.Test(DoCommandFlag::Execute));
 }
+
+/* Every second game minute (the pace of the Terminal): the live price glides. */
+static const GameTimeSubscription _gold_glide(GameTimeEvent::Minute, [](const GameTimeSnapshot &now)
+{
+	_gold_reserve.UpdateGlide(now.total_minutes);
+});

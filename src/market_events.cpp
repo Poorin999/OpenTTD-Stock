@@ -54,7 +54,7 @@ static void PublishMarketEvent(const MarketEvent &e)
 static std::vector<uint8_t> ExistingCompanies()
 {
 	std::vector<uint8_t> companies;
-	for (const Company *c : Company::Iterate()) companies.push_back(static_cast<uint8_t>(c->index));
+	for (const Company *c : Company::Iterate()) companies.push_back(static_cast<uint8_t>(c->index.base()));
 	return companies;
 }
 

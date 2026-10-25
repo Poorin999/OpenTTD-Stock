@@ -55,7 +55,7 @@ static int64_t ReferencePriceCents()
 /** The citizens buy gold with part of their savings. */
 static void CitizensBuy(TownAccount &a, int64_t cap_oz)
 {
-	int64_t n = _gold_reserve.GetMaxBuyOunces(a.savings * TOWN_GOLD_BUY_SHARE_PERCENT / 100);
+	int64_t n = _gold_reserve.GetMaxBuyOunces(a.savings * TOWN_GOLD_BUY_SHARE_PERCENT / (100 * TOWN_GOLD_TRADES_PER_DAY));
 	/* Never take the market below half of its start stock: the citizens must not make gold scarce on their own. */
 	n = std::min({n, cap_oz, _gold_reserve.market_stock_oz - GoldReserveManager::MARKET_STOCK_START / 2});
 	if (n <= 0) return;
@@ -79,7 +79,7 @@ static void CitizensSell(TownAccount &a, int64_t cap_oz)
 {
 	if (a.gold_oz <= 0) return;
 	const int64_t held = a.gold_oz;
-	const int64_t n = std::min(held, std::max<int64_t>(1, std::min(cap_oz, std::max<int64_t>(1, held * TOWN_GOLD_SELL_SHARE_PERCENT / 100))));
+	const int64_t n = std::min(held, std::max<int64_t>(1, std::min(cap_oz, std::max<int64_t>(1, held * TOWN_GOLD_SELL_SHARE_PERCENT / (100 * TOWN_GOLD_TRADES_PER_DAY)))));
 
 	const int64_t gross = _gold_reserve.GetSellProceeds(n);
 	const int64_t commission = std::min(gross, GoldReserveManager::GetCommission(gross));
@@ -99,17 +99,34 @@ static void CitizensSell(TownAccount &a, int64_t cap_oz)
 			_gold_reserve.pressure_ppm - n * GoldReserveManager::PPM / GoldReserveManager::DEPTH_OUNCES);
 }
 
+/** One game hour: the citizens buy gold when it is cheap and sell when it is dear, 1/24 of the daily share per hour. Only towns that already have an account (made by TownsDaily). */
+static void TownsHourly()
+{
+	if (_game_mode != GM_NORMAL) return;
+	if (!_gold_reserve.EnsureStarted()) return;
+
+	const int64_t ref = ReferencePriceCents();
+	if (ref <= 0) return;
+	const int64_t price = _gold_reserve.price_cents;
+	const bool cheap = price * GoldReserveManager::PPM < ref * (GoldReserveManager::PPM - TOWN_GOLD_BUY_BELOW_PPM);
+	const bool dear  = price * GoldReserveManager::PPM > ref * (GoldReserveManager::PPM + TOWN_GOLD_SELL_ABOVE_PPM);
+	if (!cheap && !dear) return;
+
+	const int64_t cap_oz = std::max<int64_t>(1, _gold_reserve.market_stock_oz / (TOWN_GOLD_DAILY_STOCK_DIV * TOWN_GOLD_TRADES_PER_DAY));
+	for (Town *t : Town::Iterate()) {
+		if (t->cache.population < TOWN_MIN_POPULATION) continue;
+		auto it = _town_treasury.accounts.find(t->index.base());
+		if (it == _town_treasury.accounts.end()) continue;
+		if (cheap) CitizensBuy(it->second, cap_oz); else CitizensSell(it->second, cap_oz);
+	}
+}
+
 /** One game day for all towns. */
 static void TownsDaily(const GameTimeSnapshot &now)
 {
 	if (_game_mode != GM_NORMAL) return;
 
 	const int64_t index_ppm = GetPriceIndexPpm();
-	const bool market = _gold_reserve.EnsureStarted();
-	const int64_t ref = market ? ReferencePriceCents() : 0;
-	const int64_t price = _gold_reserve.price_cents;
-	const bool cheap = ref > 0 && price * GoldReserveManager::PPM < ref * (GoldReserveManager::PPM - TOWN_GOLD_BUY_BELOW_PPM);
-	const bool dear  = ref > 0 && price * GoldReserveManager::PPM > ref * (GoldReserveManager::PPM + TOWN_GOLD_SELL_ABOVE_PPM);
 
 	/* Accounts of towns that no longer exist are dropped (their gold and money are simply gone, like the gold of a removed company). */
 	for (auto it = _town_treasury.accounts.begin(); it != _town_treasury.accounts.end();) {
@@ -128,10 +145,7 @@ static void TownsDaily(const GameTimeSnapshot &now)
 		a.treasury += tax;
 		a.taxed += tax;
 
-		/* Gold: buy cheap, sell dear. */
-		const int64_t cap_oz = std::max<int64_t>(1, _gold_reserve.market_stock_oz / TOWN_GOLD_DAILY_STOCK_DIV);
-		if (cheap) CitizensBuy(a, cap_oz);
-		else if (dear) CitizensSell(a, cap_oz);
+		/* The gold trade of the citizens is not here any more: it runs every game hour (TownsHourly), so it does not hit the price at midnight. */
 
 		/* Development: fund new buildings for 3 months, once the treasury can pay for it. */
 		const int64_t cost = (TOWN_DEVELOP_BASE_COST + pop * TOWN_DEVELOP_COST_PER_CAPITA) * index_ppm / 1'000'000;
@@ -159,3 +173,5 @@ static void TownsDaily(const GameTimeSnapshot &now)
 } // namespace
 
 static const GameTimeSubscription _town_treasury_daily(GameTimeEvent::Day, [](const GameTimeSnapshot &now) { TownsDaily(now); }, 20);
+
+static const GameTimeSubscription _town_treasury_hourly(GameTimeEvent::Hour, [](const GameTimeSnapshot &) { TownsHourly(); }, 20);
