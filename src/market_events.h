@@ -69,6 +69,28 @@ static constexpr int MARKET_PEACE_CHANCE_PERMILLE = 12;       ///< Chance per ga
 static constexpr int64_t MARKET_WAR_MIN_GAP_DAYS = 8;         ///< At least this many game days from the last peace to the next war.
 static constexpr int64_t MARKET_PEACE_MIN_GAP_DAYS = 4;       ///< At least this many game days from the start of a war to its end.
 
+/*
+ * ---- REAL GOLD NEWS (owner request 2026-10-26): gold falls for a reason that really happened in the gold market ------------------------------
+ * Two kinds of the old table are now made from the real figures of `_gold_reserve` (no dice). They keep their kind numbers, so no savegame changes:
+ *  - CentralBanksSellGold: the central bank really sold gold of its own reserve (CentralBank::TradeGold) because the gold reserve of the whole system is
+ *    above the level (BANK_GOLD_SELL_ABOVE_BP, 30% of the cash in circulation). fact_ppm = ounces sold. fact2 = backing (bp) | share of its gold sold (permille) << 20.
+ *  - GoldMineFound: the mines really delivered gold to the market stock (GoldFromDelivery adds the ounces to GoldReserveManager::mine_news_oz). When the
+ *    ounces reach MARKET_MINE_NEWS_MIN_OZ there is news. fact_ppm = ounces delivered. fact2 = ounces in the market stock now.
+ * The size of the push on gold comes from the REAL ounces (MarketGoldDropPpm), not from a dice and not from a table. A news event of this kind has
+ * fact_ppm > 0; an old random one (fact_ppm == 0) keeps the old table and the old texts.
+ */
+static constexpr bool MARKET_GOLD_REAL_NEWS = true;            ///< false: no news is made from the real gold market (the old random draw is not used either while MARKET_ONLY_WAR_IS_RANDOM is true).
+static constexpr bool MARKET_GOLD_REAL_SHOCK = true;           ///< true: such news also moves the live price at once (a gap down, GoldReserveManager::ApplyShock); false: only the goal moves and the price glides there (5% of the way per game day).
+static constexpr int64_t MARKET_GOLD_STOCK_START_OZ = 32'151'000; ///< Start stock of the gold market (= GoldReserveManager::MARKET_STOCK_START, a static_assert in market_events.cpp keeps them equal).
+static constexpr int64_t MARKET_GOLD_NEWS_GAP_DAYS = 3;        ///< The same kind of real gold news is not made again within this many game days.
+static constexpr int64_t MARKET_GOLD_NEWS_MIN_PPM = 15'000;    ///< The smallest real gold news pushes gold down by 1.5% (the biggest by MARKET_EVENT_GOLD_MAX_PPM = 8%).
+static constexpr int64_t MARKET_MINE_NEWS_MIN_OZ = 80'000;     ///< Mines must have put this many ounces into the market stock (about 0.25% of the start stock) before it is news.
+static constexpr int64_t MARKET_MINE_NEWS_FULL_OZ = 400'000;   ///< From this many ounces on the news pushes with the full 8%.
+static constexpr int64_t MARKET_MINE_NEWS_DECAY_PERCENT = 5;   ///< Every game day without news the counted ounces fade by 5%, so only deliveries of the last weeks count.
+static constexpr int64_t MARKET_BANK_SELL_LEVEL_BP = 3000;     ///< The reserve level of the story: 30% of the cash in circulation (= BANK_GOLD_SELL_ABOVE_BP, a static_assert in market_events.cpp keeps them equal).
+static constexpr int64_t MARKET_BANK_NEWS_MIN_OZ = 5;          ///< A sale of fewer ounces is not news.
+static constexpr int64_t MARKET_BANK_NEWS_MIN_SHARE_PERMILLE = 100; ///< The bank must have sold at least 10% of the gold that it held (the size of its sale against its own reserve).
+
 /** The kinds of events. The numbers are saved in savegames: add new kinds at the END, before Count. */
 enum class MarketEventKind : uint8_t {
 	EconomicBoom,        ///< World: shares up, gold down.
@@ -335,6 +357,7 @@ struct MarketEvent {
 	int64_t gold_ppm = 0;                ///< Push on the gold demand (negative: down).
 	int64_t share_ppm = 0;               ///< Push on the sentiment of the shares (negative: down).
 	int64_t fact_ppm = 0;                ///< The REAL number of the story: company events a change or a ratio in ppm (months for a bankruptcy); town events a change in ppm or the population mark; storm and meteor the damage in money units; drought the days. 0 for world events and old savegames.
+	int64_t fact2 = 0;                   ///< A second REAL number (0 or more, below 2^31). Only the real gold news use it (see MARKET_GOLD_REAL_NEWS): market stock in ounces (new mine) or backing | share << 20 (bank sale).
 };
 
 /** The real figures of one company, taken from the game when the dice ask for company news. Money units. */
@@ -393,6 +416,47 @@ inline bool MarketKindHasTownField(MarketEventKind kind)
 {
 	return MarketKindIsTown(kind) || MarketKindIsWeather(kind);
 }
+
+/* ---- Real gold news: the rules (see MARKET_GOLD_REAL_NEWS above) ---------------------------------------------------------------------------- */
+
+/** True for the two kinds that can be made from the real gold market. */
+inline bool MarketKindIsRealGoldKind(MarketEventKind kind)
+{
+	return kind == MarketEventKind::GoldMineFound || kind == MarketEventKind::CentralBanksSellGold;
+}
+
+/** True for a real gold news (a real gold kind with a real number). An old random event of the same kind has fact_ppm == 0. */
+inline bool MarketIsRealGoldNews(const MarketEvent &e)
+{
+	return MarketKindIsRealGoldKind(e.kind) && e.fact_ppm > 0;
+}
+
+/**
+ * The push on gold of a real gold news, in ppm (negative): MARKET_GOLD_NEWS_MIN_PPM at `min_size`, a straight line up to MARKET_EVENT_GOLD_MAX_PPM at `full_size`
+ * (and the same above). 0 when `size` is below `min_size`. The size is the real ounces of a new mine, or the permille of its gold that the bank sold.
+ */
+inline int64_t MarketGoldDropPpm(int64_t size, int64_t min_size, int64_t full_size)
+{
+	if (size < min_size || full_size <= min_size) return 0;
+	const int64_t span = MARKET_EVENT_GOLD_MAX_PPM - MARKET_GOLD_NEWS_MIN_PPM;
+	const int64_t extra = std::min(size, full_size) - min_size;
+	return -(MARKET_GOLD_NEWS_MIN_PPM + span * extra / (full_size - min_size));
+}
+
+/** Severity 1 .. 3 from the size of the push (a negative or a positive number): under 3.5% small, under 6% medium, else big. */
+inline int MarketGoldSeverity(int64_t push_ppm)
+{
+	const int64_t a = push_ppm < 0 ? -push_ppm : push_ppm;
+	return a < 35'000 ? 1 : (a < 60'000 ? 2 : 3);
+}
+
+/** The second number of a bank sale: backing in bp (0 .. 1,000,000, 20 bits) | share of its gold that the bank sold in permille (0 .. 1000) << 20. Below 2^30. */
+inline int64_t MarketBankFact2(int64_t backing_bp, int64_t share_permille)
+{
+	return std::clamp<int64_t>(backing_bp, 0, 1'000'000) | (std::clamp<int64_t>(share_permille, 0, 1000) << 20);
+}
+inline int64_t MarketBankFactBacking(int64_t fact2) { return fact2 & 0xFFFFF; }
+inline int64_t MarketBankFactShare(int64_t fact2) { return (fact2 >> 20) & 0x3FF; }
 
 /* ---- Real town news and weather -------------------------------------------------------------------------------------------------------------- */
 static constexpr int64_t MARKET_TOWN_WINDOW_DAYS = 6;          ///< Town news compare the population with this many game days ago.
@@ -940,6 +1004,16 @@ struct MarketEvents {
 		return false;
 	}
 
+	/** True when the log already has REAL gold news of this kind (fact_ppm > 0) within `days` game days. */
+	bool RecentlyReportedGold(MarketEventKind kind, int64_t minute, int64_t days) const
+	{
+		for (const MarketEvent &e : this->log) {
+			if (minute - e.minute > days * MARKET_MINUTES_PER_DAY) break; // newest first
+			if (e.kind == kind && e.fact_ppm > 0) return true;
+		}
+		return false;
+	}
+
 	/** The weather that is on a town now (one callback per active weather event). */
 	template <typename F>
 	void ForEachActiveWeather(uint32_t town, int64_t minute, F &&fn) const
@@ -1014,6 +1088,16 @@ std::string MarketEventSubjectName(const MarketEvent &e);
 
 /** Put an event into the game: sentiment, gold pressure, diamond stock, the log and the news item. Used by market_events.cpp and town_news.cpp. */
 void PublishMarketEvent(const MarketEvent &e);
+
+/**
+ * The central bank has just sold gold of its own reserve because the reserve of the system is above its level (called by CentralBank::TradeGold after the sale).
+ * Makes the real news (CentralBanksSellGold) when the sale is big enough, with the real numbers.
+ * @param ounces_sold Ounces that the bank sold today.
+ * @param reserve_before_oz Ounces that the bank held before the sale.
+ * @param backing_bp Backing of the whole reserve before the sale: value of the reserve / cash in circulation, in bp.
+ * @param force Test tool: ignore the gap to the last news of this kind.
+ */
+void PublishBankGoldSaleNews(int64_t ounces_sold, int64_t reserve_before_oz, int64_t backing_bp, bool force = false);
 
 /** Test tool (console command stock_event): make an event now. @param kind Number of the kind, -1 = by weight. @return The event that happened. */
 MarketEvent FireMarketEventNow(int kind);

@@ -52,6 +52,8 @@ void GoldReserveManager::Reset()
 	this->holdings_oz.fill(0);
 	this->holdings_cost.fill(0);
 	this->history_cents.clear();
+	this->mine_news_oz = 0;
+	this->day_shift_cents = 0;
 	this->spread_ppm = SPREAD_MIN_PPM;
 }
 
@@ -220,12 +222,39 @@ void GoldFromDelivery(CargoType cargo, uint count)
 	if (ounces <= 0) return;
 	_gold_reserve.market_stock_oz += ounces;
 	_gold_reserve.mine_intake_today_oz += ounces;
+	_gold_reserve.mine_news_oz = std::min<int64_t>(1'000'000'000, _gold_reserve.mine_news_oz + ounces); // For the news about new mines (market_events.cpp).
 }
 
 /** The price at the start of today's glide: the last point of the chart (the price at midnight); the live price when the chart is empty (old savegame). Needs no saved value. */
 int64_t GoldReserveManager::GetDayStartCents() const
 {
 	return this->history_cents.empty() ? this->price_cents : this->history_cents.back();
+}
+
+/** Where today's glide starts: the price at midnight plus the news shock of today (day_shift_cents). The chart and the previous close do not see the shock (GetDayStartCents). */
+int64_t GoldReserveManager::GetGlideStartCents() const
+{
+	return std::max<int64_t>(1, this->GetDayStartCents() + this->day_shift_cents);
+}
+
+/**
+ * Real news moves the price at once: the start of today's glide goes up or down by `ppm` of itself and the live price is worked out again from it, so the
+ * price jumps (a gap) instead of gliding only 5% of the way per day. Afterwards the glide pulls the price to the target, which the news has moved too
+ * (the push on the demand pressure, see PublishMarketEvent), so the price stays low while that pressure lasts and recovers as it fades (3% a day).
+ * At midnight the shift is cleared (UpdateDaily) and the end of the day, with the shock inside it, is the new start. Integer only.
+ * @param ppm The change, 1,000,000 = 100%; negative = the price falls.
+ */
+void GoldReserveManager::ApplyShock(int64_t ppm)
+{
+	if (this->price_cents <= 0 || ppm == 0 || this->history_cents.empty()) return; // Without a chart the day start would be the live price itself.
+	const int64_t start = this->GetGlideStartCents();
+	const int64_t step = start / PPM * ppm + start % PPM * ppm / PPM;
+	this->day_shift_cents += step;
+	const int64_t total = static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes());
+	const int64_t minute_of_day = total % GameTimeManager::MINUTES_PER_DAY;
+	const int64_t day = total / GameTimeManager::MINUTES_PER_DAY;
+	this->price_cents = GlideCents(this->GetGlideStartCents(), this->ComputeTargetCents(), minute_of_day, NoisePpmForDay(day));
+	InvalidateWindowData(WC_STOCK_MARKET, 0);
 }
 
 /**
@@ -319,7 +348,7 @@ void GoldReserveManager::UpdateGlide(uint64_t total_minutes)
 	const int64_t minute_of_day = static_cast<int64_t>(total_minutes % GameTimeManager::MINUTES_PER_DAY);
 	if (minute_of_day == 0) return; // Midnight belongs to UpdateDaily, which writes the end of the day.
 	const int64_t day = static_cast<int64_t>(total_minutes / GameTimeManager::MINUTES_PER_DAY);
-	this->price_cents = GlideCents(this->GetDayStartCents(), this->ComputeTargetCents(), minute_of_day, NoisePpmForDay(day));
+	this->price_cents = GlideCents(this->GetGlideStartCents(), this->ComputeTargetCents(), minute_of_day, NoisePpmForDay(day));
 }
 
 /** One game day of the gold market: the glide reaches its end value, the day goes into the chart, and the demand effect fades. */
@@ -335,10 +364,11 @@ void GoldReserveManager::UpdateDaily(int64_t finished_day)
 
 	/* The end of the day: the same formula as the glide, with a whole day. The new price is the start of the next glide (last point of the chart). */
 	if (finished_day < 0) finished_day = std::max<int64_t>(0, static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes() / GameTimeManager::MINUTES_PER_DAY) - 1);
-	this->price_cents = GlideCents(this->GetDayStartCents(), this->ComputeTargetCents(), GameTimeManager::MINUTES_PER_DAY, NoisePpmForDay(finished_day));
+	this->price_cents = GlideCents(this->GetGlideStartCents(), this->ComputeTargetCents(), GameTimeManager::MINUTES_PER_DAY, NoisePpmForDay(finished_day));
 	/* The world takes gold out of the stock and puts new gold in (scrap, jewellery, new mines): the stock moves back to its start level, so mines can not sink the price for good. */
 	this->market_stock_oz = goldmath::RebalancedStock(this->market_stock_oz, MARKET_STOCK_START);
 	this->PushHistory();
+	this->day_shift_cents = 0; // The news shock of the day is inside the end price now.
 
 	/* The demand effect of the buying and selling fades by 3% a day. */
 	this->pressure_ppm = std::clamp<int64_t>(this->pressure_ppm - this->pressure_ppm * 3 / 100, -PRESSURE_MAX_PPM, PRESSURE_MAX_PPM);

@@ -67,6 +67,7 @@ enum StockRecordKind : uint8_t {
 	SRK_TOWN = 34,    ///< Account of a town: ym = index of the town, b = 1 when the groups have their start wealth, v4 = treasury, v5 = spent on development. v1..v3 (ounces, cost, savings) are only read from older savegames and go to the balanced group. Taxes collected are not saved.
 	SRK_TOWN_NEWS = 38, ///< What the daily town news scan remembers about a town: ym = index of the town, v1 = population at the start of the window, v2 = game day of that snapshot, v3 = number of population marks reached.
 	SRK_TOWN_POS = 37, ///< Open terminal position of a citizen group: a = group (citizengold::Style), b = symbol | 0x80 when long, ym = index of the town, v1 = volume, v2 = entry price, v3 = stop loss, v4 = take profit.
+	SRK_GOLD_NEWS = 40, ///< State of the real gold news: ym = ounces that the mines delivered since the last news (mine_news_oz), v1 = shock of today in 1/100 money units (day_shift_cents).
 	SRK_TOWN_BOOK = 36, ///< One group of citizens of a town: a = group (citizengold::Style), ym = index of the town, v1 = gold in hundredths of an ounce, v2 = what it cost, v3 = cash, v4 = profit of closed sales, v5 = wins | losses << 24 | cooldown << 48.
 };
 
@@ -328,9 +329,10 @@ struct STCKChunkHandler : ChunkHandler {
 			r.v1 = it->minute;
 			r.v2 = it->gold_ppm;
 			r.v3 = it->share_ppm;
-			/* v4: severity | variant << 8 | (town + 1) << 16 (0 = no town; older savegames have 0 there). */
+			/* v4: severity | variant << 8 | (town + 1) << 16 (0 = no town; older savegames have 0 there) | fact2 << 32 (the second real number of a real gold news; 0 in older savegames). */
 			r.v4 = static_cast<int64_t>(it->severity) | (static_cast<int64_t>(it->variant) << 8)
-					| (it->town != MARKET_NO_TOWN ? (static_cast<int64_t>(it->town) + 1) << 16 : 0);
+					| (it->town != MARKET_NO_TOWN ? (static_cast<int64_t>(it->town) + 1) << 16 : 0)
+					| (std::clamp<int64_t>(it->fact2, 0, 0x7FFFFFFF) << 32);
 			r.v5 = it->fact_ppm;
 			write(r);
 		}
@@ -429,6 +431,12 @@ struct STCKChunkHandler : ChunkHandler {
 			r.v4 = _gold_reserve.pressure_ppm;
 			r.v5 = _gold_reserve.market_stock_oz + 1;
 			write(r);
+
+			StockRecord n;
+			n.kind = SRK_GOLD_NEWS;
+			n.ym = static_cast<int32_t>(std::clamp<int64_t>(_gold_reserve.mine_news_oz, 0, 1'000'000'000));
+			n.v1 = _gold_reserve.day_shift_cents;
+			write(n);
 		}
 		/* The daily prices of the gold chart, five to a record. */
 		for (size_t i = 0; i < _gold_reserve.history_cents.size(); i += 5) {
@@ -763,6 +771,10 @@ struct STCKChunkHandler : ChunkHandler {
 					/* The damage of a storm or a meteorite is money, not a percentage: it has its own (wide) limit. */
 					ev.fact_ppm = MarketKindIsWeather(ev.kind) ? std::clamp<int64_t>(r.v5, 0, static_cast<int64_t>(1'000'000'000'000'000)) : std::clamp<int64_t>(r.v5, -MARKET_FACT_CAP_PPM, MARKET_FACT_CAP_PPM);
 					if (ev.kind == MarketEventKind::TownMilestone) ev.fact_ppm = std::max<int64_t>(r.v5, 0); // A population mark: people, not a percentage.
+					if (MarketKindIsRealGoldKind(ev.kind)) { // Real gold news: ounces (0 = an old random event) and a second real number.
+						ev.fact_ppm = std::clamp<int64_t>(r.v5, 0, 1'000'000'000);
+						ev.fact2 = ev.fact_ppm > 0 ? ((r.v4 >> 32) & 0x7FFFFFFF) : 0;
+					}
 					_market_events.log.push_front(ev); // Records come oldest first: the newest ends up in front.
 					if (_market_events.log.size() > MARKET_EVENT_KEEP) _market_events.log.pop_back();
 					break;
@@ -865,6 +877,11 @@ struct STCKChunkHandler : ChunkHandler {
 					_gold_reserve.bank_reserve_oz = std::max<int64_t>(r.v3, 0);
 					_gold_reserve.market_stock_oz = r.v5 <= 0 ? GoldReserveManager::MARKET_STOCK_START : r.v5 - 1;
 					_gold_reserve.pressure_ppm = std::clamp<int64_t>(r.v4, -GoldReserveManager::PRESSURE_MAX_PPM, GoldReserveManager::PRESSURE_MAX_PPM);
+					break;
+
+				case SRK_GOLD_NEWS:
+					_gold_reserve.mine_news_oz = std::clamp<int64_t>(r.ym, 0, 1'000'000'000);
+					_gold_reserve.day_shift_cents = r.v1;
 					break;
 
 				case SRK_GOLD_HISTORY: {

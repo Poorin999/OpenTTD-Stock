@@ -519,6 +519,80 @@ int main()
 		CHECK(MarketFuelEffectPpm(MarketEventKind::FuelDrop, 2) < 0 && MarketFuelEffectPpm(MarketEventKind::Recession, 3) == 0);
 	}
 
+	/* Real gold news: a new mine from delivered ounces, a sale of the central bank from its own reserve. */
+	{
+		/* The push comes from the real size: 1.5% at the smallest news, 8% at the biggest, a straight line between, nothing below the minimum. */
+		CHECK(MarketGoldDropPpm(MARKET_MINE_NEWS_MIN_OZ - 1, MARKET_MINE_NEWS_MIN_OZ, MARKET_MINE_NEWS_FULL_OZ) == 0);
+		CHECK(MarketGoldDropPpm(MARKET_MINE_NEWS_MIN_OZ, MARKET_MINE_NEWS_MIN_OZ, MARKET_MINE_NEWS_FULL_OZ) == -MARKET_GOLD_NEWS_MIN_PPM);
+		CHECK(MarketGoldDropPpm(MARKET_MINE_NEWS_FULL_OZ, MARKET_MINE_NEWS_MIN_OZ, MARKET_MINE_NEWS_FULL_OZ) == -MARKET_EVENT_GOLD_MAX_PPM);
+		CHECK(MarketGoldDropPpm(50'000'000, MARKET_MINE_NEWS_MIN_OZ, MARKET_MINE_NEWS_FULL_OZ) == -MARKET_EVENT_GOLD_MAX_PPM);   // never more than 8%
+		int64_t last = 0;
+		for (int64_t oz = MARKET_MINE_NEWS_MIN_OZ; oz <= MARKET_MINE_NEWS_FULL_OZ; oz += 1'000) {
+			const int64_t d = MarketGoldDropPpm(oz, MARKET_MINE_NEWS_MIN_OZ, MARKET_MINE_NEWS_FULL_OZ);
+			CHECK(d <= last + 0 || last == 0);                                                                                       // more ounces, never a smaller drop
+			CHECK(d < 0 && d >= -MARKET_EVENT_GOLD_MAX_PPM && d <= -MARKET_GOLD_NEWS_MIN_PPM);
+			last = d;
+		}
+		CHECK(MarketGoldDropPpm(MARKET_BANK_NEWS_MIN_SHARE_PERMILLE - 1, MARKET_BANK_NEWS_MIN_SHARE_PERMILLE, 1000) == 0);
+		CHECK(MarketGoldDropPpm(1000, MARKET_BANK_NEWS_MIN_SHARE_PERMILLE, 1000) == -MARKET_EVENT_GOLD_MAX_PPM);
+		CHECK(MarketGoldSeverity(-15'000) == 1 && MarketGoldSeverity(-40'000) == 2 && MarketGoldSeverity(-80'000) == 3);
+		CHECK(MARKET_EVENT_GOLD_MAX_PPM >= -MarketGoldDropPpm(1000, 1, 1000));                                                         // inside the limit that PublishMarketEvent and the loader use
+
+		/* Packing of the second number of a bank sale. */
+		for (int64_t bp : {0, 1, 3000, 3141, 999'999, 1'000'000}) {
+			for (int64_t share : {0, 1, 100, 500, 1000}) {
+				const int64_t f = MarketBankFact2(bp, share);
+				CHECK(f >= 0 && f < (int64_t{1} << 30) && MarketBankFactBacking(f) == bp && MarketBankFactShare(f) == share);
+			}
+		}
+		CHECK(MarketBankFactBacking(MarketBankFact2(5'000'000, 5000)) == 1'000'000 && MarketBankFactShare(MarketBankFact2(5'000'000, 5000)) == 1000); // limited, never spills over
+
+		/* Only a real gold kind WITH a number is a real gold news; an old random event of the same kind is not. */
+		MarketEvent real; real.kind = MarketEventKind::GoldMineFound; real.fact_ppm = 123'456; real.fact2 = 33'000'000; real.gold_ppm = -40'000; real.severity = 2;
+		MarketEvent old = real; old.fact_ppm = 0;
+		MarketEvent other = real; other.kind = MarketEventKind::MineStrike;
+		CHECK(MarketIsRealGoldNews(real) && !MarketIsRealGoldNews(old) && !MarketIsRealGoldNews(other));
+		CHECK(MarketKindIsRealGoldKind(MarketEventKind::CentralBanksSellGold) && !MarketKindIsRealGoldKind(MarketEventKind::CentralBanksBuyGold));
+
+		/* The story of a new mine prints the real numbers (ounces, stock, stock against the start stock), and no {..} is left. */
+		for (uint8_t v = 0; v < 12; v++) {
+			real.variant = v;
+			const MarketStory st = ComposeMarketStory(real, "");
+			CHECK(st.headline.find("123,456") != std::string::npos);
+			CHECK(st.body.find("33,000,000") != std::string::npos && st.body.find("102.6%") != std::string::npos); // 33,000,000 / 32,151,000
+			CHECK(st.headline.find('{') == std::string::npos && st.body.find('{') == std::string::npos && st.analysis.find('{') == std::string::npos);
+			CHECK(st.analysis.find("123,456") != std::string::npos && st.analysis.find("-4.00%") != std::string::npos);
+			CHECK(st.analysis.find("ทันที") != std::string::npos);                                                              // the shock is told (MARKET_GOLD_REAL_SHOCK)
+			const MarketStory so = ComposeMarketStory(old, "");                                                                   // the old random story is untouched
+			CHECK(so.headline.find("123,456") == std::string::npos && so.headline.find('{') == std::string::npos);
+		}
+		/* The story of a bank sale: ounces sold, backing, the level, the share of its own gold. */
+		MarketEvent bank; bank.kind = MarketEventKind::CentralBanksSellGold; bank.fact_ppm = 80; bank.fact2 = MarketBankFact2(3141, 500); bank.gold_ppm = -50'000; bank.severity = 2;
+		for (uint8_t v = 0; v < 12; v++) {
+			bank.variant = v;
+			const MarketStory st = ComposeMarketStory(bank, "");
+			CHECK(st.headline.find("80 ") != std::string::npos);
+			CHECK(st.body.find("31.4%") != std::string::npos || st.headline.find("31.4%") != std::string::npos || st.body.find("30.0%") != std::string::npos);
+			CHECK(st.headline.find('{') == std::string::npos && st.body.find('{') == std::string::npos && st.analysis.find('{') == std::string::npos);
+			CHECK(st.analysis.find("31.4%") != std::string::npos && st.analysis.find("50.0%") != std::string::npos && st.analysis.find("30.0%") != std::string::npos);
+		}
+		CHECK(MarketFactText(MarketEventKind::CentralBanksSellGold, 1'234) == "1,234 ออนซ์" && MarketFactText(MarketEventKind::GoldMineFound, 0).empty());
+
+		/* The repeat guard looks only at real news of the same kind. */
+		MarketEvents m;
+		MarketEvent r1 = real; r1.minute = 10 * MARKET_MINUTES_PER_DAY;
+		m.log.push_front(old);
+		m.log.front().minute = 10 * MARKET_MINUTES_PER_DAY;
+		CHECK(!m.RecentlyReportedGold(MarketEventKind::GoldMineFound, 11 * MARKET_MINUTES_PER_DAY, MARKET_GOLD_NEWS_GAP_DAYS));    // an old random event does not count
+		m.log.push_front(r1);
+		CHECK(m.RecentlyReportedGold(MarketEventKind::GoldMineFound, 11 * MARKET_MINUTES_PER_DAY, MARKET_GOLD_NEWS_GAP_DAYS));
+		CHECK(!m.RecentlyReportedGold(MarketEventKind::GoldMineFound, (10 + MARKET_GOLD_NEWS_GAP_DAYS + 1) * MARKET_MINUTES_PER_DAY, MARKET_GOLD_NEWS_GAP_DAYS));
+		CHECK(!m.RecentlyReportedGold(MarketEventKind::CentralBanksSellGold, 11 * MARKET_MINUTES_PER_DAY, MARKET_GOLD_NEWS_GAP_DAYS));
+
+		/* The start stock and the level that the story uses are the numbers of the game (the static_asserts in market_events.cpp check this against the code). */
+		CHECK(MARKET_GOLD_STOCK_START_OZ == 1000 * 32'151 && MARKET_BANK_SELL_LEVEL_BP == 3000);
+	}
+
 	std::printf("%d checks, %d failed\n", g_checks, g_fail);
 	return g_fail == 0 ? 0 : 1;
 }

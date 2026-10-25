@@ -277,6 +277,7 @@ inline std::string MarketGroupedNumber(int64_t n)
 inline std::string MarketFactText(MarketEventKind kind, int64_t fact_ppm)
 {
 	if (fact_ppm == 0) return std::string();
+	if (MarketKindIsRealGoldKind(kind)) return MarketGroupedNumber(fact_ppm) + " ออนซ์"; // Real gold news: ounces (an old random one has 0 and returned above).
 	if (kind == MarketEventKind::TownMilestone) return MarketGroupedNumber(fact_ppm);
 	if (kind == MarketEventKind::TownGrew || kind == MarketEventKind::TownShrank) return MarketPercentText(fact_ppm);
 	if (kind == MarketEventKind::WeatherStorm || kind == MarketEventKind::WeatherMeteor) return MarketGroupedNumber(fact_ppm);
@@ -298,9 +299,59 @@ inline std::string MarketReplaceFact(std::string text, const std::string &fact)
 	return text;
 }
 
+/** Replace every `key` in a text. */
+inline std::string MarketReplaceKey(std::string text, const std::string &key, const std::string &value)
+{
+	for (size_t pos = text.find(key); pos != std::string::npos; pos = text.find(key, pos + value.size())) text.replace(pos, key.size(), value);
+	return text;
+}
+
+/** The numbers of a real gold news as text: {P} ounces, {S} market stock in ounces, {T} the stock against the start stock, {B} backing, {H} share of the gold of the bank that was sold, {L} the level. */
+inline std::string MarketReplaceGoldNumbers(std::string text, const MarketEvent &e)
+{
+	text = MarketReplaceKey(text, "{P}", MarketGroupedNumber(e.fact_ppm));
+	text = MarketReplaceKey(text, "{S}", MarketGroupedNumber(e.fact2));
+	text = MarketReplaceKey(text, "{T}", MarketPercentText(e.fact2 * 1'000'000 / MARKET_GOLD_STOCK_START_OZ));
+	text = MarketReplaceKey(text, "{B}", MarketPercentText(MarketBankFactBacking(e.fact2) * 100));
+	text = MarketReplaceKey(text, "{H}", MarketPercentText(MarketBankFactShare(e.fact2) * 1'000));
+	text = MarketReplaceKey(text, "{L}", MarketPercentText(MARKET_BANK_SELL_LEVEL_BP * 100));
+	return text;
+}
+
+/**
+ * The story of a REAL gold news (see MARKET_GOLD_REAL_NEWS): the central bank sold gold because the reserve is above its level, or the mines put gold into the
+ * market stock. Every number in the text is a real figure of the gold market, taken when the news was made.
+ */
+inline void MarketRealGoldStory(const MarketEvent &e, std::string &headline, std::string &body)
+{
+	static const char *const mine_heads[2] = {
+		"พบแหล่งทองใหม่ ทองจากเหมืองเข้าตลาด {P} ออนซ์ ราคาทองอ่อนตัว",
+		"เหมืองทองส่งทองเพิ่ม {P} ออนซ์ สต็อกตลาดเพิ่ม ราคาทองร่วง" };
+	static const char *const mine_bodies[2] = {
+		"ทองที่เหมืองส่งถึงสถานีรวม {P} ออนซ์ ทำให้สต็อกทองในตลาดเพิ่มเป็น {S} ออนซ์ ({T} ของสต็อกเริ่มต้น) อุปทานที่มากขึ้นกดดันราคาทองลง",
+		"รายงานการส่งทองจากเหมืองชี้ว่าตลาดได้ทองเพิ่ม {P} ออนซ์ สต็อกคงเหลือ {S} ออนซ์ ({T} ของสต็อกเริ่มต้น) นักลงทุนจึงเทขายทองตามแรงอุปทาน" };
+	static const char *const bank_heads[2] = {
+		"สำรองทองเกินเพดาน {L} ธนาคารกลางขายทอง {P} ออนซ์",
+		"ธนาคารกลางเทขายทองสำรอง {P} ออนซ์ ราคาทองดิ่ง" };
+	static const char *const bank_bodies[2] = {
+		"ทองสำรองของทั้งระบบคิดเป็น {B} ของเงินสดในระบบ สูงกว่าเพดาน {L} ธนาคารกลางจึงขายทองในคลังของตัวเอง {P} ออนซ์ ({H} ของทองที่ถืออยู่) ทองที่ออกสู่ตลาดทำให้อุปทานเพิ่มและราคาถูกกดลง",
+		"เมื่อทองสำรองเกินเพดาน {L} (ตอนนี้ {B} ของเงินสดในระบบ) ธนาคารกลางต้องลดทองในคลัง จึงขาย {P} ออนซ์ ({H} ของทองที่ถือ) นักลงทุนกังวลอุปทานล้น ราคาทองจึงดิ่ง" };
+	const bool mine = e.kind == MarketEventKind::GoldMineFound;
+	headline = MarketReplaceGoldNumbers((mine ? mine_heads : bank_heads)[e.variant & 1], e);
+	body = MarketReplaceGoldNumbers((mine ? mine_bodies : bank_bodies)[(e.variant >> 1) & 1], e);
+}
+
 /** The real figure as one line of the analyst text of a company, town or weather story. */
 inline std::string MarketFactLine(const MarketEvent &e)
 {
+	if (MarketIsRealGoldNews(e)) {
+		if (e.kind == MarketEventKind::GoldMineFound) {
+			return "ข้อมูลจริงจากตลาดทอง: เหมืองส่งทอง " + MarketGroupedNumber(e.fact_ppm) + " ออนซ์ สต็อกตลาด " + MarketGroupedNumber(e.fact2) + " ออนซ์ ("
+					+ MarketPercentText(e.fact2 * 1'000'000 / MARKET_GOLD_STOCK_START_OZ) + " ของสต็อกเริ่มต้น)";
+		}
+		return "ข้อมูลจริงจากตลาดทอง: ธนาคารกลางขาย " + MarketGroupedNumber(e.fact_ppm) + " ออนซ์ (" + MarketPercentText(MarketBankFactShare(e.fact2) * 1'000)
+				+ " ของทองที่ถือ) ทองสำรองรวม " + MarketPercentText(MarketBankFactBacking(e.fact2) * 100) + " ของเงินสด เพดาน " + MarketPercentText(MARKET_BANK_SELL_LEVEL_BP * 100);
+	}
 	if (MarketKindIsTown(e.kind) || MarketKindIsWeather(e.kind)) {
 		const std::string tp = MarketFactText(e.kind, e.fact_ppm);
 		switch (e.kind) {
@@ -356,7 +407,9 @@ inline MarketStory ComposeMarketStory(const MarketEvent &e, const std::string &c
 	const MarketStoryTexts &t = MarketStoryTextsOf(e.kind);
 	MarketStory s;
 	const std::string fact = MarketFactText(e.kind, e.fact_ppm);
-	if (e.kind == MarketEventKind::CompanyProfitUp && e.fact_ppm == 0) {
+	if (MarketIsRealGoldNews(e)) {
+		MarketRealGoldStory(e, s.headline, s.body);
+	} else if (e.kind == MarketEventKind::CompanyProfitUp && e.fact_ppm == 0) {
 		static const char *const heads[2] = { "{C} พลิกกลับมามีกำไรแล้ว", "{C} พ้นจากภาวะขาดทุน" };
 		static const char *const bodies[2] = {
 			"งบไตรมาสล่าสุดของ {C} เป็นกำไรสุทธิ หลังจากไตรมาสก่อนหน้าที่ขาดทุนหรือยังไม่มีกำไร นักลงทุนมองเป็นสัญญาณบวก",
@@ -371,6 +424,10 @@ inline MarketStory ComposeMarketStory(const MarketEvent &e, const std::string &c
 	s.impact = MarketImpactText(e.severity);
 
 	std::string a = MarketFactLine(e);
+	if (MarketIsRealGoldNews(e) && MARKET_GOLD_REAL_SHOCK && e.gold_ppm < 0) {
+		if (!a.empty()) a += "  ";
+		a += "ราคาทองสะดุดลงทันที " + MarketPpmText(e.gold_ppm) + " แล้วค่อยๆ ฟื้นเมื่อแรงกดดันจางลง";
+	}
 	if (e.gold_ppm != 0) {
 		if (!a.empty()) a += "  ";
 		a += std::string("ทองคำ: แรงกดดันราคา ") + MarketPpmText(e.gold_ppm) + (e.gold_ppm > 0 ? " (มีแนวโน้มปรับขึ้น)" : " (มีแนวโน้มปรับลง)");

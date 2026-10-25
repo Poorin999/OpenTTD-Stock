@@ -78,6 +78,8 @@ struct GoldReserveManager {
 	int64_t pressure_ppm = 0;     ///< Demand effect of the buying and selling of the companies; fades by 3% a day.
 	std::array<int64_t, MAX_COMPANIES> holdings_oz{}; ///< Ounces of every company.
 	std::vector<int64_t> history_cents; ///< The price at the end of every game day (1/100 money units), oldest first, at most HISTORY_MAX_DAYS. Saved (SRK_GOLD_HISTORY). Drawn by the gold chart.
+	int64_t mine_news_oz = 0;     ///< Ounces that mines put into the market stock since the last news about it (GoldFromDelivery adds, market_events.cpp reads it once a day, the news clears it, it fades 5% a day without news). Saved (SRK_GOLD_NEWS).
+	int64_t day_shift_cents = 0;  ///< News shock of today: moves the START of today's glide (not the chart) so the live price jumps at once (ApplyShock). Cleared at midnight by UpdateDaily. Saved (SRK_GOLD_NEWS).
 	std::array<int64_t, MAX_COMPANIES> holdings_cost{}; ///< What the gold of every company cost (money units, without commission): the base of the realised profit. 0 = unknown (old savegame).
 
 	void Reset();
@@ -86,6 +88,8 @@ struct GoldReserveManager {
 	int64_t ComputeTargetCents() const;
 	GoldFactors GetFactors() const;
 	int64_t GetDayStartCents() const;
+	int64_t GetGlideStartCents() const;
+	void ApplyShock(int64_t ppm);
 	static int64_t GlideCents(int64_t day_start, int64_t target, int64_t minute_of_day, int64_t noise_ppm = 0);
 	static int64_t NoisePpmForDay(int64_t day);
 	static int64_t CyclePpmForDay(int64_t day);

@@ -211,10 +211,12 @@ void CentralBank::TradeGold(int64_t day)
 		} else {
 			this->trading_revenue_cents += ounces * price_cents;
 		}
+		const int64_t reserve_before = _gold_reserve.bank_reserve_oz; // For the news: how much of its own gold the bank sold.
 		_gold_reserve.bank_reserve_oz -= ounces;
 		_gold_reserve.market_stock_oz += ounces;
 		_gold_reserve.pressure_ppm = std::max<int64_t>(-GoldReserveManager::PRESSURE_MAX_PPM,
 				_gold_reserve.pressure_ppm - ounces * GoldReserveManager::PPM / GoldReserveManager::DEPTH_OUNCES);
+		PublishBankGoldSaleNews(ounces, reserve_before, backing); // Real news with the real numbers (the reserve is above its level); the price jumps down at once.
 		ounces = -ounces;
 	} else {
 		return;
