@@ -166,6 +166,12 @@ static constexpr int64_t POLICY_SPIKE_INFLATION_BP = 2000;   ///< Inflation sinc
 static constexpr int64_t POLICY_UNSCHEDULED_CUT_BP = 50;     ///< The unscheduled cut: 0.50% (the Fed cut 50 bp on 3 March 2020).
 static constexpr int64_t POLICY_UNSCHEDULED_HIKE_BP = 75;    ///< The unscheduled hike: 0.75%.
 static constexpr bool BANK_IORB_ENABLED = true;              ///< The bank pays interest on the unborrowed cash of the companies (IORB). Set to false for no interest on cash.
+static constexpr bool BANK_IORB_CREATES_MONEY = true;        ///< true: IORB is NEW money (like the reserves of a central bank): the cash in circulation grows, so it feeds the price index and the inflation. false: it is paid from the own money of the bank (above BANK_IORB_BUDGET_FLOOR).
+static constexpr int64_t BANK_IORB_CREATE_MAX_PERCENT = 1;   ///< The IORB that is created in one day is at most this percent of the cash in circulation (a safety limit; the normal amount is about 0.01%).
+static constexpr int64_t POLICY_NEWS_EXPIRE_DAYS = 14;       ///< A crisis in the news that has not led to a meeting within 14 game days is forgotten.
+static constexpr int64_t POLICY_NEWS_CUT_BP = 50;            ///< Unscheduled cut after a crisis in the news: 0.50%.
+static constexpr int64_t POLICY_NEWS_HIKE_BP = 50;           ///< Unscheduled hike after an inflation shock in the news: 0.50%.
+static constexpr int64_t POLICY_NEWS_MIN_INFLATION_BP = 400; ///< The bank only hikes after an inflation shock when the inflation it measured is above 4.00%.
 static constexpr int64_t BANK_IORB_BUDGET_FLOOR = 12'500;    ///< The bank pays IORB only from its own money above this (money units, half of BANK_START_CAPITAL), so it can still write off bad loans.
 static constexpr int64_t POLICY_JOBS_WEIGHT_PERCENT = 50;    ///< Employment (second mandate): the growth term counts the jobs growth with this share, company values with the rest.
 static constexpr int64_t POLICY_MONEY_WEIGHT_PERCENT = 30;   ///< How much of the change of the cash in circulation goes into the price index.
@@ -288,6 +294,16 @@ inline int64_t PolicySharePushPpm(int64_t step_bp, int64_t surprise_bp)
 	return std::clamp<int64_t>(-(step_bp + surprise_bp) * POLICY_SHARE_PPM_PER_BP, -POLICY_SHARE_PUSH_MAX_PPM, POLICY_SHARE_PUSH_MAX_PPM);
 }
 
+/** What the news asked of the bank (set by market_events.cpp when a big world event happens, used by MonetaryPolicy::CheckUnscheduled). */
+enum class PolicyNewsTrigger : uint8_t {
+	None = 0,
+	Crisis,         ///< A bank scare or a recession: the bank wants to cut.
+	InflationShock, ///< A big inflation scare: the bank wants to hike.
+};
+
+/** Why the last unscheduled meeting was held. */
+enum class PolicyUnscheduledReason : uint8_t { None = 0, JobsCrash, InflationSpike, CrisisNews, InflationNews };
+
 /** One decision of the bank, for the decision log of the policy window. */
 struct PolicyDecision {
 	int64_t day = 0;           ///< Game day of the decision.
@@ -318,6 +334,10 @@ struct MonetaryPolicy {
 	bool has_jobs = false;           ///< True when the last meeting had a jobs figure. Not saved.
 	int64_t last_surprise_bp = 0;    ///< The last move minus the move that the bias of the meeting before had led to. Not saved.
 	bool last_unscheduled = false;   ///< True when the last decision was an unscheduled meeting. Not saved.
+	PolicyUnscheduledReason last_reason = PolicyUnscheduledReason::None; ///< Why it was held. Not saved.
+	PolicyNewsTrigger news_trigger = PolicyNewsTrigger::None; ///< A crisis from the news that waits for the bank to act on it. Not saved.
+	int64_t news_trigger_day = 0;    ///< Game day of that news. Not saved.
+	void RequestNewsMeeting(PolicyNewsTrigger kind, int64_t day) { this->news_trigger = kind; this->news_trigger_day = day; }
 	int64_t last_gold_push_ppm = 0;  ///< What the last decision pushed the gold demand by. Not saved.
 	int64_t last_share_push_ppm = 0; ///< What the last decision pushed the sentiment of the shares by. Not saved.
 	int64_t wanted_gap_bp = 0;       ///< Where the rule wants the policy rate minus where it is (the bias: above 0 hawkish, below 0 dovish). Not saved.
@@ -400,9 +420,10 @@ struct BankDayResult {
  * @param equity Company value plus wallets minus the debt.
  * @param day Number of the game day, to charge once per day.
  * @param policy_shift_bp Shift of the risk curve by the monetary policy (0 = the plain curve).
+ * @param news_spread_bp Extra rate from the news about the company (0 .. 150 bp, see MarketEvents::CreditSpreadBp); only the risk rate, not the penalty rate.
  * @return What to book; all 0 when the day was already charged.
  */
-inline BankDayResult BankSettleDay(BankAccount &a, int64_t cash, int64_t equity, int64_t day, int64_t policy_shift_bp = 0)
+inline BankDayResult BankSettleDay(BankAccount &a, int64_t cash, int64_t equity, int64_t day, int64_t policy_shift_bp = 0, int64_t news_spread_bp = 0)
 {
 	BankDayResult out;
 	if (day <= a.last_charged_day) return out; // Once per day, whatever the callers do.
@@ -414,7 +435,7 @@ inline BankDayResult BankSettleDay(BankAccount &a, int64_t cash, int64_t equity,
 		a.carry = 0;
 		a.in_default = false;
 	} else {
-		const int64_t risk_bp = BankShiftedRateBp(BankAnnualRateBp(BankDebtToEquityPpm(a.debt, equity)), policy_shift_bp);
+		const int64_t risk_bp = BankShiftedRateBp(BankAnnualRateBp(BankDebtToEquityPpm(a.debt, equity)) + std::max<int64_t>(0, news_spread_bp), policy_shift_bp);
 		out.rate_bp = a.in_default ? BankPenaltyRateBp(std::max<int>(1, a.penalty_level), policy_shift_bp) : risk_bp;
 		BankInterestResult r = BankDailyInterest(a.debt, out.rate_bp, a.carry);
 
@@ -509,6 +530,7 @@ struct CentralBank {
 	void AnnounceMeeting(int64_t shift_before);
 	void ApplyMarketEffect();
 	void PayIorb();
+	int64_t iorb_created = 0;          ///< IORB that was paid since the game was loaded (money units); only for the display. Not saved.
 	/** Auction value of the stations and infrastructure of a company in bankruptcy (money units, at the auction price). Not saved. */
 	std::array<int64_t, MAX_COMPANIES> auction_infra{};
 

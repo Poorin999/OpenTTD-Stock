@@ -117,7 +117,7 @@ static bool ConStockSkip(std::span<std::string_view> argv)
 static bool ConCargoPrices(std::span<std::string_view> argv)
 {
 	if (argv.empty()) {
-		IConsolePrint(CC_HELP, "Show the cargo prices of the mod. Usage: 'cargo_prices'. Per cargo: price now (100% = the normal pay of OpenTTD), normal and recent deliveries per day, game days counted.");
+		IConsolePrint(CC_HELP, "Show the cargo prices of the mod. Usage: 'cargo_prices'. Per cargo: price now (100% = the normal pay of OpenTTD), normal and recent deliveries per day, game days counted. Then the push of the news on each group of cargo.");
 		return true;
 	}
 	for (const CargoSpec *cs : CargoSpec::Iterate()) {
@@ -126,6 +126,12 @@ static bool ConCargoPrices(std::span<std::string_view> argv)
 		const cargomarket::CargoState &c = _cargo_market.cargo[i];
 		IConsolePrint(CC_DEFAULT, "{}: price {}.{:02}%  normal {}.{:02}/day  recent {}.{:02}/day  days {}", GetString(cs->name),
 				c.price_ppm / 10000, c.price_ppm % 10000 / 100, c.ref_x100 / 100, c.ref_x100 % 100, c.fast_x100 / 100, c.fast_x100 % 100, c.days);
+	}
+	/* The push of the news on the price goal of each group of cargo (coal shortage, bad harvest ...), now. */
+	const int64_t minute = static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes());
+	for (size_t g = static_cast<size_t>(MarketCargoGroup::Oil); g < static_cast<size_t>(MarketCargoGroup::Count); g++) {
+		const int64_t push = _market_events.CargoPushPpm(static_cast<MarketCargoGroup>(g), minute);
+		IConsolePrint(CC_DEFAULT, "news push on {}: {}{}.{:02}%", MarketCargoGroupName(static_cast<MarketCargoGroup>(g)), push < 0 ? "-" : "+", (push < 0 ? -push : push) / 10000, (push < 0 ? -push : push) % 10000 / 100);
 	}
 	return true;
 }
@@ -157,7 +163,7 @@ static bool ConGoldFactors(std::span<std::string_view> argv)
 static bool ConStockEvent(std::span<std::string_view> argv)
 {
 	if (argv.empty()) {
-		IConsolePrint(CC_HELP, "Make a market news event now (test tool, single player, after 'stock_dev on'). Usage: 'stock_event' (a random kind) or 'stock_event <0-28>' (a kind: 0 boom, 1 recession, 2 inflation, 3 rate cut hope, 4 war, 5 peace, 6 bank scare, 7 gold mine found, 8 mine strike, 9 central banks buy gold, 10 jewellery demand, 11 fuel up, 12 fuel down, 13 technology, 14 tourism, 15 storm, 16 company revenue up, 17 company profit down, 18 company distress, 19 company profit up, 20 company revenue down, 21 company loss, 22 company value up, 23 company value down, 24 company bankruptcy, 25 rate hike, 26 central banks sell gold, 27 jewellery demand drop, 28 profit taking). Company kinds (16-24) are made only when TRUE for a company now, otherwise a kind is drawn by weight.");
+		IConsolePrint(CC_HELP, "Make a market news event now (test tool, single player, after 'stock_dev on'). Usage: 'stock_event' (a random kind) or 'stock_event <0-37>' (a kind: 0 boom, 1 recession, 2 inflation, 3 rate cut hope, 4 war, 5 peace, 6 bank scare, 7 gold mine found, 8 mine strike, 9 central banks buy gold, 10 jewellery demand, 11 fuel up, 12 fuel down, 13 technology, 14 tourism, 15 storm, 16 company revenue up, 17 company profit down, 18 company distress, 19 company profit up, 20 company revenue down, 21 company loss, 22 company value up, 23 company value down, 24 company bankruptcy, 25 rate hike, 26 central banks sell gold, 27 jewellery demand drop, 28 profit taking, 29 coal shortage, 30 coal glut, 31 harvest failure, 32 bumper harvest, 33 construction boom, 34 construction slump, 35 diamond mine found, 36 diamond demand surge, 37 town boom). Company kinds (16-24) are made only when TRUE for a company now, otherwise a kind is drawn by weight.");
 		return true;
 	}
 	if (argv.size() > 2) return false;
@@ -176,7 +182,7 @@ static bool ConStockEvent(std::span<std::string_view> argv)
 		const std::string_view text = argv[1];
 		const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
 		if (error != std::errc() || end != text.data() + text.size() || value >= MARKET_EVENT_KIND_COUNT) {
-			IConsolePrint(CC_ERROR, "The kind must be a whole number from 0 to 28.");
+			IConsolePrint(CC_ERROR, "The kind must be a whole number from 0 to 37.");
 			return true;
 		}
 		kind = static_cast<int>(value);

@@ -21,11 +21,15 @@ int main()
 	for (size_t k = 0; k < MARKET_EVENT_KIND_COUNT; k++) {
 		const MarketEventDef &d = MarketEventInfo(static_cast<MarketEventKind>(k));
 		CHECK(d.weight > 0);
-		CHECK(d.gold_dir != 0 || d.share_dir != 0);
+		{
+			const MarketEventKind kk = static_cast<MarketEventKind>(k);
+			const bool other = MarketCargoEffectOf(kk, 1).push_ppm != 0 || MarketDiamondStockPpm(kk, 1) != 0 || MarketTownBoostPpm(kk, 1) != 0;
+			CHECK(d.gold_dir != 0 || d.share_dir != 0 || other);
+		}
 		CHECK(d.gold_min <= d.gold_max && d.share_min <= d.share_max);
 		const MarketStoryTexts &t = MarketStoryTextsOf(static_cast<MarketEventKind>(k));
 		CHECK(t.headline[0] && t.headline[1] && t.body[0] && t.body[1]);
-		CHECK((std::string(t.headline[0]).find("{C}") != std::string::npos) == d.company);
+		CHECK((std::string(t.headline[0]).find("{C}") != std::string::npos) == (d.company || static_cast<MarketEventKind>(k) == MarketEventKind::TownBoom)); // A town boom names the town.
 		CHECK(d.company == MarketKindIsCompany(static_cast<MarketEventKind>(k)));
 	}
 
@@ -47,7 +51,7 @@ int main()
 	MarketEvents m; m.Seed(777);
 	std::set<int> seen; int sev[4] = {0,0,0,0}; int64_t max_gold = 0, max_share = 0; int world_only_company = 0;
 	for (int i = 0; i < 20000; i++) {
-		MarketEvent e = m.Generate(i * 60, comps);
+		MarketEvent e = m.Generate(i * 60, comps, -1, 4);
 		const MarketEventDef &d = MarketEventInfo(e.kind);
 		seen.insert(static_cast<int>(e.kind)); sev[e.severity]++;
 		max_gold = std::max<int64_t>(max_gold, std::abs(e.gold_ppm)); max_share = std::max<int64_t>(max_share, std::abs(e.share_ppm));
@@ -99,9 +103,9 @@ int main()
 	/* Forced kind (the console command stock_event). */
 	MarketEvents fk; fk.Seed(8);
 	for (size_t k = 0; k < MARKET_EVENT_KIND_COUNT; k++) {
-		MarketEvent x = fk.Generate(0, comps, static_cast<int>(k));
+		MarketEvent x = fk.Generate(0, comps, static_cast<int>(k), 3);
 		CHECK(static_cast<size_t>(x.kind) == k);
-		MarketEvent y = fk.Generate(0, {}, static_cast<int>(k)); // Without companies a company kind is not allowed.
+		MarketEvent y = fk.Generate(0, {}, static_cast<int>(k), 3); // Without companies a company kind is not allowed.
 		CHECK(MarketEventInfo(y.kind).company == false);
 		if (!MarketEventInfo(static_cast<MarketEventKind>(k)).company) CHECK(static_cast<size_t>(y.kind) == k);
 	}
@@ -205,6 +209,103 @@ int main()
 		std::printf("gold events: up %d down %d\n", ups, downs);
 		CHECK(std::abs(sum) * 100 < sum_abs * 8);
 		CHECK(ups * 10 < downs * 14 && downs * 10 < ups * 14);
+	}
+
+
+	/* ===== News that moves cargo prices, diamonds, a town and the loan rates ===== */
+	{
+		/* Kinds, groups and signs. */
+		CHECK(MarketCargoEffectOf(MarketEventKind::CoalShortage, 1).group == MarketCargoGroup::Coal && MarketCargoEffectOf(MarketEventKind::CoalShortage, 1).push_ppm == 80'000);
+		CHECK(MarketCargoEffectOf(MarketEventKind::CoalGlut, 1).push_ppm == -80'000);
+		CHECK(MarketCargoEffectOf(MarketEventKind::CoalShortage, 3).push_ppm == 200'000 && MarketCargoEffectOf(MarketEventKind::CoalShortage, 2).push_ppm == 136'000);
+		CHECK(MarketCargoEffectOf(MarketEventKind::FuelSpike, 1).group == MarketCargoGroup::Oil && MarketCargoEffectOf(MarketEventKind::FuelSpike, 1).push_ppm > 0);
+		CHECK(MarketCargoEffectOf(MarketEventKind::FuelDrop, 1).push_ppm < 0);
+		CHECK(MarketCargoEffectOf(MarketEventKind::TourismBoom, 1).group == MarketCargoGroup::People);
+		CHECK(MarketCargoEffectOf(MarketEventKind::HarvestFailure, 1).push_ppm > 0 && MarketCargoEffectOf(MarketEventKind::BumperHarvest, 1).push_ppm < 0);
+		CHECK(MarketCargoEffectOf(MarketEventKind::ConstructionBoom, 1).group == MarketCargoGroup::Build && MarketCargoEffectOf(MarketEventKind::ConstructionSlump, 1).push_ppm < 0);
+		CHECK(MarketCargoEffectOf(MarketEventKind::WarTension, 3).group == MarketCargoGroup::None && MarketCargoEffectOf(MarketEventKind::WarTension, 3).push_ppm == 0);
+		CHECK(MarketDiamondStockPpm(MarketEventKind::DiamondMineFound, 1) == 40'000 && MarketDiamondStockPpm(MarketEventKind::DiamondDemandSurge, 3) == -100'000);
+		CHECK(MarketDiamondStockPpm(MarketEventKind::GoldMineFound, 3) == 0);
+		CHECK(MarketTownBoostPpm(MarketEventKind::TownBoom, 1) == 100'000 && MarketTownBoostPpm(MarketEventKind::TownBoom, 3) == 250'000 && MarketTownBoostPpm(MarketEventKind::BankScare, 3) == 0);
+
+		/* Fade: full at once, nothing at the end of the window, a straight line between. */
+		CHECK(MarketFadePpm(0, 1000) == 1'000'000 && MarketFadePpm(500, 1000) == 500'000 && MarketFadePpm(1000, 1000) == 0 && MarketFadePpm(-5, 1000) == 0 && MarketFadePpm(5, 0) == 0);
+
+		/* Cargo push from the log: adds, fades, stays in the limit, ignores other groups. */
+		const int64_t day = MARKET_MINUTES_PER_DAY;
+		MarketEvents n;
+		MarketEvent c1; c1.id = 1; c1.kind = MarketEventKind::CoalShortage; c1.severity = 1; c1.minute = 100 * day;
+		n.Apply(c1);
+		CHECK(n.CargoPushPpm(MarketCargoGroup::Coal, 100 * day) == 80'000);
+		CHECK(n.CargoPushPpm(MarketCargoGroup::Coal, 106 * day) == 40'000);
+		CHECK(n.CargoPushPpm(MarketCargoGroup::Coal, 112 * day) == 0);
+		CHECK(n.CargoPushPpm(MarketCargoGroup::Coal, 99 * day) == 0);        // Before the event: nothing.
+		CHECK(n.CargoPushPpm(MarketCargoGroup::Farm, 100 * day) == 0 && n.CargoPushPpm(MarketCargoGroup::None, 100 * day) == 0);
+		for (int i = 0; i < 10; i++) { MarketEvent c; c.id = 2 + i; c.kind = MarketEventKind::CoalShortage; c.severity = 3; c.minute = 100 * day + i; n.Apply(c); }
+		CHECK(n.CargoPushPpm(MarketCargoGroup::Coal, 100 * day + 10) == MARKET_CARGO_PUSH_MAX_PPM);
+		MarketEvent c2; c2.id = 50; c2.kind = MarketEventKind::CoalGlut; c2.severity = 3; c2.minute = 100 * day + 20;
+		MarketEvents n2; n2.Apply(c2);
+		CHECK(n2.CargoPushPpm(MarketCargoGroup::Coal, 100 * day + 20) == -200'000);
+
+		/* Town boom: only the town of the event, fades, limit. */
+		MarketEvents t;
+		MarketEvent tb; tb.id = 1; tb.kind = MarketEventKind::TownBoom; tb.severity = 2; tb.fact_ppm = 7; tb.minute = 50 * day;
+		t.Apply(tb);
+		CHECK(t.TownBoostPpm(7, 50 * day) == 170'000 && t.TownBoostPpm(8, 50 * day) == 0);
+		CHECK(t.TownBoostPpm(7, 55 * day) == 85'000 && t.TownBoostPpm(7, 60 * day) == 0);
+		for (int i = 0; i < 6; i++) { MarketEvent x = tb; x.id = 2 + i; x.severity = 3; x.minute = 50 * day + i; t.Apply(x); }
+		CHECK(t.TownBoostPpm(7, 50 * day + 6) == MARKET_TOWN_BOOST_MAX_PPM);
+
+		/* Credit: bad news about one company, a bank scare for all, good news takes back, never below 0 or above the limit. */
+		MarketEvents cr;
+		MarketEvent d1; d1.id = 1; d1.kind = MarketEventKind::CompanyDistress; d1.target = 3; d1.severity = 1; d1.minute = 10 * day;
+		cr.Apply(d1);
+		CHECK(cr.CreditSpreadBp(3, 10 * day) == 25 && cr.CreditSpreadBp(4, 10 * day) == 0);
+		CHECK(cr.CreditSpreadBp(3, 25 * day) == 12 && cr.CreditSpreadBp(3, 40 * day) == 0);
+		MarketEvent g1; g1.id = 2; g1.kind = MarketEventKind::CompanyProfitUp; g1.target = 3; g1.severity = 3; g1.minute = 10 * day;
+		cr.Apply(g1);
+		CHECK(cr.CreditSpreadBp(3, 10 * day) == 0); // 25 - 37 is below 0: limited to 0.
+		MarketEvents cw;
+		MarketEvent bs; bs.id = 1; bs.kind = MarketEventKind::BankScare; bs.severity = 2; bs.minute = 20 * day;
+		cw.Apply(bs);
+		CHECK(cw.CreditSpreadBp(0, 20 * day) == 68 && cw.CreditSpreadBp(5, 20 * day) == 68);
+		for (int i = 0; i < 5; i++) { MarketEvent x = bs; x.id = 2 + i; x.severity = 3; x.minute = 20 * day + i; cw.Apply(x); }
+		CHECK(cw.CreditSpreadBp(1, 20 * day + 5) == MARKET_CREDIT_MAX_BP);
+		MarketEvent tour; tour.kind = MarketEventKind::TourismBoom; tour.id = 99; tour.minute = 20 * day + 6; // No credit effect.
+		bool world = true;
+		CHECK(MarketCreditBp(MarketEventKind::TourismBoom, 1, world) == 0 && !world);
+		CHECK(MarketCreditBp(MarketEventKind::BankScare, 1, world) == 40 && world);
+		CHECK(MarketCreditBp(MarketEventKind::CompanyLoss, 1, world) == 25 && !world);
+
+		/* Generate: a town boom only with towns; its fact is an ordinal in range; every new kind can be forced. */
+		MarketEvents gt; gt.Seed(77);
+		int booms = 0;
+		for (int i = 0; i < 3000; i++) {
+			MarketEvent x = gt.Generate(i * 60, {}, -1, 0);
+			CHECK(x.kind != MarketEventKind::TownBoom);
+			MarketEvent y = gt.Generate(i * 60, {}, -1, 5);
+			if (y.kind == MarketEventKind::TownBoom) { booms++; CHECK(y.fact_ppm >= 0 && y.fact_ppm < 5 && y.target == MARKET_NO_TARGET && y.gold_ppm == 0 && y.share_ppm == 0); }
+		}
+		CHECK(booms > 0);
+		for (size_t k = static_cast<size_t>(MarketEventKind::CoalShortage); k < MARKET_EVENT_KIND_COUNT; k++) {
+			MarketEvent f = gt.Generate(0, {}, static_cast<int>(k), 3);
+			CHECK(static_cast<size_t>(f.kind) == k);
+		}
+		/* A kind that was already in the old games keeps its number (savegames). */
+		CHECK(static_cast<int>(MarketEventKind::ProfitTaking) == 28 && static_cast<int>(MarketEventKind::CoalShortage) == 29 && static_cast<int>(MarketEventKind::TownBoom) == 37 && MARKET_EVENT_KIND_COUNT == 38);
+
+		/* The story says what the news does. */
+		MarketEvent sc; sc.kind = MarketEventKind::CoalShortage; sc.severity = 2; sc.variant = 1;
+		MarketStory ss = ComposeMarketStory(sc, "");
+		CHECK(ss.analysis.find("ถ่านหิน") != std::string::npos && ss.analysis.find("+13.60%") != std::string::npos);
+		MarketEvent sd; sd.kind = MarketEventKind::DiamondDemandSurge; sd.severity = 1;
+		CHECK(ComposeMarketStory(sd, "").analysis.find("-4.00%") != std::string::npos);
+		MarketEvent st2; st2.kind = MarketEventKind::TownBoom; st2.severity = 1; st2.fact_ppm = 3;
+		MarketStory sts = ComposeMarketStory(st2, "Springfield");
+		CHECK(sts.headline.find("Springfield") != std::string::npos || sts.body.find("Springfield") != std::string::npos);
+		CHECK(sts.analysis.find("Springfield") != std::string::npos);
+		MarketEvent sb; sb.kind = MarketEventKind::BankScare; sb.severity = 1; sb.gold_ppm = 20'000; sb.share_ppm = -30'000;
+		CHECK(ComposeMarketStory(sb, "").analysis.find("ทุกบริษัท") != std::string::npos);
 	}
 
 	std::printf("%d checks, %d failed\n", g_checks, g_fail);

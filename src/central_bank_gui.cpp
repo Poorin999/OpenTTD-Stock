@@ -818,6 +818,7 @@ static void DrawMonetaryPolicy(const Rect &r)
 	/* Group 3: the rates of the loans now. */
 	row(CbText("Prime rate (ช่วงบน + 3.00%)", "Prime rate (upper + 3.00%)"), pct(PolicyPrimeBp(p.shift_bp)));
 	row(CbText("Discount rate / IORB", "Discount rate / IORB"), fmt::format("{} / {}", pct(PolicyDiscountBp(p.shift_bp)), pct(PolicyIorbBp(p.shift_bp))));
+	row(BANK_IORB_CREATES_MONEY ? CbText("IORB ที่จ่ายแล้ว (เงินใหม่)", "IORB paid so far (new money)") : CbText("IORB ที่จ่ายแล้ว (จากงบธนาคาร)", "IORB paid so far (bank budget)"), GetString(STR_JUST_CURRENCY_LONG, _central_bank.iorb_created), TC_GREEN);
 	row(CbText("ดอกเบี้ยเงินกู้ เครดิตดี", "Loan rate, good credit"), fmt::format("{} - {}", pct(BankShiftedRateBp(BANK_RATE_GOOD_MIN_BP, p.shift_bp)), pct(BankShiftedRateBp(BANK_RATE_GOOD_MAX_BP, p.shift_bp))));
 	row(CbText("ดอกเบี้ยเงินกู้ เครดิตต่ำ", "Loan rate, poor credit"), fmt::format("{} - {}", pct(BankShiftedRateBp(BANK_RATE_POOR_MIN_BP, p.shift_bp)), pct(BankShiftedRateBp(BANK_RATE_POOR_MAX_BP, p.shift_bp))));
 	row(CbText("ดอกเบี้ยผิดนัด", "Penalty rate"), fmt::format("{} - {}", pct(BankPenaltyRateBp(1, p.shift_bp)), pct(BankPenaltyRateBp(BANK_PENALTY_LEVEL_MAX, p.shift_bp))), TC_RED);
@@ -883,6 +884,7 @@ static void DrawMonetaryPolicy(const Rect &r)
 	row(CbText("ประชุม FOMC", "FOMC meetings"), fmt::format("{} {} ({} ~{} {})", POLICY_MEETINGS_PER_YEAR, CbText("ครั้งต่อปีเกม", "per game year"), CbText("ทุก", "every"), POLICY_DECISION_DAYS, CbText("วัน", "days")), TC_GREY);
 	row(CbText("ปรับได้ครั้งละ (ปกติ / ฉุกเฉิน)", "Move per meeting (normal / emergency)"), fmt::format("{} / {}", pct(POLICY_MAX_STEP_BP), pct(POLICY_EMERGENCY_STEP_BP)), TC_GREY);
 	row(CbText("ช่วงอัตรานโยบาย (ขอบบน)", "Policy rate range (upper bound)"), fmt::format("{} .. {}", pct(PolicyUpperBp(POLICY_SHIFT_MIN_BP)), pct(PolicyUpperBp(p.Extended() ? POLICY_EMERGENCY_SHIFT_MAX_BP : POLICY_SHIFT_MAX_BP))), TC_GREY);
+	row(CbText("ประชุมนอกรอบ จากข่าว", "Unscheduled meeting from the news"), CbText("ธนาคารล่ม/ถดถอยรุนแรง = ลด, เงินเฟ้อช็อก = ขึ้น", "bank scare / big recession = cut, big inflation scare = hike"), TC_GREY);
 	row(CbText("ประชุมนอกรอบ ลด เมื่อจ้างงาน (ต่อปี)", "Unscheduled cut when jobs (yearly)"), fmt::format("<= {}", pct(POLICY_CRASH_JOBS_BP)), TC_GREY);
 	row(CbText("ประชุมนอกรอบ ขึ้น เมื่อเงินเฟ้อ (ต่อปี)", "Unscheduled hike when inflation (yearly)"), fmt::format(">= {}", pct(POLICY_SPIKE_INFLATION_BP)), TC_GREY);
 	row(CbText("โหมดฉุกเฉิน เริ่ม / สิ้นสุด เมื่อเงินเฟ้อ", "Emergency mode on / off at inflation"), fmt::format("> {} / < {}", pct(POLICY_EMERGENCY_ON_BP), pct(POLICY_EMERGENCY_OFF_BP)), TC_GREY);
@@ -890,7 +892,7 @@ static void DrawMonetaryPolicy(const Rect &r)
 
 /** The monetary policy window: its own window, so it can stay open next to the bank window. */
 struct CentralBankPolicyWindow : Window {
-	static constexpr int POLICY_ROWS = 38; ///< Rows of the panel: 15 of the policy, 3 of the credit limit, the decision log (a heading and 5 lines), the gold of the bank (3 rows, a heading and 3 lines).
+	static constexpr int POLICY_ROWS = 40; ///< Rows of the panel: 15 of the policy, 3 of the credit limit, the decision log (a heading and 5 lines), the gold of the bank (3 rows, a heading and 3 lines).
 	static constexpr int POLICY_SEPARATORS = 7;
 
 	/** Redraw regularly: the numbers change all the time. */

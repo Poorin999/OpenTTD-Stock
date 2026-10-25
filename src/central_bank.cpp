@@ -54,6 +54,7 @@ void CentralBank::Reset()
 	this->uncovered_loss = 0;
 	this->auction_infra.fill(0);
 	this->gold_log.clear();
+	this->iorb_created = 0;
 }
 
 /**
@@ -305,6 +306,7 @@ bool MonetaryPolicy::Update(int64_t day, int64_t index_ppm, int64_t value_now, i
 	this->last_step_bp = step;
 	this->last_surprise_bp = step - PolicyRoundMove(expected_gap, max_step);
 	this->last_unscheduled = false;
+	this->last_reason = PolicyUnscheduledReason::None;
 	PolicyDecision d{day, shift_before, this->shift_bp, this->inflation_bp, this->growth_bp, this->emergency};
 	d.jobs_bp = this->jobs_bp;
 	d.has_jobs = has_jobs;
@@ -318,15 +320,21 @@ bool MonetaryPolicy::Update(int64_t day, int64_t index_ppm, int64_t value_now, i
 
 /**
  * An unscheduled meeting between the scheduled ones, like the emergency cut of the Fed in March 2020. Checked every day; it needs at least
- * POLICY_UNSCHEDULED_MIN_DAYS days since the last meeting (so it can not repeat every day) and one of two events:
- *   - Crash: a payroll report that came after the last meeting shows jobs falling by POLICY_CRASH_JOBS_BP a year or worse: cut by POLICY_UNSCHEDULED_CUT_BP.
+ * POLICY_UNSCHEDULED_MIN_DAYS days since the last meeting (so it can not repeat every day) and one of these events (the first that applies):
  *   - Spike: the price index rose at POLICY_SPIKE_INFLATION_BP a year or more since the last meeting, and inflation was already above
  *     POLICY_EMERGENCY_OFF_BP at that meeting: hike by POLICY_UNSCHEDULED_HIKE_BP.
- * The whole move is a surprise for the markets. The next scheduled meeting is not moved: it is held on the first day of its period as always.
+ *   - Crash: a payroll report that came after the last meeting shows jobs falling by POLICY_CRASH_JOBS_BP a year or worse: cut by POLICY_UNSCHEDULED_CUT_BP.
+ *   - Crisis news (bank scare, recession; set by market_events.cpp): cut by POLICY_NEWS_CUT_BP.
+ *   - Inflation shock news (a big inflation scare), when the measured inflation is above POLICY_NEWS_MIN_INFLATION_BP: hike by POLICY_NEWS_HIKE_BP.
+ * A piece of news that was not acted on within POLICY_NEWS_EXPIRE_DAYS days is forgotten. The whole move is a surprise for the markets.
+ * The next scheduled meeting is not moved: it is held on the first day of its period as always.
  * @return True when an unscheduled meeting was held today.
  */
 bool MonetaryPolicy::CheckUnscheduled(int64_t day, int64_t index_ppm, int64_t jobs_growth_bp, bool has_jobs, int64_t jobs_report_day)
 {
+	if (this->news_trigger != PolicyNewsTrigger::None && (day < this->news_trigger_day || day - this->news_trigger_day > POLICY_NEWS_EXPIRE_DAYS)) {
+		this->news_trigger = PolicyNewsTrigger::None; // Too old (or from a different game): forget it.
+	}
 	if (!this->measured || this->last_decision_day < 0 || this->prev_index_ppm <= 0 || index_ppm <= 0) return false;
 	const int64_t elapsed = day - this->last_decision_day;
 	if (elapsed < POLICY_UNSCHEDULED_MIN_DAYS) return false;
@@ -335,20 +343,35 @@ bool MonetaryPolicy::CheckUnscheduled(int64_t day, int64_t index_ppm, int64_t jo
 	const int64_t upper = this->emergency || this->Extended() ? POLICY_EMERGENCY_SHIFT_MAX_BP : POLICY_SHIFT_MAX_BP;
 
 	int64_t move = 0;
+	PolicyUnscheduledReason reason = PolicyUnscheduledReason::None;
 	if (reading_bp >= POLICY_SPIKE_INFLATION_BP && this->inflation_bp > POLICY_EMERGENCY_OFF_BP && this->shift_bp < upper) {
 		move = POLICY_UNSCHEDULED_HIKE_BP;
+		reason = PolicyUnscheduledReason::InflationSpike;
 	} else if (has_jobs && jobs_report_day > this->last_decision_day && jobs_growth_bp <= POLICY_CRASH_JOBS_BP && this->shift_bp > POLICY_SHIFT_MIN_BP) {
 		move = -POLICY_UNSCHEDULED_CUT_BP;
+		reason = PolicyUnscheduledReason::JobsCrash;
+	} else if (this->news_trigger == PolicyNewsTrigger::Crisis && this->shift_bp > POLICY_SHIFT_MIN_BP) {
+		move = -POLICY_NEWS_CUT_BP;
+		reason = PolicyUnscheduledReason::CrisisNews;
+	} else if (this->news_trigger == PolicyNewsTrigger::InflationShock && this->inflation_bp > POLICY_NEWS_MIN_INFLATION_BP && this->shift_bp < upper) {
+		move = POLICY_NEWS_HIKE_BP;
+		reason = PolicyUnscheduledReason::InflationNews;
 	}
-	if (move == 0) return false;
+	if (move == 0) {
+		/* The news can not be acted on (the rate is at its limit, or the inflation is not high): it is done with. */
+		this->news_trigger = PolicyNewsTrigger::None;
+		return false;
+	}
 
 	const int64_t shift_before = this->shift_bp;
 	this->shift_bp = std::clamp<int64_t>(this->shift_bp + move, POLICY_SHIFT_MIN_BP, upper);
 	const int64_t step = this->shift_bp - shift_before;
 	if (step == 0) return false;
+	this->news_trigger = PolicyNewsTrigger::None;
 	this->last_step_bp = step;
 	this->last_surprise_bp = step; // Nobody expected it.
 	this->last_unscheduled = true;
+	this->last_reason = reason;
 	this->wanted_gap_bp = 0;
 	this->has_jobs = has_jobs;
 	this->jobs_bp = has_jobs ? std::clamp<int64_t>(jobs_growth_bp, -10'000, 100'000) : 0;
@@ -414,7 +437,8 @@ int64_t GetCentralBankAnnualRateBp(CompanyID company)
 	const BankAccount &a = _central_bank.accounts[company.base()];
 	if (a.debt <= 0) return 0;
 	if (a.in_default) return BankPenaltyRateBp(std::max<int>(1, a.penalty_level), _central_bank.policy.shift_bp);
-	return BankShiftedRateBp(BankAnnualRateBp(BankDebtToEquityPpm(a.debt, GetCentralBankEquity(company))), _central_bank.policy.shift_bp);
+	const int64_t news_bp = _market_events.CreditSpreadBp(company.base(), static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes()));
+	return BankShiftedRateBp(BankAnnualRateBp(BankDebtToEquityPpm(a.debt, GetCentralBankEquity(company))) + news_bp, _central_bank.policy.shift_bp);
 }
 
 /** How much more a company may borrow now. */
@@ -864,8 +888,9 @@ void CentralBank::ApplyMarketEffect()
 
 /**
  * Interest on reserve balances (IORB): once per game day the bank pays interest on the UNBORROWED liquid cash of every company in good standing,
- * at PolicyIorbBp (upper bound of the range - 0.10%, so always below what a loan costs). The money comes from the own money of the bank, and only
- * the part above BANK_IORB_BUDGET_FLOOR: when it is not enough every company gets the same share of what is due. The money is not income of the company
+ * at PolicyIorbBp (upper bound of the range - 0.10%, so always below what a loan costs). With BANK_IORB_CREATES_MONEY the money is NEW money: it adds to the
+ * cash in circulation (so it raises the price index) and costs the bank nothing. Otherwise it comes from the own money of the bank, only the part above
+ * BANK_IORB_BUDGET_FLOOR. When the limit is not enough every company gets the same share of what is due. The money is not income of the company
  * for the statistics and the income tax; it is booked as income on the line BankInterest. Integer only, whole money units (the rest of a day is dropped).
  */
 void CentralBank::PayIorb()
@@ -883,7 +908,14 @@ void CentralBank::PayIorb()
 		total += due[c->index.base()];
 	}
 	if (total <= 0) return;
-	const int64_t available = std::max<int64_t>(0, this->trading_revenue_cents / 100 - BANK_IORB_BUDGET_FLOOR);
+	int64_t available;
+	if (BANK_IORB_CREATES_MONEY) {
+		/* New money: only a safety limit against a bug or a huge rate. */
+		const int64_t circulating = _gold_reserve.GetCirculatingCash();
+		available = circulating > 0 ? std::max<int64_t>(1, circulating / 100 * BANK_IORB_CREATE_MAX_PERCENT) : total;
+	} else {
+		available = std::max<int64_t>(0, this->trading_revenue_cents / 100 - BANK_IORB_BUDGET_FLOOR);
+	}
 	const int64_t pay_total = std::min(total, available);
 	if (pay_total <= 0) return;
 
@@ -899,7 +931,20 @@ void CentralBank::PayIorb()
 		RecordLedger(c->index, LedgerItem::BankInterest, share);
 		paid += share;
 	}
-	this->trading_revenue_cents -= paid * 100;
+	if (!BANK_IORB_CREATES_MONEY) this->trading_revenue_cents -= paid * 100; // Created money costs the bank nothing.
+	this->iorb_created += paid;
+}
+
+/** The words of the news item for an unscheduled meeting. */
+static const char *UnscheduledText(PolicyUnscheduledReason reason)
+{
+	switch (reason) {
+		case PolicyUnscheduledReason::JobsCrash:      return " (UNSCHEDULED: jobs crash)";
+		case PolicyUnscheduledReason::InflationSpike: return " (UNSCHEDULED: inflation spike)";
+		case PolicyUnscheduledReason::CrisisNews:     return " (UNSCHEDULED: financial crisis)";
+		case PolicyUnscheduledReason::InflationNews:  return " (UNSCHEDULED: inflation shock)";
+		default:                                      return " (UNSCHEDULED)";
+	}
 }
 
 /**
@@ -915,9 +960,9 @@ void CentralBank::AnnounceMeeting(int64_t shift_before)
 	const std::string range = fmt::format("{} - {}", pct(PolicyLowerBp(p.shift_bp)), pct(PolicyUpperBp(p.shift_bp)));
 	std::string text;
 	if (moved > 0) {
-		text = fmt::format("FOMC{}: the central bank RAISED the target range by {} bp to {}. Inflation {}, growth {}. Loan rates follow at once.", p.last_unscheduled ? " (UNSCHEDULED, inflation spike)" : "", moved, range, pct(std::max<int64_t>(0, p.inflation_bp)), pct(std::max<int64_t>(0, p.growth_bp)));
+		text = fmt::format("FOMC{}: the central bank RAISED the target range by {} bp to {}. Inflation {}, growth {}. Loan rates follow at once.", p.last_unscheduled ? UnscheduledText(p.last_reason) : "", moved, range, pct(std::max<int64_t>(0, p.inflation_bp)), pct(std::max<int64_t>(0, p.growth_bp)));
 	} else if (moved < 0) {
-		text = fmt::format("FOMC{}: the central bank LOWERED the target range by {} bp to {}. Inflation {}, growth {}. Loan rates follow at once.", p.last_unscheduled ? " (UNSCHEDULED, emergency cut after a jobs crash)" : "", -moved, range, pct(std::max<int64_t>(0, p.inflation_bp)), pct(std::max<int64_t>(0, p.growth_bp)));
+		text = fmt::format("FOMC{}: the central bank LOWERED the target range by {} bp to {}. Inflation {}, growth {}. Loan rates follow at once.", p.last_unscheduled ? UnscheduledText(p.last_reason) : "", -moved, range, pct(std::max<int64_t>(0, p.inflation_bp)), pct(std::max<int64_t>(0, p.growth_bp)));
 	} else {
 		const char *bias = p.wanted_gap_bp >= POLICY_HOLD_BAND_BP ? " Bias: tightening." : (p.wanted_gap_bp <= -POLICY_HOLD_BAND_BP ? " Bias: easing." : "");
 		text = fmt::format("FOMC: the central bank KEPT the target range at {}.{}", range, bias);
@@ -948,7 +993,9 @@ void CentralBank::UpdateDaily(int64_t day)
 			continue;
 		}
 
-		const BankDayResult r = BankSettleDay(a, static_cast<int64_t>(c->money), GetCentralBankEquity(company), day, this->policy.shift_bp);
+		/* The news about the company (and a bank scare for everyone) adds to the risk rate; read from the news log at this midnight, so it is the same on every client. */
+		const int64_t news_bp = _market_events.CreditSpreadBp(company.base(), day * GameTimeManager::MINUTES_PER_DAY);
+		const BankDayResult r = BankSettleDay(a, static_cast<int64_t>(c->money), GetCentralBankEquity(company), day, this->policy.shift_bp, news_bp);
 
 		if (r.paid_from_cash > 0) {
 			/* The money leaves the cash and is an expense of the company (loan interest in the finances window).

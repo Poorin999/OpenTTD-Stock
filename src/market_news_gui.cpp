@@ -63,7 +63,7 @@ static std::string NewsTime(int64_t minute)
 
 static std::string NewsCompany(const MarketEvent &e)
 {
-	return e.target != MARKET_NO_TARGET ? GetStockSymbolName(e.target) : std::string();
+	return MarketEventSubjectName(e);
 }
 
 /** The colour of a story: green when it is good news for the shares, red when bad, otherwise by the gold. */

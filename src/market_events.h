@@ -32,6 +32,7 @@
 #include <array>
 #include <cstdint>
 #include <deque>
+#include <string>
 #include <vector>
 
 static constexpr int MARKET_EVENT_CHANCE_PERMILLE = 130;      ///< Chance per game hour that an event happens (13%: about one event every 8 real minutes).
@@ -82,6 +83,15 @@ enum class MarketEventKind : uint8_t {
 	CentralBanksSellGold,///< Gold: gold down.
 	JewelleryDemandDrop, ///< Gold: gold down (after the festival).
 	ProfitTaking,        ///< Gold: gold down (investors sell after a rise).
+	CoalShortage,        ///< Cargo: coal pays more (see MarketCargoEffectOf).
+	CoalGlut,            ///< Cargo: coal pays less.
+	HarvestFailure,      ///< Cargo: farm cargo and food pay more.
+	BumperHarvest,       ///< Cargo: farm cargo and food pay less.
+	ConstructionBoom,    ///< Cargo: wood, steel and ores pay more.
+	ConstructionSlump,   ///< Cargo: wood, steel and ores pay less.
+	DiamondMineFound,    ///< Diamonds: new diamonds come into the market stock (price down).
+	DiamondDemandSurge,  ///< Diamonds: the world buys diamonds out of the market stock (price up).
+	TownBoom,            ///< Town: one town grows faster for a while. The number of the town is in fact_ppm.
 	Count,
 };
 
@@ -133,6 +143,15 @@ inline const MarketEventDef &MarketEventInfo(MarketEventKind kind)
 		{ -1, 12'000, 28'000,   0,      0,      0,  5, false }, // CentralBanksSellGold
 		{ -1,  6'000, 15'000,   0,      0,      0,  6, false }, // JewelleryDemandDrop
 		{ -1,  8'000, 20'000,   0,      0,      0, 10, false }, // ProfitTaking
+		{  0,      0,      0,   0,      0,      0,  4, false }, // CoalShortage
+		{  0,      0,      0,   0,      0,      0,  4, false }, // CoalGlut
+		{  0,      0,      0,   0,      0,      0,  4, false }, // HarvestFailure
+		{  0,      0,      0,   0,      0,      0,  4, false }, // BumperHarvest
+		{  0,      0,      0,   0,      0,      0,  4, false }, // ConstructionBoom
+		{  0,      0,      0,   0,      0,      0,  3, false }, // ConstructionSlump
+		{  0,      0,      0,   0,      0,      0,  3, false }, // DiamondMineFound
+		{  0,      0,      0,   0,      0,      0,  3, false }, // DiamondDemandSurge
+		{  0,      0,      0,   0,      0,      0,  4, false }, // TownBoom
 	};
 	const size_t i = static_cast<size_t>(kind);
 	return table[i < MARKET_EVENT_KIND_COUNT ? i : 0];
@@ -142,6 +161,121 @@ inline const MarketEventDef &MarketEventInfo(MarketEventKind kind)
 inline int MarketSeverityPercent(int severity)
 {
 	return severity >= 3 ? 250 : (severity == 2 ? 170 : 100);
+}
+
+
+/* ---- News that moves more than gold and shares: cargo prices, diamonds, a town, the cost of credit --------------------------------------------
+ * Nothing here is saved by itself. The size of every effect comes from the KIND and the SEVERITY of an event, and the events are in the saved log, so after a
+ * load every client calculates the same numbers. Cargo, town and credit effects fade in a straight line over a window (they are read from the log whenever
+ * they are needed); the diamond effect is a one-time change of the diamond stock, which is saved already. */
+static constexpr int64_t MARKET_PPM = 1'000'000;
+static constexpr int64_t MARKET_MINUTES_PER_DAY = 24 * 60;
+static constexpr int64_t MARKET_CARGO_NEWS_DAYS = 12;          ///< A cargo news item moves the price goal of the cargo for this many game days (fading in a straight line).
+static constexpr int64_t MARKET_CARGO_PUSH_MAX_PPM = 300'000;  ///< All the cargo news together never moves a price goal by more than 30%.
+static constexpr int64_t MARKET_TOWN_NEWS_DAYS = 10;           ///< A town boom lasts this many game days (fading in a straight line).
+static constexpr int64_t MARKET_TOWN_BOOST_PPM = 100'000;      ///< Growth boost of a town boom at severity 1 (10% faster growth); 17% and 25% at severity 2 and 3.
+static constexpr int64_t MARKET_TOWN_BOOST_MAX_PPM = 300'000;  ///< All the town news together never boost a town by more than this (the same limit as the wealth effect, retail::MAX_BOOST_PPM).
+static constexpr int64_t MARKET_DIAMOND_STOCK_PPM = 40'000;    ///< Diamond news at severity 1 moves the diamond stock by 4% of the start stock; 6.8% and 10% at severity 2 and 3.
+static constexpr int64_t MARKET_CREDIT_NEWS_DAYS = 30;         ///< Credit news fades over this many game days.
+static constexpr int64_t MARKET_CREDIT_COMPANY_BP = 25;        ///< Bad news about a company: its loan rate rises by 0.25% at severity 1 (0.42% and 0.62% at severity 2 and 3).
+static constexpr int64_t MARKET_CREDIT_GOOD_BP = 15;           ///< Good news about a company: takes back 0.15% of earlier bad news at severity 1 (0.25% and 0.37%).
+static constexpr int64_t MARKET_CREDIT_WORLD_BP = 40;          ///< A bank scare raises every loan rate by 0.40% at severity 1 (a recession 25 bp).
+static constexpr int64_t MARKET_CREDIT_MIN_BP = 0;             ///< Good news only takes back what bad news added; the loan rate never goes below the plain rate of the bank (so it stays above the IORB).
+static constexpr int64_t MARKET_CREDIT_MAX_BP = 150;           ///< The news never raises a loan rate by more than 1.50%.
+
+/** The groups of cargo that the news can move. The cargo labels of a group are listed in cargo_market.cpp. */
+enum class MarketCargoGroup : uint8_t {
+	None,
+	Oil,     ///< Oil and refined products.
+	Coal,    ///< Coal.
+	Farm,    ///< Crops, livestock, milk, fruit, fish and food.
+	Build,   ///< Wood, steel and ores.
+	People,  ///< Passengers and mail.
+	Count,
+};
+
+/** The effect of a kind of event on the price of a group of cargo: the group and the push on the price goal in ppm (negative: down). */
+struct MarketCargoEffect {
+	MarketCargoGroup group = MarketCargoGroup::None;
+	int64_t push_ppm = 0;
+};
+
+inline MarketCargoEffect MarketCargoEffectOf(MarketEventKind kind, int severity)
+{
+	MarketCargoGroup g = MarketCargoGroup::None;
+	int64_t base = 0; // At severity 1.
+	switch (kind) {
+		case MarketEventKind::FuelSpike:         g = MarketCargoGroup::Oil;    base = 60'000; break;
+		case MarketEventKind::FuelDrop:          g = MarketCargoGroup::Oil;    base = -60'000; break;
+		case MarketEventKind::TourismBoom:       g = MarketCargoGroup::People; base = 50'000; break;
+		case MarketEventKind::CoalShortage:      g = MarketCargoGroup::Coal;   base = 80'000; break;
+		case MarketEventKind::CoalGlut:          g = MarketCargoGroup::Coal;   base = -80'000; break;
+		case MarketEventKind::HarvestFailure:    g = MarketCargoGroup::Farm;   base = 80'000; break;
+		case MarketEventKind::BumperHarvest:     g = MarketCargoGroup::Farm;   base = -80'000; break;
+		case MarketEventKind::ConstructionBoom:  g = MarketCargoGroup::Build;  base = 70'000; break;
+		case MarketEventKind::ConstructionSlump: g = MarketCargoGroup::Build;  base = -70'000; break;
+		default: break;
+	}
+	MarketCargoEffect e;
+	e.group = g;
+	e.push_ppm = base * MarketSeverityPercent(severity) / 100;
+	return e;
+}
+
+/** The name of a group of cargo, for the story. */
+inline const char *MarketCargoGroupName(MarketCargoGroup g)
+{
+	switch (g) {
+		case MarketCargoGroup::Oil:    return "น้ำมัน";
+		case MarketCargoGroup::Coal:   return "ถ่านหิน";
+		case MarketCargoGroup::Farm:   return "สินค้าเกษตรและอาหาร";
+		case MarketCargoGroup::Build:  return "ไม้ เหล็ก และแร่";
+		case MarketCargoGroup::People: return "ผู้โดยสารและไปรษณีย์";
+		default: return "";
+	}
+}
+
+/** The one-time change of the diamond stock in ppm of the START stock (negative: carats leave the market, so the price rises). 0 for the other kinds. */
+inline int64_t MarketDiamondStockPpm(MarketEventKind kind, int severity)
+{
+	const int64_t pct = MarketSeverityPercent(severity);
+	if (kind == MarketEventKind::DiamondMineFound) return MARKET_DIAMOND_STOCK_PPM * pct / 100;
+	if (kind == MarketEventKind::DiamondDemandSurge) return -MARKET_DIAMOND_STOCK_PPM * pct / 100;
+	return 0;
+}
+
+/** The growth boost of a town boom at its start, in ppm. 0 for the other kinds. */
+inline int64_t MarketTownBoostPpm(MarketEventKind kind, int severity)
+{
+	return kind == MarketEventKind::TownBoom ? MARKET_TOWN_BOOST_PPM * MarketSeverityPercent(severity) / 100 : 0;
+}
+
+/** The change of a loan rate in bp that one event starts with: + dearer, - cheaper. world = false: only for the company of the event (target), true: for all. */
+inline int64_t MarketCreditBp(MarketEventKind kind, int severity, bool &world)
+{
+	world = false;
+	const int64_t pct = MarketSeverityPercent(severity);
+	switch (kind) {
+		case MarketEventKind::CompanyDistress:
+		case MarketEventKind::CompanyBankruptcy:
+		case MarketEventKind::CompanyLoss:
+		case MarketEventKind::CompanyProfitDown:
+		case MarketEventKind::CompanyRevenueDown:
+		case MarketEventKind::CompanyValueDown: return MARKET_CREDIT_COMPANY_BP * pct / 100;
+		case MarketEventKind::CompanyProfitUp:
+		case MarketEventKind::CompanyRevenueUp:
+		case MarketEventKind::CompanyValueUp: return -MARKET_CREDIT_GOOD_BP * pct / 100;
+		case MarketEventKind::BankScare: world = true; return MARKET_CREDIT_WORLD_BP * pct / 100;
+		case MarketEventKind::Recession: world = true; return 25 * pct / 100;
+		default: return 0;
+	}
+}
+
+/** 1.0 (ppm) for an event that just happened, 0 once `window` has passed; a straight line in between. A negative age (an event "in the future") counts as 0. */
+inline int64_t MarketFadePpm(int64_t age_minutes, int64_t window_minutes)
+{
+	if (age_minutes < 0 || window_minutes <= 0 || age_minutes >= window_minutes) return 0;
+	return (window_minutes - age_minutes) * MARKET_PPM / window_minutes;
 }
 
 /** One event. The text of the story is made from these numbers when it is shown (see market_news_ai.h), so only the numbers are saved. */
@@ -326,8 +460,10 @@ struct MarketEvents {
 	 * #CompanyEventFact); the company is drawn among those, severity and number come from the real figures.
 	 * @param facts Real figures of the companies that exist.
 	 * @param force_kind Test tool: kind number, -1 = by weight. A company kind that is not true for any company is drawn by weight instead.
+	 * @param town_count Number of towns that exist. A town boom is only possible with at least one; its fact_ppm is then the ORDINAL (0 .. town_count - 1) of the
+	 *        drawn town, which the caller turns into the index of the town (see market_events.cpp).
 	 */
-	MarketEvent Generate(int64_t minute, const std::vector<CompanyFacts> &facts, int force_kind = -1)
+	MarketEvent Generate(int64_t minute, const std::vector<CompanyFacts> &facts, int force_kind = -1, size_t town_count = 0)
 	{
 		std::array<std::vector<size_t>, MARKET_EVENT_KIND_COUNT> candidates{};
 		for (size_t k = 0; k < MARKET_EVENT_KIND_COUNT; k++) {
@@ -340,7 +476,10 @@ struct MarketEvents {
 				candidates[k].push_back(i);
 			}
 		}
-		auto allowed = [&](size_t k) { return !MarketEventInfo(static_cast<MarketEventKind>(k)).company || !candidates[k].empty(); };
+		auto allowed = [&](size_t k) {
+			if (static_cast<MarketEventKind>(k) == MarketEventKind::TownBoom) return town_count > 0;
+			return !MarketEventInfo(static_cast<MarketEventKind>(k)).company || !candidates[k].empty();
+		};
 
 		uint32_t total = 0;
 		for (size_t k = 0; k < MARKET_EVENT_KIND_COUNT; k++) if (allowed(k)) total += MarketEventInfo(static_cast<MarketEventKind>(k)).weight;
@@ -362,6 +501,7 @@ struct MarketEvents {
 		const uint32_t sev_roll = static_cast<uint32_t>(this->Next() >> 11) % 100;
 		e.severity = sev_roll < 60 ? 1 : (sev_roll < 90 ? 2 : 3);
 		e.variant = static_cast<uint8_t>(this->Range(0, 11));
+		if (e.kind == MarketEventKind::TownBoom) e.fact_ppm = this->Range(0, static_cast<int64_t>(town_count) - 1);
 		if (def.company) {
 			const std::vector<size_t> &c = candidates[chosen];
 			const CompanyFacts &f = facts[c[static_cast<size_t>(this->Range(0, static_cast<int64_t>(c.size()) - 1))]];
@@ -409,6 +549,53 @@ struct MarketEvents {
 		for (int64_t &s : this->sentiment_ppm) fade(s);
 	}
 
+	/** The push on the price goal of a group of cargo from the news, in ppm, at game minute `minute`. Read from the log, nothing is saved for it. */
+	int64_t CargoPushPpm(MarketCargoGroup group, int64_t minute) const
+	{
+		if (group == MarketCargoGroup::None) return 0;
+		const int64_t window = MARKET_CARGO_NEWS_DAYS * MARKET_MINUTES_PER_DAY;
+		int64_t sum = 0;
+		for (const MarketEvent &e : this->log) {
+			const int64_t age = minute - e.minute;
+			if (age >= window) break; // newest first
+			const MarketCargoEffect fx = MarketCargoEffectOf(e.kind, e.severity);
+			if (fx.group != group) continue;
+			sum += fx.push_ppm * MarketFadePpm(age, window) / MARKET_PPM;
+		}
+		return std::clamp<int64_t>(sum, -MARKET_CARGO_PUSH_MAX_PPM, MARKET_CARGO_PUSH_MAX_PPM);
+	}
+
+	/** The growth boost of a town (index of the town) from town booms, in ppm, at game minute `minute`. */
+	int64_t TownBoostPpm(int64_t town, int64_t minute) const
+	{
+		const int64_t window = MARKET_TOWN_NEWS_DAYS * MARKET_MINUTES_PER_DAY;
+		int64_t sum = 0;
+		for (const MarketEvent &e : this->log) {
+			const int64_t age = minute - e.minute;
+			if (age >= window) break;
+			if (e.kind != MarketEventKind::TownBoom || e.fact_ppm != town) continue;
+			sum += MarketTownBoostPpm(e.kind, e.severity) * MarketFadePpm(age, window) / MARKET_PPM;
+		}
+		return std::clamp<int64_t>(sum, 0, MARKET_TOWN_BOOST_MAX_PPM);
+	}
+
+	/** The extra loan rate of a company (number of the company) from the news, in bp (0 .. MARKET_CREDIT_MAX_BP), at game minute `minute`: bad news adds, good news takes back. */
+	int64_t CreditSpreadBp(int64_t company, int64_t minute) const
+	{
+		const int64_t window = MARKET_CREDIT_NEWS_DAYS * MARKET_MINUTES_PER_DAY;
+		int64_t sum = 0;
+		for (const MarketEvent &e : this->log) {
+			const int64_t age = minute - e.minute;
+			if (age >= window) break;
+			bool world = false;
+			const int64_t bp = MarketCreditBp(e.kind, e.severity, world);
+			if (bp == 0) continue;
+			if (!world && e.target != company) continue;
+			sum += bp * MarketFadePpm(age, window) / MARKET_PPM;
+		}
+		return std::clamp<int64_t>(sum, MARKET_CREDIT_MIN_BP, MARKET_CREDIT_MAX_BP);
+	}
+
 	/** The sentiment that moves the goal price of a symbol (market plus own), limited. 0 for a symbol that is not a company. */
 	int64_t SentimentPpm(size_t symbol) const
 	{
@@ -421,6 +608,9 @@ extern MarketEvents _market_events;
 
 /** The sentiment of a share in ppm, for the price formula of stock_base.cpp. Companies only: valuables follow the gold price. */
 int64_t MarketEventSentimentPpm(size_t symbol);
+
+/** The name of what a story is about: the company of a company event, the town of a town boom, "" for the rest. */
+std::string MarketEventSubjectName(const MarketEvent &e);
 
 /** Test tool (console command stock_event): make an event now. @param kind Number of the kind, -1 = by weight. @return The event that happened. */
 MarketEvent FireMarketEventNow(int kind);

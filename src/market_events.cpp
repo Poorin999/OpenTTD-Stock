@@ -14,6 +14,8 @@
 #include "gold_reserve.h"
 #include "central_bank.h"
 #include "company_base.h"
+#include "town.h"
+#include "valuables.h"
 #include "news_func.h"
 #include "settings_type.h"
 #include "strings_func.h"
@@ -35,7 +37,36 @@ int64_t MarketEventSentimentPpm(size_t symbol)
 	return _market_events.SentimentPpm(symbol);
 }
 
-/** Put an event into the game: the sentiment, the gold pressure and the news item. */
+std::string MarketEventSubjectName(const MarketEvent &e)
+{
+	if (e.kind == MarketEventKind::TownBoom) {
+		if (e.fact_ppm >= 0 && e.fact_ppm < 0xFFFF && Town::IsValidID(TownID{static_cast<uint16_t>(e.fact_ppm)})) return GetString(STR_TOWN_NAME, TownID{static_cast<uint16_t>(e.fact_ppm)});
+		return std::string();
+	}
+	return e.target != MARKET_NO_TARGET ? GetStockSymbolName(e.target) : std::string();
+}
+
+/** Number of towns that exist (a town boom needs one). */
+static size_t CountTowns()
+{
+	size_t n = 0;
+	for (const Town *t : Town::Iterate()) { (void)t; n++; }
+	return n;
+}
+
+/** A town boom is drawn with the ORDINAL of a town (see MarketEvents::Generate); turn it into the index of that town. -1 when there is no such town. */
+static void ResolveTownBoom(MarketEvent &e)
+{
+	if (e.kind != MarketEventKind::TownBoom) return;
+	const int64_t ordinal = e.fact_ppm;
+	int64_t i = 0;
+	for (const Town *t : Town::Iterate()) {
+		if (i++ == ordinal) { e.fact_ppm = t->index.base(); return; }
+	}
+	e.fact_ppm = -1;
+}
+
+/** Put an event into the game: the sentiment, the gold pressure, the diamond stock and the news item. */
 static void PublishMarketEvent(const MarketEvent &e)
 {
 	_market_events.Apply(e);
@@ -46,8 +77,24 @@ static void PublishMarketEvent(const MarketEvent &e)
 				-GoldReserveManager::PRESSURE_MAX_PPM, GoldReserveManager::PRESSURE_MAX_PPM);
 	}
 
+	/* Diamonds: news about a new mine or a rush of buyers changes the stock of the diamond market once (the price follows the stock, see DiamondScarcityPpm).
+	 * The cargo prices, the growth of a town and the loan rates read the news from the log when they need it (MarketEvents::CargoPushPpm, TownBoostPpm, CreditSpreadBp). */
+	const int64_t diamond_ppm = MarketDiamondStockPpm(e.kind, e.severity);
+	if (diamond_ppm != 0) {
+		const int64_t delta = ValuablesManager::DIAMOND_STOCK_START / MARKET_PPM * diamond_ppm + ValuablesManager::DIAMOND_STOCK_START % MARKET_PPM * diamond_ppm / MARKET_PPM;
+		_valuables.diamond_stock_carats = std::clamp<int64_t>(_valuables.diamond_stock_carats + delta, 0, ValuablesManager::DIAMOND_STOCK_CAP);
+	}
+
+	/* A big crisis in the news can make the central bank meet at once (see MonetaryPolicy::CheckUnscheduled). Same event on every client, so the same decision. */
+	const int64_t news_day = e.minute / GameTimeManager::MINUTES_PER_DAY;
+	if ((e.kind == MarketEventKind::BankScare && e.severity >= 2) || (e.kind == MarketEventKind::Recession && e.severity >= 3)) {
+		_central_bank.policy.RequestNewsMeeting(PolicyNewsTrigger::Crisis, news_day);
+	} else if (e.kind == MarketEventKind::InflationScare && e.severity >= 3) {
+		_central_bank.policy.RequestNewsMeeting(PolicyNewsTrigger::InflationShock, news_day);
+	}
+
 	/* Every event is a news item. */
-	const std::string company = e.target != MARKET_NO_TARGET ? GetStockSymbolName(e.target) : std::string();
+	const std::string company = MarketEventSubjectName(e);
 	const MarketStory story = ComposeMarketStory(e, company);
 	AddNewsItem(GetEncodedString(STR_JUST_RAW_STRING, "[" + story.impact + "] " + story.headline), NewsType::General, NewsStyle::Small, {});
 }
@@ -85,7 +132,8 @@ MarketEvent FireMarketEventNow(int kind)
 {
 	MarketEvents &ev = _market_events;
 	ev.Seed(static_cast<uint64_t>(_settings_game.game_creation.generation_seed));
-	const MarketEvent e = ev.Generate(static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes()), CollectCompanyFacts(), kind);
+	MarketEvent e = ev.Generate(static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes()), CollectCompanyFacts(), kind, CountTowns());
+	ResolveTownBoom(e);
 	PublishMarketEvent(e);
 	return e;
 }
@@ -99,5 +147,7 @@ static const GameTimeSubscription _market_events_hour(GameTimeEvent::Hour, [](co
 
 	const int64_t minute = static_cast<int64_t>(now.total_minutes);
 	if (!ev.ShouldFire(minute)) return;
-	PublishMarketEvent(ev.Generate(minute, CollectCompanyFacts()));
+	MarketEvent e = ev.Generate(minute, CollectCompanyFacts(), -1, CountTowns());
+	ResolveTownBoom(e);
+	PublishMarketEvent(e);
 });

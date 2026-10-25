@@ -15,6 +15,7 @@
 #include "company_base.h"
 #include "company_func.h"
 #include "town.h"
+#include "market_events.h"
 #include "openttd.h"
 #include "game_time/game_time_manager.h"
 #include "stock_cmd.h"
@@ -131,7 +132,8 @@ const RetailCompanyReport &RetailMarketManager::GetReport(CompanyID company) con
 /** How much faster a town grows now because of the dividends and gains of the retail investors, in ppm. */
 int64_t RetailMarketManager::GetTownGrowthBoostPpm(TownID town) const
 {
-	return town.base() < this->towns.size() ? this->towns[town.base()].boost_ppm : 0;
+	const int64_t own = town.base() < this->towns.size() ? this->towns[town.base()].boost_ppm : 0;
+	return std::min<int64_t>(retail::MAX_BOOST_PPM, own + _market_events.TownBoostPpm(town.base(), static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes())));
 }
 
 /**
@@ -459,7 +461,9 @@ void RetailMarketManager::ApplyMacroFeedback()
 		const int64_t fraction = weight_sum > 0 ? TownWeight(rec.input) * PPM / weight_sum : 0;
 		const int64_t share = pool / PPM * fraction + (pool % PPM) * fraction / PPM;
 		rec.boost_ppm = NextBoost(rec.boost_ppm, BoostIncrease(share, rec.input));
-		ApplyGrowthBoost(t, rec.boost_ppm, rec.base_growth_rate, rec.applied_growth_rate);
+		/* A town boom in the news (market_events.h) adds to the boost for a while. It is read from the news log, so it is not part of rec.boost_ppm and fades by itself. */
+		const int64_t news_boost = _market_events.TownBoostPpm(t->index.base(), static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes()));
+		ApplyGrowthBoost(t, std::min<int64_t>(MAX_BOOST_PPM, rec.boost_ppm + news_boost), rec.base_growth_rate, rec.applied_growth_rate);
 	}
 	if (weight_sum > 0) this->wealth_pool = 0;
 }

@@ -36,6 +36,19 @@ bool IsGoldMarketCargo(const CargoSpec *cs)
 	return cs->label == CT_GOLD || cs->label == CargoLabel{'VALU'};
 }
 
+/** The group of cargo that the news can move (market_events.h) for a cargo type; None for the others. */
+MarketCargoGroup NewsGroupOf(const CargoSpec *cs)
+{
+	const CargoLabel l = cs->label;
+	if (l == CargoLabel{'PASS'} || l == CargoLabel{'MAIL'}) return MarketCargoGroup::People;
+	if (l == CargoLabel{'OIL_'} || l == CargoLabel{'RFPR'}) return MarketCargoGroup::Oil;
+	if (l == CargoLabel{'COAL'}) return MarketCargoGroup::Coal;
+	if (l == CargoLabel{'GRAI'} || l == CargoLabel{'WHEA'} || l == CargoLabel{'MAIZ'} || l == CargoLabel{'LVST'} || l == CargoLabel{'MILK'} ||
+			l == CargoLabel{'FRUT'} || l == CargoLabel{'FOOD'} || l == CargoLabel{'FISH'}) return MarketCargoGroup::Farm;
+	if (l == CargoLabel{'WOOD'} || l == CargoLabel{'STEL'} || l == CargoLabel{'IORE'} || l == CargoLabel{'CORE'}) return MarketCargoGroup::Build;
+	return MarketCargoGroup::None;
+}
+
 /** The money factor of the price index (cash in circulation against the start), without the inflation of the game: OpenTTD pays inflated cargo already. */
 int64_t MoneyFactorPpm()
 {
@@ -55,11 +68,15 @@ int64_t CargoMarket::GetPricePpm(CargoType cargo_type) const
 void CargoMarket::UpdateDaily()
 {
 	const int64_t outside = cargomarket::OutsideFactor(_market_events.market_sentiment_ppm, MoneyFactorPpm());
+	const int64_t minute = static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes());
 	for (const CargoSpec *cs : CargoSpec::Iterate()) {
 		const size_t i = static_cast<size_t>(cs->Index());
 		if (i >= this->cargo.size()) continue;
 		if (IsGoldMarketCargo(cs)) { this->cargo[i] = {}; continue; }
-		cargomarket::UpdateDay(this->cargo[i], ElasticityPpm(cs), outside);
+		/* News about one kind of cargo (a coal shortage, a bad harvest ...) moves the price goal of that cargo on top of the outside factor. */
+		const int64_t news_push = _market_events.CargoPushPpm(NewsGroupOf(cs), minute);
+		const int64_t outside_cargo = std::clamp<int64_t>(outside * (cargomarket::PPM + news_push) / cargomarket::PPM, cargomarket::PPM / 2, 2 * cargomarket::PPM);
+		cargomarket::UpdateDay(this->cargo[i], ElasticityPpm(cs), outside_cargo);
 	}
 }
 
