@@ -439,8 +439,8 @@ CARGO_MARKET_MARKER = "CARGO_MARKET_PATCH"
 def patch_cargo_market(tree):
     """The price of cargo follows supply and demand (cargo_market.cpp). Two hooks in economy.cpp, in place, at anchors (nothing is written when one is missing):
     (1) the first line of CargoPayment::PayFinalDelivery counts the delivered units (supply);
-    (2) the last return of GetTransportedGoodsIncome (the income that OpenTTD calculates for a delivery; the transfers, the final payment and the
-        income estimates of the windows all use it) is multiplied by the price of the cargo."""
+    (2) GetTransportedGoodsIncome (the income that OpenTTD calculates for a delivery; the transfers, the final payment and the
+        income estimates of the windows all use it) is renamed to GetTransportedGoodsIncomeUnscaled and a wrapper with the old name multiplies it by the price of the cargo."""
     p = tree / "src" / "economy.cpp"
     t, crlf = _read_lf(p)
     if CARGO_MARKET_MARKER in t:
@@ -454,20 +454,27 @@ def patch_cargo_market(tree):
     m = re.search(r"^Money GetTransportedGoodsIncome\(([^)]*)\)\n\{\n", t, re.M)
     if not m:
         sys.exit("ERROR: Money GetTransportedGoodsIncome(...) not found in economy.cpp (anchor of the cargo market patch)")
-    arg = re.search(r"CargoType\s+(\w+)", m.group(1))
-    if not arg:
+    # The body is not touched (its returns differ between versions): the original function gets a new name and a small
+    # function with the old name and the same parameters is put after it. It calls the original and multiplies the result by the price.
+    params = [x.strip() for x in re.split(r",", m.group(1).replace("\n", " ")) if x.strip()]
+    names = []
+    for prm in params:
+        nm = re.search(r"(\w+)\s*(?:=.*)?$", prm)
+        if not nm:
+            sys.exit("ERROR: cannot read the parameters of GetTransportedGoodsIncome (cargo market patch)")
+        names.append(nm.group(1))
+    cargo_param = next((re.search(r"(\w+)\s*(?:=.*)?$", prm).group(1) for prm in params if re.search(r"\bCargoType\b", prm)), None)
+    if not names or cargo_param is None:
         sys.exit("ERROR: GetTransportedGoodsIncome has no CargoType parameter (cargo market patch)")
     end = t.find("\n}\n", m.end())
     if end < 0:
         sys.exit("ERROR: end of GetTransportedGoodsIncome not found (cargo market patch)")
-    body = t[m.end():end]
-    rets = [r for r in re.finditer(r"^\treturn (.+);$", body, re.M) if r.group(1).strip() != "0"]
-    if not rets:
-        sys.exit("ERROR: no final return in GetTransportedGoodsIncome (cargo market patch)")
-    r = rets[-1]
-    new_ret = f"\treturn CargoMarketAdjustIncome({arg.group(1)}, {r.group(1)}); /* {CARGO_MARKET_MARKER} */"
-    body = body[:r.start()] + new_ret + body[r.end():]
-    t = t[:m.end()] + body + t[end:]
+    end += 3  # just after the closing brace line
+    wrapper = (f"\n/* {CARGO_MARKET_MARKER}: the income of a delivery times the price of the cargo (cargo_market.cpp). */\n"
+               f"Money GetTransportedGoodsIncome({m.group(1)})\n{{\n"
+               f"\treturn CargoMarketAdjustIncome({cargo_param}, GetTransportedGoodsIncomeUnscaled({', '.join(names)}));\n}}\n")
+    t = t[:end] + wrapper + t[end:]
+    t = t[:m.start()] + "static Money GetTransportedGoodsIncomeUnscaled(" + t[m.start() + len("Money GetTransportedGoodsIncome("):]
     t = ensure_include(t, '#include "cargo_market.h" /* CARGO_MARKET_PATCH */', ['#include "central_bank.h"', '#include "stdafx.h"'])
     _write_like(p, t, crlf)
     print("economy.cpp: cargo market hooks added")
