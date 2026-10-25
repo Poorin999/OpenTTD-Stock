@@ -18,6 +18,7 @@
 #include "stdafx.h"
 #include "CargoMarketMath.h"
 #include "cargo_type.h"
+#include "economy_type.h"
 #include <array>
 
 /** The state of the cargo prices: one entry per cargo type of OpenTTD. Saved in the 'STCK' chunk (SRK_CARGO_MARKET). */
