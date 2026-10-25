@@ -97,9 +97,43 @@ int main(){
 	{ MonetaryPolicy p; p.shift_bp=100; p.prev_index_ppm=1'000'000; p.last_decision_day=100; p.measured=true; p.inflation_bp=250;
 	  p.CheckUnscheduled(120,1'000'000,-9000,true,110);
 	  int64_t nextm=120+PolicyDaysToNextMeeting(120); CHECK(!p.Update(nextm-1,1'000'000,1,1,0,false)); CHECK(p.Update(nextm,1'000'000,1,1,0,false)); CHECK(!p.last_unscheduled); }
+
+	/* news: a crisis in the news cuts 50 bp after the minimum days; waits until then; expires; one news = one meeting */
+	{ MonetaryPolicy p; p.shift_bp=100; p.prev_index_ppm=1'000'000; p.last_decision_day=100; p.measured=true; p.inflation_bp=250;
+	  p.RequestNewsMeeting(PolicyNewsTrigger::Crisis,105);
+	  CHECK(!p.CheckUnscheduled(108,1'000'000,0,false,-1)); CHECK(p.news_trigger==PolicyNewsTrigger::Crisis);   /* too soon, kept */
+	  CHECK(p.CheckUnscheduled(115,1'000'000,0,false,-1)); CHECK(p.shift_bp==50); CHECK(p.last_reason==PolicyUnscheduledReason::CrisisNews);
+	  CHECK(p.news_trigger==PolicyNewsTrigger::None); CHECK(p.last_surprise_bp==-50);
+	  CHECK(!p.CheckUnscheduled(140,1'000'000,0,false,-1)); }
+	{ MonetaryPolicy p; p.shift_bp=100; p.prev_index_ppm=1'000'000; p.last_decision_day=100; p.measured=true; p.inflation_bp=250;
+	  p.RequestNewsMeeting(PolicyNewsTrigger::Crisis,101);
+	  CHECK(!p.CheckUnscheduled(116,1'000'000,0,false,-1)); CHECK(p.news_trigger==PolicyNewsTrigger::None); CHECK(p.shift_bp==100);  /* 15 days old: forgotten */ }
+	{ MonetaryPolicy p; p.shift_bp=POLICY_SHIFT_MIN_BP; p.prev_index_ppm=1'000'000; p.last_decision_day=0; p.measured=true;
+	  p.RequestNewsMeeting(PolicyNewsTrigger::Crisis,20); CHECK(!p.CheckUnscheduled(20,1'000'000,0,false,-1)); CHECK(p.news_trigger==PolicyNewsTrigger::None); }  /* at the floor */
+	/* inflation shock news: only when inflation is above 4% */
+	{ MonetaryPolicy p; p.shift_bp=100; p.prev_index_ppm=1'000'000; p.last_decision_day=0; p.measured=true; p.inflation_bp=250;
+	  p.RequestNewsMeeting(PolicyNewsTrigger::InflationShock,20); CHECK(!p.CheckUnscheduled(20,1'000'000,0,false,-1)); CHECK(p.shift_bp==100); CHECK(p.news_trigger==PolicyNewsTrigger::None);
+	  p.inflation_bp=600; p.RequestNewsMeeting(PolicyNewsTrigger::InflationShock,20); CHECK(p.CheckUnscheduled(20,1'000'000,0,false,-1)); CHECK(p.shift_bp==150); CHECK(p.last_reason==PolicyUnscheduledReason::InflationNews); }
+	/* data beats news: a jobs crash and crisis news together give one cut, the crash reason */
+	{ MonetaryPolicy p; p.shift_bp=100; p.prev_index_ppm=1'000'000; p.last_decision_day=0; p.measured=true; p.inflation_bp=250;
+	  p.RequestNewsMeeting(PolicyNewsTrigger::Crisis,20); CHECK(p.CheckUnscheduled(20,1'000'000,-9000,true,15)); CHECK(p.shift_bp==50); CHECK(p.last_reason==PolicyUnscheduledReason::JobsCrash); }
+	/* news from a different game (day in the future) is dropped */
+	{ MonetaryPolicy p; p.shift_bp=100; p.prev_index_ppm=1'000'000; p.last_decision_day=0; p.measured=true; p.RequestNewsMeeting(PolicyNewsTrigger::Crisis,500);
+	  CHECK(!p.CheckUnscheduled(20,1'000'000,0,false,-1)); CHECK(p.news_trigger==PolicyNewsTrigger::None); }
 	/* IORB arithmetic: 100,000 at upper 3.50% - 0.10% = 3.40% a day, and always below the cheapest loan */
 	CHECK(100'000LL*PolicyIorbBp(0)/BANK_INTEREST_DIVISOR==9);
 	for(int64_t sh=POLICY_SHIFT_MIN_BP; sh<=POLICY_EMERGENCY_SHIFT_MAX_BP; sh+=25) CHECK(PolicyIorbBp(sh) <= BankShiftedRateBp(BANK_RATE_GOOD_MIN_BP,sh));
+
+	/* loan rate with the news spread: adds to the risk rate, stays inside floor / ceiling, never touches the penalty rate, never below IORB */
+	{ BankAccount a0; a0.debt=1'000'000; BankAccount a1=a0, a2=a0, a3=a0, a4=a0;
+	  BankDayResult r0=BankSettleDay(a0, 10'000'000, 5'000'000, 1, 0, 0);
+	  BankDayResult r1=BankSettleDay(a1, 10'000'000, 5'000'000, 1, 0, 60);
+	  BankDayResult r2=BankSettleDay(a2, 10'000'000, 5'000'000, 1, 0, -500); /* a negative spread counts as 0 */
+	  BankDayResult r3=BankSettleDay(a3, 10'000'000, 5'000'000, 1, 0, 100000); /* far above: the ceiling holds */
+	  CHECK(r1.rate_bp==r0.rate_bp+60); CHECK(r2.rate_bp==r0.rate_bp); CHECK(r3.rate_bp==BANK_RATE_CEIL_BP); CHECK(r3.rate_bp<BankPenaltyRateBp(1,0));
+	  BankDayResult r4=BankSettleDay(a4, 0, 5'000'000, 1, 0, 150); /* no cash: default, penalty rate without the spread */
+	  CHECK(r4.defaulted && r4.rate_bp==BankPenaltyRateBp(1,0));
+	  for(int64_t sh=POLICY_SHIFT_MIN_BP; sh<=POLICY_EMERGENCY_SHIFT_MAX_BP; sh+=25) for(int64_t sp : {0,25,150}) CHECK(PolicyIorbBp(sh) <= BankShiftedRateBp(BANK_RATE_GOOD_MIN_BP+sp,sh)); }
 
 	/* loan rates still the same numbers at shift 0 */
 	CHECK(BankShiftedRateBp(BANK_RATE_GOOD_MIN_BP,0)==350); CHECK(BankShiftedRateBp(BANK_RATE_POOR_MAX_BP,0)==1200);
