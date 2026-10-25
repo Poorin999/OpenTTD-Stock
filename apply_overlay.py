@@ -1226,6 +1226,40 @@ def main(tree):
             cpp.write_text(c, encoding="utf-8")
             print("script_company: GetGoldHoldings and GetGoldPrice added to the script API")
 
+    # Script API: borrow from and repay the central bank (OpenTTD-Stock mod). AIs such as StockHoge had no way to take a loan, only to read the debt.
+    if hpp.exists() and cpp.exists():
+        h = hpp.read_text(encoding="utf-8")
+        c = cpp.read_text(encoding="utf-8")
+        decl_rx = r"^([ \t]*)static Money GetLoanAmount\(\);[ \t]*\n"
+        if "BorrowFromCentralBank" in h and "BorrowFromCentralBank" in c:
+            print("script_company: borrow functions already present")
+        elif not re.search(decl_rx, h, re.M):
+            print("WARNING: ScriptCompany::GetLoanAmount not found in script_company.hpp, the script API has no borrow functions")
+        else:
+            decls = (
+                "\n\t/**\n\t * Borrow money from the central bank (OpenTTD-Stock mod). The money is paid into the cash of the company.\n"
+                "\t * @param amount The money to borrow, more than 0 and at most GetCentralBankAvailable.\n\t * @return True when the loan was paid out.\n\t */\n"
+                "\tstatic bool BorrowFromCentralBank(Money amount);\n"
+                "\n\t/**\n\t * Repay a loan of the central bank from the cash of the company (OpenTTD-Stock mod).\n"
+                "\t * @param amount The money to repay, more than 0 and at most GetCentralBankDebt.\n\t * @return True when the money was repaid.\n\t */\n"
+                "\tstatic bool RepayCentralBank(Money amount);\n"
+            )
+            m = re.search(decl_rx, h, re.M)
+            h = h[:m.end()] + decls + h[m.end():]
+            impl = (
+                "\n/* static */ bool ScriptCompany::BorrowFromCentralBank(Money amount)\n{\n"
+                "\tEnforceCompanyModeValid(false);\n\tEnforcePrecondition(false, amount > 0);\n\n"
+                "\treturn ScriptObject::Command<CMD_BANK_BORROW>::Do(0 /* WALLET_CASH */, amount);\n}\n"
+                "\n/* static */ bool ScriptCompany::RepayCentralBank(Money amount)\n{\n"
+                "\tEnforceCompanyModeValid(false);\n\tEnforcePrecondition(false, amount > 0);\n\n"
+                "\treturn ScriptObject::Command<CMD_BANK_REPAY>::Do(0 /* WALLET_CASH */, amount);\n}\n"
+            )
+            c = ensure_include(c, '#include "../../central_bank.h"', ['#include "../../company_base.h"', '#include "../../company_func.h"', '#include "script_company.hpp"', '#include "../../stdafx.h"'])
+            c = c.rstrip("\n") + "\n" + impl
+            hpp.write_text(h, encoding="utf-8")
+            cpp.write_text(c, encoding="utf-8")
+            print("script_company: BorrowFromCentralBank and RepayCentralBank added to the script API")
+
     print("overlay applied")
 
 
