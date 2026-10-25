@@ -25,7 +25,7 @@
  *     exist in those climates and no vehicle of those climates can carry it);
  *  3. it looks like a local mine (Iron ore mine in Temperate, Copper ore mine in Sub-tropical): the graphics of the Sub-arctic gold mine are not
  *     loaded in the other climates;
- *  4. the bank (in every climate) accepts that cargo.
+ *  4. the bank (in every climate) accepts that cargo (found by what it accepts).
  * Every field that is not sure to exist in this version of OpenTTD is reached through a generic lambda with `requires`, so a different
  * name gives a skipped step and not a compile error.
  */
@@ -46,20 +46,6 @@ static void SetOutputLabel(IndustrySpec &spec, CargoLabel label)
 {
 	[&](auto &s) {
 		if constexpr (requires { s.produced_cargo_label[0] = label; }) s.produced_cargo_label[0] = label;
-	}(spec);
-}
-
-static void AddAcceptedLabel(IndustrySpec &spec, CargoLabel label)
-{
-	[&](auto &s) {
-		if constexpr (requires { s.accepts_cargo_label[0] = label; }) {
-			for (auto &l : s.accepts_cargo_label) {
-				if (l == label) return;
-			}
-			for (auto &l : s.accepts_cargo_label) {
-				if (l == CargoLabel{0}) { l = label; return; }
-			}
-		}
 	}(spec);
 }
 
@@ -112,13 +98,17 @@ void ApplyGoldIndustries()
 		}
 	}
 
-	/* Banks take the gold cargo of the climate (Valuables, Gold or Diamonds, whichever exists). */
+	/* Banks take the gold cargo of the climate (Valuables, Gold or Diamonds, whichever exists). A bank is found by what it accepts, not by its
+	 * name: an industry that accepts one of these cargos is a bank. In the original economy this already holds in every climate (the Temperate
+	 * bank takes Valuables, the Sub-arctic / Sub-tropical bank takes Gold / Diamonds), so this only fills a free input slot when one is missing. */
 	for (IndustrySpec &spec : _industry_specs) {
-		if (spec.name != STR_INDUSTRY_NAME_BANK_TEMPERATE && spec.name != STR_INDUSTRY_NAME_BANK_TROPIC_ARCTIC) continue;
+		bool is_bank = false;
+		for (const CargoType c : spec.accepts_cargo) {
+			if (c != INVALID_CARGO && (c == valuables || c == gold || c == diamonds)) is_bank = true;
+		}
+		if (!is_bank) continue;
 		for (const CargoType c : {valuables, gold, diamonds}) {
-			if (c == INVALID_CARGO) continue;
-			AddAcceptedCargo(spec, c);
-			AddAcceptedLabel(spec, CargoSpec::Get(c)->label);
+			if (c != INVALID_CARGO) AddAcceptedCargo(spec, c);
 		}
 	}
 }
