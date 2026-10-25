@@ -177,7 +177,7 @@ static void DrawAccountStatement(const Rect &r, int offset)
 	yearly("Total Transport Income", {EXPENSES_TRAIN_REVENUE, EXPENSES_ROADVEH_REVENUE, EXPENSES_SHIP_REVENUE, EXPENSES_AIRCRAFT_REVENUE}, true);
 
 	category("Interest & Fees");
-	booked("Central Bank Daily Interest", LedgerItem::BankInterest);
+	booked("Central Bank Interest (paid / IORB received)", LedgerItem::BankInterest);
 	booked("Stock Commission & Brokerage Fees", LedgerItem::TradeCommission);
 	booked("Margin Maintenance / Swap Fees", LedgerItem::MarginSwap);
 
@@ -332,7 +332,7 @@ static void DrawArchiveStatement(const Rect &r, int age)
 	yearly("Aircraft", LedgerItem::YearAircraft, {EXPENSES_AIRCRAFT_REVENUE});
 
 	category("Interest & Fees");
-	booked("Central Bank Daily Interest", LedgerItem::BankInterest);
+	booked("Central Bank Interest (paid / IORB received)", LedgerItem::BankInterest);
 	booked("Stock Commission & Brokerage Fees", LedgerItem::TradeCommission);
 	booked("Margin Maintenance / Swap Fees", LedgerItem::MarginSwap);
 
@@ -564,7 +564,7 @@ struct CentralBankWindow : Window {
 	static std::string LogName(const BankLogEntry &e)
 	{
 		switch (e.item) {
-			case LedgerItem::BankInterest:    return CbText("ดอกเบี้ย", "Interest");
+			case LedgerItem::BankInterest:    return e.amount > 0 ? CbText("ดอกเบี้ยเงินฝาก (IORB)", "IORB interest") : CbText("ดอกเบี้ย", "Interest");
 			case LedgerItem::TradeCommission: return CbText("ค่าคอมมิชชัน", "Commission");
 			case LedgerItem::MarginSwap:      return CbText("ค่าสวอป", "Swap fee");
 			case LedgerItem::Dividends:       return CbText("เงินปันผล", "Dividend");
@@ -619,7 +619,7 @@ struct CentralBankWindow : Window {
 			if (shown >= LOG_ROWS) break;
 			if (shown % 2 == 1) GfxFillRect(r.left + 1, y - 1, r.right - 1, y + row_h - 2, GREY_SCALE(3));
 
-			const TextColour colour = e.item == LedgerItem::BankInterest ? TC_ORANGE : (e.amount >= 0 ? TC_GREEN : TC_RED);
+			const TextColour colour = e.item == LedgerItem::BankInterest && e.amount < 0 ? TC_ORANGE : (e.amount >= 0 ? TC_GREEN : TC_RED);
 			DrawString(day_x, right, y, fmt::format("{} {}", CbText("วันที่", "Day"), e.day), TC_WHITE, SA_LEFT);
 			DrawString(name_x, right, y, LogName(e), TC_WHITE, SA_LEFT);
 			DrawString(left, right, y, (e.amount > 0 ? "+" : "") + GetString(STR_JUST_CURRENCY_LONG, e.amount), colour, SA_RIGHT);
@@ -795,24 +795,29 @@ static void DrawMonetaryPolicy(const Rect &r)
 	if (p.measured) {
 		const int64_t err = p.inflation_bp > POLICY_TARGET_INFLATION_BP ? p.inflation_bp - POLICY_TARGET_INFLATION_BP : POLICY_TARGET_INFLATION_BP - p.inflation_bp;
 		row(CbText("เงินเฟ้อ (ต่อปี)", "Inflation (yearly)"), pct(p.inflation_bp), err <= POLICY_DEADBAND_BP ? TC_GREEN : (err <= 3 * POLICY_DEADBAND_BP ? TC_ORANGE : TC_RED));
-		row(CbText("การเติบโตของมูลค่าบริษัท (ต่อปี)", "Company value growth (yearly)"), pct(p.growth_bp));
+		row(CbText("การเติบโตที่ใช้ตัดสินใจ (ต่อปี)", "Growth used by the rule (yearly)"), pct(p.growth_bp));
+		row(CbText("การจ้างงาน Payroll (ต่อปี)", "Employment, payrolls (yearly)"), p.has_jobs ? pct(p.jobs_bp, true) : std::string("-"), p.has_jobs ? (p.jobs_bp < 0 ? TC_RED : TC_GREEN) : TC_GREY);
 	} else {
 		row(CbText("เงินเฟ้อ (ต่อปี)", "Inflation (yearly)"), CbText("กำลังวัด...", "measuring..."), TC_GREY);
-		row(CbText("การเติบโตของมูลค่าบริษัท (ต่อปี)", "Company value growth (yearly)"), CbText("กำลังวัด...", "measuring..."), TC_GREY);
+		row(CbText("การเติบโตที่ใช้ตัดสินใจ (ต่อปี)", "Growth used by the rule (yearly)"), CbText("กำลังวัด...", "measuring..."), TC_GREY);
+		row(CbText("การจ้างงาน Payroll (ต่อปี)", "Employment, payrolls (yearly)"), CbText("กำลังวัด...", "measuring..."), TC_GREY);
 	}
 	row(CbText("เป้าหมายเงินเฟ้อ", "Inflation target"), fmt::format("{} (+/-{})", pct(POLICY_TARGET_INFLATION_BP), pct(POLICY_DEADBAND_BP)));
 	separator();
 
 	/* Group 2: what the bank decided. */
-	row(CbText("ส่วนปรับดอกเบี้ย (นโยบาย)", "Policy rate shift"), pct(p.shift_bp, true), p.shift_bp > 0 ? TC_ORANGE : (p.shift_bp < 0 ? TC_GREEN : TC_WHITE));
+	row(CbText("ช่วงอัตราดอกเบี้ยนโยบาย (Target range)", "Target range (policy rate)"), fmt::format("{} - {}", pct(PolicyLowerBp(p.shift_bp)), pct(PolicyUpperBp(p.shift_bp))), p.shift_bp > 0 ? TC_ORANGE : (p.shift_bp < 0 ? TC_GREEN : TC_WHITE));
+	row(p.last_unscheduled ? CbText("การประชุมครั้งล่าสุด (นอกรอบ!)", "Last meeting (UNSCHEDULED!)") : CbText("การประชุมครั้งล่าสุด", "Last meeting"), p.measured ? (p.last_step_bp > 0 ? fmt::format("{} {} bp", CbText("ขึ้น", "raised"), p.last_step_bp) : (p.last_step_bp < 0 ? fmt::format("{} {} bp", CbText("ลด", "lowered"), -p.last_step_bp) : std::string(CbText("คงที่", "held")))) : std::string("-"), p.last_step_bp > 0 ? TC_ORANGE : (p.last_step_bp < 0 ? TC_GREEN : TC_GREY));
+	row(CbText("ทิศทาง (Bias)", "Bias"), p.measured ? (p.wanted_gap_bp >= POLICY_HOLD_BAND_BP ? std::string(CbText("ตึงตัว (อยากขึ้น)", "tightening")) : (p.wanted_gap_bp <= -POLICY_HOLD_BAND_BP ? std::string(CbText("ผ่อนคลาย (อยากลด)", "easing")) : std::string(CbText("เป็นกลาง", "neutral")))) : std::string("-"), TC_GREY);
+	row(CbText("ผลต่อตลาดล่าสุด (ทอง / หุ้น)", "Last market push (gold / shares)"), p.measured ? fmt::format("{} / {}", pct(p.last_gold_push_ppm / 100, true), pct(p.last_share_push_ppm / 100, true)) : std::string("-"), p.last_gold_push_ppm > 0 ? TC_GREEN : (p.last_gold_push_ppm < 0 ? TC_ORANGE : TC_GREY));
 	row(CbText("โหมดนโยบาย", "Policy mode"), p.emergency ? CbText("ฉุกเฉิน (เงินเฟ้อสูง)", "EMERGENCY (high inflation)") : (p.Extended() ? CbText("กำลังกลับสู่ปกติ", "returning to normal") : CbText("ปกติ", "Normal")), p.emergency ? TC_RED : (p.Extended() ? TC_ORANGE : TC_GREY));
-	row(CbText("การปรับครั้งล่าสุด", "Last change"), p.measured ? pct(p.last_step_bp, true) : std::string("-"), TC_GREY);
 	const int64_t today = static_cast<int64_t>(GameTimeManager::Get().GetCurrentGameDay());
-	const int64_t left_days = p.last_decision_day < 0 ? POLICY_DECISION_DAYS : std::clamp<int64_t>(POLICY_DECISION_DAYS - (today - p.last_decision_day), 0, POLICY_DECISION_DAYS);
-	row(CbText("ทบทวนครั้งต่อไป", "Next review"), fmt::format("{} {}", left_days, CbText("วัน", "days")), TC_GREY);
+	row(CbText("ประชุม FOMC ครั้งต่อไป", "Next FOMC meeting"), fmt::format("{} {}", p.last_decision_day < 0 ? POLICY_DECISION_DAYS : PolicyDaysToNextMeeting(today), CbText("วัน", "days")), TC_GREY);
 	separator();
 
 	/* Group 3: the rates of the loans now. */
+	row(CbText("Prime rate (ช่วงบน + 3.00%)", "Prime rate (upper + 3.00%)"), pct(PolicyPrimeBp(p.shift_bp)));
+	row(CbText("Discount rate / IORB", "Discount rate / IORB"), fmt::format("{} / {}", pct(PolicyDiscountBp(p.shift_bp)), pct(PolicyIorbBp(p.shift_bp))));
 	row(CbText("ดอกเบี้ยเงินกู้ เครดิตดี", "Loan rate, good credit"), fmt::format("{} - {}", pct(BankShiftedRateBp(BANK_RATE_GOOD_MIN_BP, p.shift_bp)), pct(BankShiftedRateBp(BANK_RATE_GOOD_MAX_BP, p.shift_bp))));
 	row(CbText("ดอกเบี้ยเงินกู้ เครดิตต่ำ", "Loan rate, poor credit"), fmt::format("{} - {}", pct(BankShiftedRateBp(BANK_RATE_POOR_MIN_BP, p.shift_bp)), pct(BankShiftedRateBp(BANK_RATE_POOR_MAX_BP, p.shift_bp))));
 	row(CbText("ดอกเบี้ยผิดนัด", "Penalty rate"), fmt::format("{} - {}", pct(BankPenaltyRateBp(1, p.shift_bp)), pct(BankPenaltyRateBp(BANK_PENALTY_LEVEL_MAX, p.shift_bp))), TC_RED);
@@ -842,10 +847,10 @@ static void DrawMonetaryPolicy(const Rect &r)
 			continue;
 		}
 		const PolicyDecision &d = p.log[i];
-		const char *what_th = d.shift_after > d.shift_before ? "ขึ้น" : (d.shift_after < d.shift_before ? "ลง" : "คงที่");
-		const char *what_en = d.shift_after > d.shift_before ? "tighten" : (d.shift_after < d.shift_before ? "ease" : "hold");
-		row(fmt::format("D{}{} {} ({} {}, {} {})", d.day + 1, d.emergency ? "!" : "", CbText(what_th, what_en), CbText("เฟ้อ", "infl"), pct(d.inflation_bp), CbText("โต", "growth"), pct(d.growth_bp)),
-				fmt::format("{} -> {}", pct(d.shift_before, true), pct(d.shift_after, true)),
+		const char *what_th = d.shift_after > d.shift_before ? "ขึ้น" : (d.shift_after < d.shift_before ? "ลด" : "คงที่");
+		const char *what_en = d.shift_after > d.shift_before ? "hike" : (d.shift_after < d.shift_before ? "cut" : "hold");
+		row(fmt::format("D{}{}{} {} ({} {}, {} {})", d.day + 1, d.emergency ? "!" : "", d.unscheduled ? "*" : "", CbText(what_th, what_en), CbText("เฟ้อ", "infl"), pct(d.inflation_bp), CbText("โต", "growth"), pct(d.growth_bp)),
+				fmt::format("{} -> {}", pct(PolicyUpperBp(d.shift_before)), pct(PolicyUpperBp(d.shift_after))),
 				d.shift_after > d.shift_before ? TC_ORANGE : (d.shift_after < d.shift_before ? TC_GREEN : TC_GREY));
 	}
 	separator();
@@ -875,15 +880,17 @@ static void DrawMonetaryPolicy(const Rect &r)
 	separator();
 
 	/* Group 7: the rule of the bank. */
-	row(CbText("ทบทวนทุก", "Review every"), fmt::format("{} {}", POLICY_DECISION_DAYS, CbText("วัน", "days")), TC_GREY);
-	row(CbText("ปรับได้ไม่เกินครั้งละ", "At most per review"), pct(p.Extended() ? POLICY_EMERGENCY_STEP_BP : POLICY_MAX_STEP_BP), TC_GREY);
-	row(CbText("ช่วงส่วนปรับ", "Range of the shift"), fmt::format("{} .. {}", pct(POLICY_SHIFT_MIN_BP, true), pct(p.Extended() ? POLICY_EMERGENCY_SHIFT_MAX_BP : POLICY_SHIFT_MAX_BP, true)), TC_GREY);
+	row(CbText("ประชุม FOMC", "FOMC meetings"), fmt::format("{} {} ({} ~{} {})", POLICY_MEETINGS_PER_YEAR, CbText("ครั้งต่อปีเกม", "per game year"), CbText("ทุก", "every"), POLICY_DECISION_DAYS, CbText("วัน", "days")), TC_GREY);
+	row(CbText("ปรับได้ครั้งละ (ปกติ / ฉุกเฉิน)", "Move per meeting (normal / emergency)"), fmt::format("{} / {}", pct(POLICY_MAX_STEP_BP), pct(POLICY_EMERGENCY_STEP_BP)), TC_GREY);
+	row(CbText("ช่วงอัตรานโยบาย (ขอบบน)", "Policy rate range (upper bound)"), fmt::format("{} .. {}", pct(PolicyUpperBp(POLICY_SHIFT_MIN_BP)), pct(PolicyUpperBp(p.Extended() ? POLICY_EMERGENCY_SHIFT_MAX_BP : POLICY_SHIFT_MAX_BP))), TC_GREY);
+	row(CbText("ประชุมนอกรอบ ลด เมื่อจ้างงาน (ต่อปี)", "Unscheduled cut when jobs (yearly)"), fmt::format("<= {}", pct(POLICY_CRASH_JOBS_BP)), TC_GREY);
+	row(CbText("ประชุมนอกรอบ ขึ้น เมื่อเงินเฟ้อ (ต่อปี)", "Unscheduled hike when inflation (yearly)"), fmt::format(">= {}", pct(POLICY_SPIKE_INFLATION_BP)), TC_GREY);
 	row(CbText("โหมดฉุกเฉิน เริ่ม / สิ้นสุด เมื่อเงินเฟ้อ", "Emergency mode on / off at inflation"), fmt::format("> {} / < {}", pct(POLICY_EMERGENCY_ON_BP), pct(POLICY_EMERGENCY_OFF_BP)), TC_GREY);
 }
 
 /** The monetary policy window: its own window, so it can stay open next to the bank window. */
 struct CentralBankPolicyWindow : Window {
-	static constexpr int POLICY_ROWS = 31; ///< Rows of the panel: 15 of the policy, 3 of the credit limit, the decision log (a heading and 5 lines), the gold of the bank (3 rows, a heading and 3 lines).
+	static constexpr int POLICY_ROWS = 38; ///< Rows of the panel: 15 of the policy, 3 of the credit limit, the decision log (a heading and 5 lines), the gold of the bank (3 rows, a heading and 3 lines).
 	static constexpr int POLICY_SEPARATORS = 7;
 
 	/** Redraw regularly: the numbers change all the time. */

@@ -12,6 +12,8 @@
 #include "central_bank.h"
 #include "gold_reserve.h"
 #include "economy_func.h"
+#include "economy_news.h"
+#include "market_events.h"
 #include "wallet_base.h"
 #include "stock_base.h"
 #include "command_func.h"
@@ -240,16 +242,21 @@ int64_t GetPriceIndexPpm()
 }
 
 /**
- * One day of the monetary policy. Once every POLICY_DECISION_DAYS days: measure the yearly change of the price index and the
- * yearly growth of the company values, ask the rule for the shift (PolicyDesiredShiftBp) and move the shift towards it by at
- * most POLICY_MAX_STEP_BP (POLICY_EMERGENCY_STEP_BP in emergency mode, see POLICY_EMERGENCY_*).
+ * One day of the monetary policy, Fed style. The bank meets POLICY_MEETINGS_PER_YEAR (8) times per game year (the first day of each meeting
+ * period, see PolicyMeetingIndex). At a meeting it measures the yearly change of the price index (inflation) and the growth of the real
+ * economy, asks the rule (Taylor rule, PolicyDesiredShiftBp) where the policy rate should be, and then does what a central bank does:
+ * it moves in steps of 25 bp (50 bp when the rule is far away, 75 bp at most in emergency mode, see POLICY_EMERGENCY_*) or it holds.
+ * The second mandate is employment: the growth term is the company value growth blended with the yearly growth of the jobs
+ * (Transport Payrolls) by POLICY_JOBS_WEIGHT_PERCENT.
  * @param day Number of the game day.
  * @param index_ppm The price index now (GetPriceIndexPpm).
  * @param value_now Sum of the company values of the last finished quarter.
  * @param value_before Sum of the company values of the quarter before it.
- * @return True when a decision was made today.
+ * @param jobs_growth_bp Yearly growth of the employment in bp (only used when has_jobs).
+ * @param has_jobs True when at least two payroll reports exist.
+ * @return True when a meeting was held today.
  */
-bool MonetaryPolicy::Update(int64_t day, int64_t index_ppm, int64_t value_now, int64_t value_before)
+bool MonetaryPolicy::Update(int64_t day, int64_t index_ppm, int64_t value_now, int64_t value_before, int64_t jobs_growth_bp, bool has_jobs)
 {
 	if (index_ppm <= 0) return false;
 	const int64_t elapsed = day - this->last_decision_day;
@@ -259,14 +266,22 @@ bool MonetaryPolicy::Update(int64_t day, int64_t index_ppm, int64_t value_now, i
 		this->last_decision_day = day;
 		return false;
 	}
-	if (elapsed < POLICY_DECISION_DAYS) return false;
+	if (PolicyMeetingIndex(day) <= PolicyMeetingIndex(this->last_decision_day)) return false; // Not a meeting day.
 
-	this->inflation_bp = std::clamp<int64_t>((index_ppm - this->prev_index_ppm) * 10'000 * BANK_DAYS_PER_YEAR / (this->prev_index_ppm * elapsed), -2000, 5000);
+	/* A meeting every 45 days sees a short, noisy stretch of the index: the Fed looks at the 12 months, so the reading is averaged with the one before it. */
+	const int64_t reading_bp = std::clamp<int64_t>((index_ppm - this->prev_index_ppm) * 10'000 * BANK_DAYS_PER_YEAR / (this->prev_index_ppm * std::max<int64_t>(1, elapsed)), -2000, 5000);
+	this->inflation_bp = this->measured ? (reading_bp + this->inflation_bp) / 2 : reading_bp;
 
+	/* Growth of the company values (a quarter against the quarter before it), yearly. */
 	int64_t growth_period_bp = 0;
 	while (value_before > 10'000'000'000'000 ) { value_before /= 1000; value_now /= 1000; } // Only for absurd values: keeps the multiplication below small.
 	if (value_before > 0) growth_period_bp = std::clamp<int64_t>((value_now - value_before) * 10'000 / value_before, -10'000, 100'000);
-	this->growth_bp = growth_period_bp * BANK_DAYS_PER_YEAR / POLICY_DECISION_DAYS;
+	const int64_t value_growth_bp = growth_period_bp * BANK_DAYS_PER_YEAR / POLICY_VALUE_PERIOD_DAYS;
+
+	/* Second mandate: employment. With a jobs figure the growth term is a blend; without it only the company values count. */
+	this->has_jobs = has_jobs;
+	this->jobs_bp = has_jobs ? std::clamp<int64_t>(jobs_growth_bp, -10'000, 100'000) : 0;
+	this->growth_bp = has_jobs ? (value_growth_bp * (100 - POLICY_JOBS_WEIGHT_PERCENT) + this->jobs_bp * POLICY_JOBS_WEIGHT_PERCENT) / 100 : value_growth_bp;
 
 	/* Emergency mode with a hysteresis: on above 10% yearly inflation, off below 7%. */
 	if (!this->emergency && this->inflation_bp > POLICY_EMERGENCY_ON_BP) {
@@ -275,18 +290,76 @@ bool MonetaryPolicy::Update(int64_t day, int64_t index_ppm, int64_t value_now, i
 		this->emergency = false;
 	}
 
+	/* The target range always sits on a multiple of 25 bp (an old savegame may not): snap to the nearest one before the decision. */
+	this->shift_bp = (this->shift_bp >= 0 ? this->shift_bp + POLICY_MAX_STEP_BP / 2 : this->shift_bp - POLICY_MAX_STEP_BP / 2) / POLICY_MAX_STEP_BP * POLICY_MAX_STEP_BP;
 	const int64_t wanted = PolicyDesiredShiftBp(this->inflation_bp, this->growth_bp, this->emergency);
+	/* What the market expected: the part of the gap that the last meeting left open (its bias), rounded like a move. Nothing is expected at the first meeting. */
+	const int64_t expected_gap = this->measured ? this->wanted_gap_bp - this->last_step_bp : 0;
+	this->wanted_gap_bp = wanted - this->shift_bp;
 	/* The wide step also applies while the shift is still above the normal ceiling after the emergency, so it comes back down fast. */
-	const int64_t max_step = this->Extended() ? POLICY_EMERGENCY_STEP_BP : POLICY_MAX_STEP_BP;
-	const int64_t step = std::clamp<int64_t>(wanted - this->shift_bp, -max_step, max_step);
+	const int64_t max_step = this->Extended() ? POLICY_EMERGENCY_STEP_BP : POLICY_BIG_STEP_BP;
+	int64_t step = PolicyRoundMove(this->wanted_gap_bp, max_step);
 	const int64_t shift_before = this->shift_bp;
-	this->shift_bp = std::clamp<int64_t>(this->shift_bp + step, POLICY_SHIFT_MIN_BP, POLICY_EMERGENCY_SHIFT_MAX_BP);
+	this->shift_bp = std::clamp<int64_t>(this->shift_bp + step, POLICY_SHIFT_MIN_BP, this->Extended() || this->emergency ? POLICY_EMERGENCY_SHIFT_MAX_BP : POLICY_SHIFT_MAX_BP);
+	step = this->shift_bp - shift_before; // A move that hits the limit is smaller.
 	this->last_step_bp = step;
-	this->log.push_front(PolicyDecision{day, shift_before, this->shift_bp, this->inflation_bp, this->growth_bp, this->emergency});
+	this->last_surprise_bp = step - PolicyRoundMove(expected_gap, max_step);
+	this->last_unscheduled = false;
+	PolicyDecision d{day, shift_before, this->shift_bp, this->inflation_bp, this->growth_bp, this->emergency};
+	d.jobs_bp = this->jobs_bp;
+	d.has_jobs = has_jobs;
+	this->log.push_front(d);
 	if (this->log.size() > POLICY_LOG_MAX) this->log.pop_back();
 	this->prev_index_ppm = index_ppm;
 	this->last_decision_day = day;
 	this->measured = true;
+	return true;
+}
+
+/**
+ * An unscheduled meeting between the scheduled ones, like the emergency cut of the Fed in March 2020. Checked every day; it needs at least
+ * POLICY_UNSCHEDULED_MIN_DAYS days since the last meeting (so it can not repeat every day) and one of two events:
+ *   - Crash: a payroll report that came after the last meeting shows jobs falling by POLICY_CRASH_JOBS_BP a year or worse: cut by POLICY_UNSCHEDULED_CUT_BP.
+ *   - Spike: the price index rose at POLICY_SPIKE_INFLATION_BP a year or more since the last meeting, and inflation was already above
+ *     POLICY_EMERGENCY_OFF_BP at that meeting: hike by POLICY_UNSCHEDULED_HIKE_BP.
+ * The whole move is a surprise for the markets. The next scheduled meeting is not moved: it is held on the first day of its period as always.
+ * @return True when an unscheduled meeting was held today.
+ */
+bool MonetaryPolicy::CheckUnscheduled(int64_t day, int64_t index_ppm, int64_t jobs_growth_bp, bool has_jobs, int64_t jobs_report_day)
+{
+	if (!this->measured || this->last_decision_day < 0 || this->prev_index_ppm <= 0 || index_ppm <= 0) return false;
+	const int64_t elapsed = day - this->last_decision_day;
+	if (elapsed < POLICY_UNSCHEDULED_MIN_DAYS) return false;
+
+	const int64_t reading_bp = std::clamp<int64_t>((index_ppm - this->prev_index_ppm) * 10'000 * BANK_DAYS_PER_YEAR / (this->prev_index_ppm * elapsed), -2000, 5000);
+	const int64_t upper = this->emergency || this->Extended() ? POLICY_EMERGENCY_SHIFT_MAX_BP : POLICY_SHIFT_MAX_BP;
+
+	int64_t move = 0;
+	if (reading_bp >= POLICY_SPIKE_INFLATION_BP && this->inflation_bp > POLICY_EMERGENCY_OFF_BP && this->shift_bp < upper) {
+		move = POLICY_UNSCHEDULED_HIKE_BP;
+	} else if (has_jobs && jobs_report_day > this->last_decision_day && jobs_growth_bp <= POLICY_CRASH_JOBS_BP && this->shift_bp > POLICY_SHIFT_MIN_BP) {
+		move = -POLICY_UNSCHEDULED_CUT_BP;
+	}
+	if (move == 0) return false;
+
+	const int64_t shift_before = this->shift_bp;
+	this->shift_bp = std::clamp<int64_t>(this->shift_bp + move, POLICY_SHIFT_MIN_BP, upper);
+	const int64_t step = this->shift_bp - shift_before;
+	if (step == 0) return false;
+	this->last_step_bp = step;
+	this->last_surprise_bp = step; // Nobody expected it.
+	this->last_unscheduled = true;
+	this->wanted_gap_bp = 0;
+	this->has_jobs = has_jobs;
+	this->jobs_bp = has_jobs ? std::clamp<int64_t>(jobs_growth_bp, -10'000, 100'000) : 0;
+	PolicyDecision d{day, shift_before, this->shift_bp, reading_bp, this->growth_bp, this->emergency};
+	d.jobs_bp = this->jobs_bp;
+	d.has_jobs = has_jobs;
+	d.unscheduled = true;
+	this->log.push_front(d);
+	if (this->log.size() > POLICY_LOG_MAX) this->log.pop_back();
+	this->prev_index_ppm = index_ppm;
+	this->last_decision_day = day;
 	return true;
 }
 
@@ -769,6 +842,91 @@ void CentralBank::WriteOffRemoved(CompanyID company)
 }
 
 /**
+ * What a decision does to the markets (only when the rate moved): a hike pushes the gold demand and the sentiment of the shares down, a cut pushes them up.
+ * The size follows the move plus the surprise (see PolicyGoldPushPpm), so a move that the bias of the meeting before had announced counts half. The sentiment of the
+ * shares fades by itself within a few game hours, the gold pressure by 3% a day. Integer only; run on every client from the daily clock event.
+ */
+void CentralBank::ApplyMarketEffect()
+{
+	MonetaryPolicy &p = this->policy;
+	p.last_gold_push_ppm = 0;
+	p.last_share_push_ppm = 0;
+	if (p.last_step_bp == 0) return;
+	const int64_t gold = PolicyGoldPushPpm(p.last_step_bp, p.last_surprise_bp);
+	const int64_t shares = PolicySharePushPpm(p.last_step_bp, p.last_surprise_bp);
+	if (_gold_reserve.GetPriceCents() > 0) {
+		_gold_reserve.pressure_ppm = std::clamp<int64_t>(_gold_reserve.pressure_ppm + gold, -GoldReserveManager::PRESSURE_MAX_PPM, GoldReserveManager::PRESSURE_MAX_PPM);
+		p.last_gold_push_ppm = gold;
+	}
+	_market_events.market_sentiment_ppm = std::clamp<int64_t>(_market_events.market_sentiment_ppm + shares, -MARKET_SENTIMENT_MAX_PPM, MARKET_SENTIMENT_MAX_PPM);
+	p.last_share_push_ppm = shares;
+}
+
+/**
+ * Interest on reserve balances (IORB): once per game day the bank pays interest on the UNBORROWED liquid cash of every company in good standing,
+ * at PolicyIorbBp (upper bound of the range - 0.10%, so always below what a loan costs). The money comes from the own money of the bank, and only
+ * the part above BANK_IORB_BUDGET_FLOOR: when it is not enough every company gets the same share of what is due. The money is not income of the company
+ * for the statistics and the income tax; it is booked as income on the line BankInterest. Integer only, whole money units (the rest of a day is dropped).
+ */
+void CentralBank::PayIorb()
+{
+	if (!BANK_IORB_ENABLED) return;
+	const int64_t rate_bp = PolicyIorbBp(this->policy.shift_bp);
+	if (rate_bp <= 0) return;
+
+	std::array<int64_t, MAX_COMPANIES> due{};
+	int64_t total = 0;
+	for (const Company *c : Company::Iterate()) {
+		if (this->accounts[c->index.base()].in_default) continue;
+		const int64_t cash = std::min<int64_t>(GetUnborrowedLiquidCash(c->index), 1'000'000'000'000);
+		due[c->index.base()] = cash * rate_bp / BANK_INTEREST_DIVISOR;
+		total += due[c->index.base()];
+	}
+	if (total <= 0) return;
+	const int64_t available = std::max<int64_t>(0, this->trading_revenue_cents / 100 - BANK_IORB_BUDGET_FLOOR);
+	const int64_t pay_total = std::min(total, available);
+	if (pay_total <= 0) return;
+
+	int shift = 0;
+	while ((total >> shift) > 1'000'000'000) shift++;
+	int64_t paid = 0;
+	for (Company *c : Company::Iterate()) {
+		const int64_t d = due[c->index.base()];
+		if (d <= 0) continue;
+		const int64_t share = pay_total >= total ? d : (BankShareOf(pay_total >> shift, d >> shift, total >> shift) << shift);
+		if (share <= 0) continue;
+		c->money += Money(share);
+		RecordLedger(c->index, LedgerItem::BankInterest, share);
+		paid += share;
+	}
+	this->trading_revenue_cents -= paid * 100;
+}
+
+/**
+ * The statement after a meeting, as a news item: hold, raise or lower, the new target range and the two numbers behind it.
+ * The text is only for the display (every client shows its own news); the policy itself was decided in MonetaryPolicy::Update().
+ * @param shift_before The shift before the meeting.
+ */
+void CentralBank::AnnounceMeeting(int64_t shift_before)
+{
+	const MonetaryPolicy &p = this->policy;
+	auto pct = [](int64_t bp) { return fmt::format("{}.{:02}%", bp / 100, bp % 100); };
+	const int64_t moved = p.shift_bp - shift_before;
+	const std::string range = fmt::format("{} - {}", pct(PolicyLowerBp(p.shift_bp)), pct(PolicyUpperBp(p.shift_bp)));
+	std::string text;
+	if (moved > 0) {
+		text = fmt::format("FOMC{}: the central bank RAISED the target range by {} bp to {}. Inflation {}, growth {}. Loan rates follow at once.", p.last_unscheduled ? " (UNSCHEDULED, inflation spike)" : "", moved, range, pct(std::max<int64_t>(0, p.inflation_bp)), pct(std::max<int64_t>(0, p.growth_bp)));
+	} else if (moved < 0) {
+		text = fmt::format("FOMC{}: the central bank LOWERED the target range by {} bp to {}. Inflation {}, growth {}. Loan rates follow at once.", p.last_unscheduled ? " (UNSCHEDULED, emergency cut after a jobs crash)" : "", -moved, range, pct(std::max<int64_t>(0, p.inflation_bp)), pct(std::max<int64_t>(0, p.growth_bp)));
+	} else {
+		const char *bias = p.wanted_gap_bp >= POLICY_HOLD_BAND_BP ? " Bias: tightening." : (p.wanted_gap_bp <= -POLICY_HOLD_BAND_BP ? " Bias: easing." : "");
+		text = fmt::format("FOMC: the central bank KEPT the target range at {}.{}", range, bias);
+	}
+	if (p.emergency) text += " (Emergency mode.)";
+	AddNewsItem(GetEncodedString(STR_JUST_RAW_STRING, text), NewsType::General, NewsStyle::Small, {});
+}
+
+/**
  * Once per game day, at 00:00 game time, the interest of the day is taken from the cash of every company that has a debt.
  * See BankSettleDay() for the rules: risk rate (3.5% .. 12%) from the debt-to-equity ratio; if the cash is not enough, the
  * penalty rate (15% .. 18%), the cash that exists is taken, the rest is added to the debt, and the penalty level goes up
@@ -815,7 +973,26 @@ void CentralBank::UpdateDaily(int64_t day)
 		value_now += static_cast<int64_t>(c->old_economy[0].company_value);
 		value_before += static_cast<int64_t>(c->old_economy[1].company_value);
 	}
-	this->policy.Update(day, GetPriceIndexPpm(), value_now, value_before);
+	/* Second mandate: the jobs. The two newest payroll reports (newest in front) give the yearly growth of the employment. */
+	int64_t jobs_growth_bp = 0;
+	bool has_jobs = false;
+	if (_payroll_news.releases.size() >= 2) {
+		const int64_t now_avg = _payroll_news.releases[0].avg_x100;
+		const int64_t before_avg = _payroll_news.releases[1].avg_x100;
+		if (before_avg > 0) {
+			jobs_growth_bp = std::clamp<int64_t>((now_avg - before_avg) * 10'000 / before_avg, -10'000, 100'000) * BANK_DAYS_PER_YEAR / PAYROLL_PERIOD_DAYS;
+			has_jobs = true;
+		}
+	}
+	const int64_t shift_before_meeting = this->policy.shift_bp;
+	const int64_t jobs_report_day = _payroll_news.releases.empty() ? -1 : _payroll_news.releases.front().day;
+	const int64_t index_now = GetPriceIndexPpm();
+	if (this->policy.Update(day, index_now, value_now, value_before, jobs_growth_bp, has_jobs) ||
+			this->policy.CheckUnscheduled(day, index_now, jobs_growth_bp, has_jobs, jobs_report_day)) {
+		this->ApplyMarketEffect();
+		this->AnnounceMeeting(shift_before_meeting);
+	}
+	this->PayIorb();
 	this->TradeGold(day);
 
 	SnapshotYearlyExpenses();

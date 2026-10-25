@@ -68,7 +68,7 @@ static constexpr bool GAME_TIME_SYNC_CALENDAR = true;
  */
 static constexpr bool GAME_TIME_SYNC_QUARTERS = true;
 /** The cash that a new company starts with: there is no original loan. It is the company's own money: the company starts without any loan. In the base currency (pounds). */
-static constexpr int64_t GAME_TIME_STARTING_CAPITAL = 1'000'000;
+static constexpr int64_t GAME_TIME_STARTING_CAPITAL = 500'000;
 
 /** The kinds of events that a system can subscribe to. */
 enum class GameTimeEvent : uint8_t {

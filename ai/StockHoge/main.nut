@@ -748,6 +748,7 @@ class HogeAI extends AIController {
 			local bankDebt = GetCentralBankDebt();
 			if(bankDebt != null) {
 				HgLog.Info("central bank debt:"+bankDebt+" own money:"+GetOwnMoney());
+				RepayCentralBankSpare();
 			}
 			ResetEstimateTable();
 			while(indexPointer < 4) {
@@ -4224,12 +4225,15 @@ class HogeAI extends AIController {
 		self.supressInterval = true;
 
 		local execMode = AIExecMode();
-		/* OpenTTD-Stock: no original loan to take or repay. The money comes from the bot of the mod; when it does not come (the need is more than the bank
+		/* OpenTTD-Stock: the loan is a loan of the central bank (BorrowForCash). When the money does not come (the need is more than the bank
 		 * lends) a wait must still end, otherwise the whole AI stops for good. */
 		if(maxDays <= 0) maxDays = 150;
 		local first = true;
 		self.waitForPriceStartDate = AIDate.GetCurrentDate();
-		while(AICompany.GetBankBalance(AICompany.COMPANY_SELF) < needMoney + buffer) {
+		while(true) {
+			/* OpenTTD-Stock: take the missing money from the central bank (the original took a loan here). */
+			HogeAI.BorrowForCash(needMoney + buffer);
+			if(AICompany.GetBankBalance(AICompany.COMPANY_SELF) >= needMoney + buffer) break;
 			if(first) {
 				first = false;
 			} else {
@@ -4299,9 +4303,63 @@ class HogeAI extends AIController {
 		AIController.Sleep(sleepTime);
 	}
 	
-	function GetUsableMoney() {
-		// OpenTTD-Stock: no original loan, so only the cash counts. (The bot of the mod keeps the cash topped up from the central bank.)
+	function GetCash() {
 		return min(1000000000,AICompany.GetBankBalance(AICompany.COMPANY_SELF));
+	}
+
+	function GetUsableMoney() {
+		/* OpenTTD-Stock: the cash plus what the central bank still lends (as the original: cash + max loan - loan), so the planning knows it can borrow. */
+		local cash = HogeAI.GetCash();
+		local avail = HogeAI.GetCentralBankAvailable();
+		return min(1000000000, cash + (avail == null ? 0 : avail));
+	}
+
+	/** What the central bank still lends to the company, or null when the script API of the game cannot tell. */
+	function GetCentralBankAvailable() {
+		local self = HogeAI.Get();
+		if(self.centralBankApi == false) return null;
+		try {
+			local avail = AICompany.GetCentralBankAvailable(AICompany.COMPANY_SELF);
+			return avail >= 0 ? avail : null;
+		} catch(e) {
+			return null;
+		}
+	}
+
+	/** Borrow from the central bank until the cash is at least needCash (only what the bank lends, with a small safety margin). Returns true when the cash is enough afterwards. */
+	function BorrowForCash(needCash) {
+		local cash = HogeAI.GetCash();
+		if(cash >= needCash) return true;
+		local avail = HogeAI.GetCentralBankAvailable();
+		if(avail == null || avail <= 0) return false;
+		local amount = needCash - cash;
+		local limit = avail * 95 / 100;
+		if(amount > limit) amount = limit;
+		if(amount <= 0) return false;
+		local execMode = AIExecMode();
+		try {
+			if(AICompany.BorrowFromCentralBank(amount)) {
+				HgLog.Info("central bank loan:"+amount+" debt:"+HogeAI.GetCentralBankDebt());
+				return HogeAI.GetCash() >= needCash;
+			}
+		} catch(e) {
+			HgLog.Warning("OpenTTD-Stock: the script API has no BorrowFromCentralBank (build the mod with the newest apply_overlay.py). The AI cannot borrow.");
+		}
+		return false;
+	}
+
+	/** Repay the central bank with cash above a working reserve: the interest of a loan costs money that an idle company does not need to pay. */
+	function RepayCentralBankSpare() {
+		local debt = HogeAI.GetCentralBankDebt();
+		if(debt == null || debt <= 0) return;
+		local spare = HogeAI.GetCash() - HogeAI.GetInflatedMoney(150000);
+		local amount = min(debt, spare);
+		if(amount < HogeAI.GetInflatedMoney(1000)) return;
+		local execMode = AIExecMode();
+		try {
+			if(AICompany.RepayCentralBank(amount)) HgLog.Info("central bank repaid:"+amount);
+		} catch(e) {
+		}
 	}
 
 	/** The money that the company owes to the central bank, or null when the script API of the game cannot tell (a build of the mod without the central bank functions). */
@@ -4322,8 +4380,8 @@ class HogeAI extends AIController {
 	/** The money of the company that is not borrowed: the cash minus the debt at the central bank. Without the central bank functions it is the cash. */
 	function GetOwnMoney() {
 		local debt = HogeAI.GetCentralBankDebt();
-		if(debt == null) return HogeAI.GetUsableMoney();
-		return max(0, HogeAI.GetUsableMoney() - debt);
+		if(debt == null) return HogeAI.GetCash();
+		return max(0, HogeAI.GetCash() - debt);
 	}
 
 	function IsTooExpensive(cost) {

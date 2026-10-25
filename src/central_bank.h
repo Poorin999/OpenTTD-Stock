@@ -143,10 +143,31 @@ static constexpr int64_t POLICY_INFLATION_WEIGHT_PERCENT = 150; ///< The shift w
 static constexpr int64_t POLICY_TREND_GROWTH_BP = 600;       ///< Normal growth of the company values of the map: 6% a year.
 static constexpr int64_t POLICY_GAP_DIVISOR = 8;             ///< Growth above (below) the trend moves the shift by 1/8 of the difference.
 static constexpr int64_t POLICY_GAP_MAX_BP = 200;            ///< The growth term never moves the shift more than 2%.
-static constexpr int64_t POLICY_SHIFT_MIN_BP = -150;         ///< Lowest shift: -1.5%.
+static constexpr int64_t POLICY_SHIFT_MIN_BP = -325;         ///< Lowest shift: -3.25%, which puts the target range at 0.00% - 0.25% (the zero lower bound, as the Fed).
 static constexpr int64_t POLICY_SHIFT_MAX_BP = 600;          ///< Highest shift: +6%.
-static constexpr int64_t POLICY_MAX_STEP_BP = 25;            ///< Speed limit: the shift changes by at most 0.25% per decision.
-static constexpr int64_t POLICY_DECISION_DAYS = 90;          ///< One decision per quarter (90 game days).
+static constexpr int64_t POLICY_MAX_STEP_BP = 25;            ///< The normal move of a meeting: 0.25%, as the Fed.
+static constexpr int64_t POLICY_BIG_STEP_BP = 50;            ///< A bigger move (0.50%), only when the rule wants at least POLICY_BIG_STEP_MIN_BP.
+static constexpr int64_t POLICY_BIG_STEP_MIN_BP = 38;        ///< The rule wants 38 bp or more away from the rate: 50 bp instead of 25.
+static constexpr int64_t POLICY_MEETINGS_PER_YEAR = 8;        ///< FOMC: 8 scheduled meetings per game year (a meeting about every 45.6 game days).
+static constexpr int64_t POLICY_DECISION_DAYS = BANK_DAYS_PER_YEAR / POLICY_MEETINGS_PER_YEAR; ///< Average days between meetings (45), for the display.
+static constexpr int64_t POLICY_VALUE_PERIOD_DAYS = 90;      ///< The company values are compared quarter against quarter (90 game days), whatever the meeting rhythm.
+static constexpr int64_t POLICY_HOLD_BAND_BP = 13;           ///< A wanted move of less than 13 bp rounds to nothing: the Fed holds (it moves in steps of 25 bp).
+static constexpr int64_t POLICY_RANGE_WIDTH_BP = 25;         ///< The target range is 25 bp wide: the policy rate is its upper bound, as the federal funds target.
+static constexpr int64_t POLICY_NEUTRAL_RATE_BP = 350;       ///< Policy rate (upper bound) at shift 0. Equal to BANK_RATE_GOOD_MIN_BP, so the loan rates keep their numbers.
+static constexpr int64_t POLICY_PRIME_SPREAD_BP = 300;       ///< Prime rate = upper bound of the range + 3.00%.
+static constexpr int64_t POLICY_IORB_SPREAD_BP = -10;        ///< Rate paid on money kept at the bank (interest on reserve balances): upper bound - 0.10%.
+static constexpr int64_t POLICY_GOLD_PPM_PER_BP = 200;       ///< Effect on the gold price: ppm of demand pressure per bp of (move + surprise): a 25 bp hike that was not expected = -1.0%. Hikes push gold down, cuts up.
+static constexpr int64_t POLICY_GOLD_PUSH_MAX_PPM = 50'000;  ///< One decision never moves the gold demand by more than 5%.
+static constexpr int64_t POLICY_SHARE_PPM_PER_BP = 100;      ///< Effect on the shares: ppm of market sentiment per bp of (move + surprise): a 25 bp hike that was not expected = -0.5%. Hikes push the shares down, cuts up.
+static constexpr int64_t POLICY_SHARE_PUSH_MAX_PPM = 30'000; ///< One decision never moves the sentiment of the shares by more than 3%.
+static constexpr int64_t POLICY_UNSCHEDULED_MIN_DAYS = 14;   ///< An unscheduled meeting needs at least 14 game days since the last meeting.
+static constexpr int64_t POLICY_CRASH_JOBS_BP = -5000;       ///< A new payroll report with a yearly job growth of -50% or worse is a crash: an unscheduled cut.
+static constexpr int64_t POLICY_SPIKE_INFLATION_BP = 2000;   ///< Inflation since the last meeting of 20% a year or more (and above POLICY_EMERGENCY_OFF_BP at that meeting) is a spike: an unscheduled hike.
+static constexpr int64_t POLICY_UNSCHEDULED_CUT_BP = 50;     ///< The unscheduled cut: 0.50% (the Fed cut 50 bp on 3 March 2020).
+static constexpr int64_t POLICY_UNSCHEDULED_HIKE_BP = 75;    ///< The unscheduled hike: 0.75%.
+static constexpr bool BANK_IORB_ENABLED = true;              ///< The bank pays interest on the unborrowed cash of the companies (IORB). Set to false for no interest on cash.
+static constexpr int64_t BANK_IORB_BUDGET_FLOOR = 12'500;    ///< The bank pays IORB only from its own money above this (money units, half of BANK_START_CAPITAL), so it can still write off bad loans.
+static constexpr int64_t POLICY_JOBS_WEIGHT_PERCENT = 50;    ///< Employment (second mandate): the growth term counts the jobs growth with this share, company values with the rest.
 static constexpr int64_t POLICY_MONEY_WEIGHT_PERCENT = 30;   ///< How much of the change of the cash in circulation goes into the price index.
 static constexpr int64_t BANK_RATE_FLOOR_BP = 100;           ///< The rate of a loan is never below 1% ...
 static constexpr int64_t BANK_RATE_CEIL_BP = 1400;           ///< ... and never above 14%, so it stays under the penalty rate (15%).
@@ -162,7 +183,7 @@ static constexpr int64_t BANK_RATE_CEIL_BP = 1400;           ///< ... and never 
  */
 static constexpr int64_t POLICY_EMERGENCY_ON_BP = 1000;          ///< Emergency mode starts above 10% yearly inflation.
 static constexpr int64_t POLICY_EMERGENCY_OFF_BP = 700;          ///< Emergency mode ends below 7% yearly inflation.
-static constexpr int64_t POLICY_EMERGENCY_STEP_BP = 100;         ///< Speed limit in emergency mode: 1% per review.
+static constexpr int64_t POLICY_EMERGENCY_STEP_BP = 75;          ///< Speed limit in emergency mode: 0.75% per meeting (the Fed did 75 bp in 2022).
 static constexpr int64_t POLICY_EMERGENCY_SHIFT_MAX_BP = 1500;   ///< Highest shift in emergency mode: +15%.
 static constexpr int64_t BANK_RATE_CEIL_EMERGENCY_BP = 2500;     ///< Loan rate ceiling while the shift is above the normal ceiling: 25%.
 static constexpr int64_t BANK_PENALTY_EMERGENCY_EXTRA_BP = BANK_RATE_CEIL_EMERGENCY_BP - BANK_RATE_CEIL_BP; ///< Added to the penalty rate: 26% .. 29%, above the loan ceiling.
@@ -173,7 +194,7 @@ static constexpr int64_t POLICY_CREDIT_MIN_EMERGENCY_PERCENT = 10; ///< The cred
  * The limit is a share of the net equity of the company. The share is CENTRAL_BANK_CREDIT_PERCENT (50%) when the policy shift
  * is 0. A tight policy (a positive shift) lowers it by 1 percentage point for every POLICY_CREDIT_BP_PER_PERCENT bp of shift,
  * an easy policy (a negative shift) raises it. The credit standing of the gold reserve (C .. AAA) then scales the limit again.
- * A company that starts with GAME_TIME_STARTING_CAPITAL (1,000,000) and no debt can borrow about 500,000 at a shift of 0 and standing A.
+ * A company that starts with GAME_TIME_STARTING_CAPITAL (500,000) and no debt can borrow about 250,000 at a shift of 0 and standing A.
  */
 static constexpr int64_t POLICY_CREDIT_BP_PER_PERCENT = 20; ///< 20 bp of shift move the credit share by 1 percentage point.
 static constexpr int64_t POLICY_CREDIT_MIN_PERCENT = 25;    ///< The share of the equity is never below 25% ...
@@ -214,14 +235,70 @@ inline int64_t PolicyDesiredShiftBp(int64_t inflation_bp, int64_t growth_bp, boo
 	return std::clamp<int64_t>(err * POLICY_INFLATION_WEIGHT_PERCENT / 100 + gap, POLICY_SHIFT_MIN_BP, emergency ? POLICY_EMERGENCY_SHIFT_MAX_BP : POLICY_SHIFT_MAX_BP);
 }
 
+/*
+ * ---- Fed style: target range, meetings, rounding to 25 bp ------------------------------------------------------------
+ * The saved state is still the shift (in bp). The policy rate is the UPPER bound of the target range: neutral rate + shift. The loan
+ * rates are the risk curve moved by the shift, so a loan rate is policy rate + credit spread, as bank lending follows the federal funds rate.
+ */
+/** Upper bound of the target range (the policy rate) in bp for a shift. */
+inline int64_t PolicyUpperBp(int64_t shift_bp) { return POLICY_NEUTRAL_RATE_BP + shift_bp; }
+/** Lower bound of the target range in bp. */
+inline int64_t PolicyLowerBp(int64_t shift_bp) { return std::max<int64_t>(0, PolicyUpperBp(shift_bp) - POLICY_RANGE_WIDTH_BP); }
+/** Prime rate: upper bound + 3.00%. */
+inline int64_t PolicyPrimeBp(int64_t shift_bp) { return PolicyUpperBp(shift_bp) + POLICY_PRIME_SPREAD_BP; }
+/** Discount rate (primary credit): the upper bound. */
+inline int64_t PolicyDiscountBp(int64_t shift_bp) { return PolicyUpperBp(shift_bp); }
+/** Interest on reserve balances: upper bound - 0.10%. */
+inline int64_t PolicyIorbBp(int64_t shift_bp) { return std::max<int64_t>(0, PolicyUpperBp(shift_bp) + POLICY_IORB_SPREAD_BP); }
+
+/** Number of the meeting period that a game day belongs to: 8 per game year, so a meeting is held on the first day of each period. */
+inline int64_t PolicyMeetingIndex(int64_t day) { return day < 0 ? -1 : day * POLICY_MEETINGS_PER_YEAR / BANK_DAYS_PER_YEAR; }
+/** Game days until the next meeting (1 .. 46; the meeting is held on the first day of the next period). */
+inline int64_t PolicyDaysToNextMeeting(int64_t day)
+{
+	const int64_t next = PolicyMeetingIndex(day) + 1;
+	return std::max<int64_t>(1, (next * BANK_DAYS_PER_YEAR + POLICY_MEETINGS_PER_YEAR - 1) / POLICY_MEETINGS_PER_YEAR - day);
+}
+
+/**
+ * Round the move that the rule wants to what a meeting does: nothing below POLICY_HOLD_BAND_BP, 25 bp, 50 bp when the rule wants
+ * POLICY_BIG_STEP_MIN_BP or more, and never more than max_step. Always a multiple of 25 bp.
+ */
+inline int64_t PolicyRoundMove(int64_t wanted_move_bp, int64_t max_step_bp)
+{
+	const int64_t a = wanted_move_bp < 0 ? -wanted_move_bp : wanted_move_bp;
+	int64_t step = 0;
+	if (a >= POLICY_BIG_STEP_MIN_BP) {
+		step = std::max<int64_t>(POLICY_BIG_STEP_BP, (a + POLICY_MAX_STEP_BP / 2) / POLICY_MAX_STEP_BP * POLICY_MAX_STEP_BP); // Emergency: 75 and more.
+	} else if (a >= POLICY_HOLD_BAND_BP) {
+		step = POLICY_MAX_STEP_BP;
+	}
+	step = std::min(step, std::max(POLICY_MAX_STEP_BP, max_step_bp / POLICY_MAX_STEP_BP * POLICY_MAX_STEP_BP));
+	return wanted_move_bp < 0 ? -step : step;
+}
+
+/** Push on the gold demand (ppm, negative = down) for a move and its surprise, both in bp. A move that was expected counts half, a surprise full. */
+inline int64_t PolicyGoldPushPpm(int64_t step_bp, int64_t surprise_bp)
+{
+	return std::clamp<int64_t>(-(step_bp + surprise_bp) * POLICY_GOLD_PPM_PER_BP, -POLICY_GOLD_PUSH_MAX_PPM, POLICY_GOLD_PUSH_MAX_PPM);
+}
+/** Push on the sentiment of the shares (ppm) for a move and its surprise, both in bp. */
+inline int64_t PolicySharePushPpm(int64_t step_bp, int64_t surprise_bp)
+{
+	return std::clamp<int64_t>(-(step_bp + surprise_bp) * POLICY_SHARE_PPM_PER_BP, -POLICY_SHARE_PUSH_MAX_PPM, POLICY_SHARE_PUSH_MAX_PPM);
+}
+
 /** One decision of the bank, for the decision log of the policy window. */
 struct PolicyDecision {
 	int64_t day = 0;           ///< Game day of the decision.
 	int64_t shift_before = 0;  ///< Policy shift before it, in bp.
 	int64_t shift_after = 0;   ///< Policy shift after it, in bp.
 	int64_t inflation_bp = 0;  ///< Yearly inflation that it measured.
-	int64_t growth_bp = 0;     ///< Yearly growth of the company values that it measured.
+	int64_t growth_bp = 0;     ///< Yearly growth the rule used (company values blended with the jobs, see POLICY_JOBS_WEIGHT_PERCENT).
 	bool emergency = false;    ///< True when the bank was in emergency mode at this decision.
+	int64_t jobs_bp = 0;       ///< Yearly growth of the employment (Transport Payrolls) at this meeting; only meaningful when has_jobs.
+	bool has_jobs = false;     ///< True when two payroll reports existed, so the jobs counted.
+	bool unscheduled = false;  ///< True for a meeting between the scheduled ones (crash or inflation spike).
 };
 
 /** How many decisions the log keeps. Only for the display: it is not saved and starts empty after a load. */
@@ -237,12 +314,20 @@ struct MonetaryPolicy {
 	bool measured = false;           ///< True after the first real decision (before it there is nothing to show). Saved.
 	bool emergency = false;          ///< Emergency mode for high inflation (see POLICY_EMERGENCY_*). Saved in bit 1 of the ym field of SRK_POLICY.
 	int64_t last_step_bp = 0;        ///< What the last decision changed, for the display. Not saved.
+	int64_t jobs_bp = 0;             ///< Yearly growth of the employment that the last meeting measured (Transport Payrolls). Not saved.
+	bool has_jobs = false;           ///< True when the last meeting had a jobs figure. Not saved.
+	int64_t last_surprise_bp = 0;    ///< The last move minus the move that the bias of the meeting before had led to. Not saved.
+	bool last_unscheduled = false;   ///< True when the last decision was an unscheduled meeting. Not saved.
+	int64_t last_gold_push_ppm = 0;  ///< What the last decision pushed the gold demand by. Not saved.
+	int64_t last_share_push_ppm = 0; ///< What the last decision pushed the sentiment of the shares by. Not saved.
+	int64_t wanted_gap_bp = 0;       ///< Where the rule wants the policy rate minus where it is (the bias: above 0 hawkish, below 0 dovish). Not saved.
 	std::deque<PolicyDecision> log{};///< The latest decisions, the newest in front. Not saved.
 
 	void Reset() { *this = MonetaryPolicy{}; }
 	/** True while the wider limits apply: in emergency mode, and afterwards until the shift is back inside the normal range. */
 	bool Extended() const { return this->emergency || this->shift_bp > POLICY_SHIFT_MAX_BP; }
-	bool Update(int64_t day, int64_t index_ppm, int64_t value_now, int64_t value_before);
+	bool Update(int64_t day, int64_t index_ppm, int64_t value_now, int64_t value_before, int64_t jobs_growth_bp = 0, bool has_jobs = false);
+	bool CheckUnscheduled(int64_t day, int64_t index_ppm, int64_t jobs_growth_bp, bool has_jobs, int64_t jobs_report_day);
 };
 
 /** The penalty rate in bp for a penalty level (1 or more): 1500, 1550, ... capped at 1800; 1100 more while the policy shift is above the normal ceiling (emergency). */
@@ -391,7 +476,7 @@ static constexpr int64_t BANK_GOLD_SELL_ABOVE_BP = 3000;  ///< Sell while the ba
 static constexpr int64_t BANK_GOLD_MAX_DAILY_OZ = 500;    ///< At most this many ounces per game day.
 static constexpr int64_t BANK_GOLD_CREATE_MAX_PERCENT = 1; ///< The bank never creates more than 1% of the cash in circulation in one day.
 static constexpr int64_t BANK_GOLD_CASH_MAX_PERCENT = 5;  ///< The bank never takes more than 5% of the unborrowed liquid cash of all companies in one day.
-static constexpr int64_t BANK_START_CAPITAL = 50'000;     ///< Own money of the bank at the start of a game, in money units (5% of the 1,000,000 that a company starts with).
+static constexpr int64_t BANK_START_CAPITAL = 25'000;     ///< Own money of the bank at the start of a game, in money units (5% of the 500,000 that a company starts with).
 static constexpr size_t BANK_GOLD_LOG_MAX = 6;            ///< How many trades the log keeps (not saved).
 
 /*
@@ -421,6 +506,9 @@ struct CentralBank {
 	void Reset();
 	void UpdateDaily(int64_t day);
 	void TradeGold(int64_t day);
+	void AnnounceMeeting(int64_t shift_before);
+	void ApplyMarketEffect();
+	void PayIorb();
 	/** Auction value of the stations and infrastructure of a company in bankruptcy (money units, at the auction price). Not saved. */
 	std::array<int64_t, MAX_COMPANIES> auction_infra{};
 
