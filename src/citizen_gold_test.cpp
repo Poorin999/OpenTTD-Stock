@@ -44,7 +44,7 @@ static Result Sim(uint64_t seed, int days, bool print_share = false)
 			for (size_t i = 0; i < STYLE_COUNT; i++) {
 				Book &b = r.b[i];
 				if (b.cooldown > 0) b.cooldown--;
-				GoldOrder o = Decide(static_cast<Style>(i), b, m, Mix(seed, 1, i, d * 24 + h));
+				Order o = Decide(static_cast<Style>(i), b, m, Mix(seed, 1, i, d * 24 + h));
 				if (o.cz <= 0) continue;
 				if (o.buy) { Fill f = ApplyBuy(b, o.cz, m.ask_cents, INT64_MAX); r.bought_cz += f.cz; CHECK(f.cz >= 0); }
 				else { Fill f = ApplySell(b, o.cz, m.bid_cents); r.sold_cz += f.cz; if (static_cast<Style>(i) == Style::Speculator && b.gold_cz == 0 && f.cz > 0) b.cooldown = SPEC_COOLDOWN_HOURS; }

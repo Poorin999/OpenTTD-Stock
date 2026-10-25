@@ -71,12 +71,13 @@ static int64_t HistoryAverage(size_t n, size_t min_days)
 /** Give the four groups of a town their start wealth: a part is cash, a part is already gold (bought from the market stock at the middle price). */
 static void EndowTown(TownAccount &a, uint32_t town, int64_t population, int64_t index_ppm)
 {
-	const auto share = citizengold::GroupSharePpm(CitizenSeed(), town);
+	using namespace citizengold;
+	const auto share = GroupSharePpm(CitizenSeed(), town);
 	const int64_t price = _gold_reserve.price_cents;
-	for (size_t i = 0; i < citizengold::STYLE_COUNT; i++) {
-		const int64_t wealth = population * citizengold::START_WEALTH_PER_CAPITA * share[i] / citizengold::PPM * index_ppm / citizengold::PPM;
-		const int64_t gold_money = wealth * citizengold::START_GOLD_SHARE_PPM / citizengold::PPM;
-		citizengold::Book &b = a.books[i];
+	for (size_t i = 0; i < STYLE_COUNT; i++) {
+		const int64_t wealth = population * START_WEALTH_PER_CAPITA * share[i] / PPM * index_ppm / PPM;
+		const int64_t gold_money = wealth * START_GOLD_SHARE_PPM / PPM;
+		Book &b = a.books[i];
 		b.cash += wealth - gold_money;
 		if (price > 0 && gold_money > 0) {
 			const int64_t cz = gold_money * 10'000 / price;
@@ -114,11 +115,12 @@ static void SettleCarries(int64_t net_bought_cz)
  */
 static void TownsHourly(const GameTimeSnapshot &now)
 {
+	using namespace citizengold;
 	if (_game_mode != GM_NORMAL) return;
 	if (!_gold_reserve.EnsureStarted()) return;
 
 	const uint64_t hour = now.total_minutes / 60;
-	citizengold::MarketView m;
+	MarketView m;
 	m.price_cents = _gold_reserve.price_cents;
 	m.ask_cents = _gold_reserve.GetAskCents();
 	m.bid_cents = _gold_reserve.GetBidCents();
@@ -127,7 +129,7 @@ static void TownsHourly(const GameTimeSnapshot &now)
 	m.prev_close_cents = _gold_reserve.GetDayStartCents();
 	m.pressure_ppm = _gold_reserve.pressure_ppm;
 	const int64_t floor_oz = GoldReserveManager::MARKET_STOCK_START * TOWN_STOCK_FLOOR_PERCENT / 100;
-	m.stock_cz = std::max<int64_t>(0, _gold_reserve.market_stock_oz - floor_oz) * citizengold::CZ_PER_OZ;
+	m.stock_cz = std::max<int64_t>(0, _gold_reserve.market_stock_oz - floor_oz) * CZ_PER_OZ;
 
 	int64_t net_bought_cz = 0;
 	for (Town *t : Town::Iterate()) {
@@ -135,24 +137,24 @@ static void TownsHourly(const GameTimeSnapshot &now)
 		auto it = _town_treasury.accounts.find(t->index.base());
 		if (it == _town_treasury.accounts.end() || !it->second.started) continue;
 		TownAccount &a = it->second;
-		for (size_t i = 0; i < citizengold::STYLE_COUNT; i++) {
-			citizengold::Book &b = a.books[i];
+		for (size_t i = 0; i < STYLE_COUNT; i++) {
+			Book &b = a.books[i];
 			if (b.cooldown > 0) b.cooldown--;
-			const citizengold::GoldOrder o = citizengold::Decide(static_cast<citizengold::Style>(i), b, m, citizengold::Mix(CitizenSeed(), t->index.base(), i, hour));
+			const Order o = Decide(static_cast<Style>(i), b, m, Mix(CitizenSeed(), t->index.base(), i, hour));
 			if (o.cz <= 0) continue;
 			if (o.buy) {
-				const citizengold::Fill f = citizengold::ApplyBuy(b, o.cz, m.ask_cents, m.stock_cz);
+				const Fill f = ApplyBuy(b, o.cz, m.ask_cents, m.stock_cz);
 				if (f.cz <= 0) continue;
 				m.stock_cz -= f.cz;
 				net_bought_cz += f.cz;
-				_central_bank.trading_revenue_cents += (m.ask_cents - m.price_cents) * f.cz / citizengold::CZ_PER_OZ + f.commission * 100;
+				_central_bank.trading_revenue_cents += (m.ask_cents - m.price_cents) * f.cz / CZ_PER_OZ + f.commission * 100;
 			} else {
-				const citizengold::Fill f = citizengold::ApplySell(b, o.cz, m.bid_cents);
+				const Fill f = ApplySell(b, o.cz, m.bid_cents);
 				if (f.cz <= 0) continue;
 				m.stock_cz += f.cz;
 				net_bought_cz -= f.cz;
-				_central_bank.trading_revenue_cents += (m.price_cents - m.bid_cents) * f.cz / citizengold::CZ_PER_OZ + f.commission * 100;
-				if (static_cast<citizengold::Style>(i) == citizengold::Style::Speculator && b.gold_cz == 0) b.cooldown = static_cast<int32_t>(citizengold::SPEC_COOLDOWN_HOURS);
+				_central_bank.trading_revenue_cents += (m.price_cents - m.bid_cents) * f.cz / CZ_PER_OZ + f.commission * 100;
+				if (static_cast<Style>(i) == Style::Speculator && b.gold_cz == 0) b.cooldown = static_cast<int32_t>(SPEC_COOLDOWN_HOURS);
 				/* The town gains tax on the profit of the sale. */
 				if (f.gain > 0) {
 					const int64_t tax = std::min(b.cash, f.gain * TOWN_GAINS_TAX_PERCENT / 100);
