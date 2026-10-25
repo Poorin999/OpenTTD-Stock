@@ -23,6 +23,10 @@
  *     investors have made rich (the demand boost) and a big town pay more; a tiny, poor town pays less. How much depends on the cargo:
  *     people and consumer goods follow the town, raw material hardly does. The factor is limited, so the loop retail wealth ->
  *     demand -> income -> dividends -> retail wealth stays stable.
+ *   - Freight rate (step 3): the price of the transport service. Cargo that waits at the stations (the backlog) against what is carried per day
+ *     means the service is scarce: the rate goes up. A fleet that grows faster than its own long average means more capacity: the rate goes
+ *     down. It multiplies the income together with the price of the cargo. This is a brake that works against itself: a high rate pays for
+ *     new vehicles, the backlog shrinks, the rate comes back.
  */
 
 #ifndef CARGO_MARKET_MATH_H
@@ -59,13 +63,36 @@ static constexpr int64_t LOCAL_WEIGHT_PEOPLE_PPM = 1'000'000; ///< Passengers an
 static constexpr int64_t LOCAL_WEIGHT_CONSUMER_PPM = 800'000; ///< Goods and food are bought by the town.
 static constexpr int64_t LOCAL_WEIGHT_OTHER_PPM = 250'000;    ///< Raw material goes to industries: the town matters little.
 
-/** What is known about one cargo. Saved: price_ppm, ref_x100, fast_x100, days. delivered_today is not saved (a load starts the day again). */
+static constexpr int64_t BACKLOG_NORMAL_DAYS = 2;        ///< Cargo waiting for this many days of normal carrying (the normal level) is a normal backlog.
+static constexpr int64_t BACKLOG_DIV = 7;                ///< The backlog is smoothed: it follows the daily value by one this-many-th per day.
+static constexpr int64_t BACKLOG_WEIGHT_PPM = 300'000;   ///< A backlog twice the normal (pressure +1.0) raises the rate goal by 30%; an empty one lowers it by 30%.
+static constexpr int64_t FLEET_FAST_DIV = 30;            ///< The recent fleet size follows the daily count by one this-many-th per day (about a month).
+static constexpr int64_t FLEET_SLOW_DIV = 360;           ///< The long fleet size follows by one this-many-th per day (about a year).
+static constexpr int64_t FLEET_FLOOR_X100 = 1'000;       ///< The long fleet size counts as at least 10 vehicles (x100), so a tiny fleet does not swing the rate.
+static constexpr int64_t FLEET_GROWTH_MAX_PPM = 200'000; ///< Fleet growth against the long average is counted up to +-20% ...
+static constexpr int64_t FLEET_WEIGHT_PERCENT = 100;     ///< ... and it moves the rate goal by this share of it (growth +20% = rate -20%).
+static constexpr int64_t FREIGHT_MIN_PPM = 700'000;      ///< The freight rate is never below 70% ...
+static constexpr int64_t FREIGHT_MAX_PPM = 1'500'000;    ///< ... or above 150%.
+static constexpr int64_t FREIGHT_STEP_PPM = 50'000;      ///< Every day the rate goes 5% of the way to its goal (slower than the price: a service changes slowly).
+static constexpr int64_t BACKLOG_CAP_X100 = 1'000'000'000'000; ///< No backlog counts above 10^10 units (x100), so the products cannot overflow an int64.
+
+/** The vehicles of all companies: a fast and a long average, in vehicles x 100. Saved (SRK_FLEET). */
+struct FleetState {
+	int64_t fast_x100 = 0;   ///< Recent fleet size (about a month).
+	int64_t slow_x100 = 0;   ///< Long fleet size (about a year).
+	bool started = false;    ///< False until the first count: both averages start at the first count, so the first day gives growth 0.
+};
+
+/** What is known about one cargo. Saved: price_ppm, ref_x100, fast_x100, days, freight_ppm, backlog_x100. delivered_today and waiting_today are not saved (a load starts the day again). */
 struct CargoState {
 	int64_t price_ppm = PPM;      ///< What a unit pays now, 1.0 = the normal pay of OpenTTD.
 	int64_t ref_x100 = 0;         ///< Normal level of the deliveries, units per day x 100.
 	int64_t fast_x100 = 0;        ///< Recent level of the deliveries, units per day x 100.
 	int32_t days = 0;             ///< Game days since the first day of this cargo; counted up to BASELINE_DAYS + 1.
 	int64_t delivered_today = 0;  ///< Units delivered since midnight.
+	int64_t freight_ppm = PPM;    ///< The freight rate now, 1.0 = no change, FREIGHT_MIN_PPM .. FREIGHT_MAX_PPM.
+	int64_t backlog_x100 = 0;     ///< Smoothed number of units waiting at all stations, x 100.
+	int64_t waiting_today = 0;    ///< Units waiting at the stations when the day was counted (set by the caller before UpdateFreight).
 };
 
 /** The outside factor: the mood of the market and the money in circulation, around PPM. */
@@ -115,6 +142,56 @@ inline void UpdateDay(CargoState &s, int64_t elasticity_ppm, int64_t outside_ppm
 	}
 	const int64_t goal = std::clamp<int64_t>(supply * outside_ppm / PPM, PRICE_MIN_PPM, PRICE_MAX_PPM);
 	s.price_ppm = std::clamp<int64_t>(s.price_ppm + (goal - s.price_ppm) * PRICE_STEP_PPM / PPM, PRICE_MIN_PPM, PRICE_MAX_PPM);
+}
+
+/** One count of the fleet (vehicles of all companies). The first count starts both averages. */
+inline void UpdateFleet(FleetState &f, int64_t vehicles)
+{
+	const int64_t now_x100 = std::clamp<int64_t>(vehicles, 0, LEVEL_CAP_X100 / 100) * 100;
+	if (!f.started) { f.fast_x100 = f.slow_x100 = now_x100; f.started = true; return; }
+	f.fast_x100 += (now_x100 - f.fast_x100) / FLEET_FAST_DIV;
+	f.slow_x100 += (now_x100 - f.slow_x100) / FLEET_SLOW_DIV;
+}
+
+/** Fleet growth against the long average, -FLEET_GROWTH_MAX_PPM .. +FLEET_GROWTH_MAX_PPM (positive = more vehicles than usual). */
+inline int64_t FleetGrowthPpm(const FleetState &f)
+{
+	const int64_t fast = std::clamp<int64_t>(f.fast_x100, 0, LEVEL_CAP_X100);
+	const int64_t slow = std::clamp<int64_t>(f.slow_x100, 0, LEVEL_CAP_X100);
+	return std::clamp<int64_t>((fast - slow) * PPM / std::max(slow, FLEET_FLOOR_X100), -FLEET_GROWTH_MAX_PPM, FLEET_GROWTH_MAX_PPM);
+}
+
+/**
+ * The pressure of the backlog: how far the waiting cargo is above (+) or below (-) the normal backlog, -PPM .. +PPM.
+ * The normal backlog is BACKLOG_NORMAL_DAYS days of the normal carrying (the normal level of deliveries, at least the floor of 50 units a day).
+ */
+inline int64_t BacklogPressurePpm(int64_t backlog_x100, int64_t ref_x100)
+{
+	const int64_t backlog = std::clamp<int64_t>(backlog_x100, 0, BACKLOG_CAP_X100);
+	const int64_t normal = std::max(std::clamp<int64_t>(ref_x100, 0, LEVEL_CAP_X100), REF_FLOOR_X100) * BACKLOG_NORMAL_DAYS;
+	return std::clamp<int64_t>((backlog - normal) * PPM / normal, -PPM, PPM);
+}
+
+/** The goal of the freight rate: backlog pushes it up, a growing fleet pushes it down. FREIGHT_MIN_PPM .. FREIGHT_MAX_PPM. */
+inline int64_t FreightGoal(int64_t backlog_pressure_ppm, int64_t fleet_growth_ppm)
+{
+	const int64_t backlog = std::clamp<int64_t>(backlog_pressure_ppm, -PPM, PPM) * BACKLOG_WEIGHT_PPM / PPM;
+	const int64_t fleet = std::clamp<int64_t>(fleet_growth_ppm, -FLEET_GROWTH_MAX_PPM, FLEET_GROWTH_MAX_PPM) * FLEET_WEIGHT_PERCENT / 100;
+	return std::clamp<int64_t>(PPM + backlog - fleet, FREIGHT_MIN_PPM, FREIGHT_MAX_PPM);
+}
+
+/**
+ * One game day of the freight rate of one cargo. Call it AFTER UpdateDay (it uses the updated normal level and day count) with waiting_today set.
+ * During the baseline days only the backlog average is measured and the rate stays 1.0.
+ */
+inline void UpdateFreight(CargoState &s, int64_t fleet_growth_ppm)
+{
+	const int64_t waiting_x100 = std::min<int64_t>(std::max<int64_t>(s.waiting_today, 0), BACKLOG_CAP_X100 / 100) * 100;
+	s.waiting_today = 0;
+	if (s.days <= BASELINE_DAYS) { s.backlog_x100 = waiting_x100; s.freight_ppm = PPM; return; }
+	s.backlog_x100 += (waiting_x100 - s.backlog_x100) / BACKLOG_DIV;
+	const int64_t goal = FreightGoal(BacklogPressurePpm(s.backlog_x100, s.ref_x100), fleet_growth_ppm);
+	s.freight_ppm = std::clamp<int64_t>(s.freight_ppm + (goal - s.freight_ppm) * FREIGHT_STEP_PPM / PPM, FREIGHT_MIN_PPM, FREIGHT_MAX_PPM);
 }
 
 /**

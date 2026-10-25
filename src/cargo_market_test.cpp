@@ -143,6 +143,59 @@ int main()
 		CHECK(SupplyFactor(INT64_MAX, 0, PPM) == SUPPLY_MIN_PPM);  // the old code overflowed here
 	}
 
+	/* 14. Freight rate (step 3): backlog and fleet. */
+	{
+		/* Day counter helper: a cargo with a settled normal level of 200 a day, then days with `waiting` units at the stations. */
+		auto settled = []() { CargoState s; Run(s, 200, 200); return s; };
+		auto freight_days = [](CargoState &s, int n, int64_t waiting, int64_t growth = 0) {
+			for (int i = 0; i < n; i++) { s.delivered_today = 200; UpdateDay(s, 500'000, PPM); s.waiting_today = waiting; UpdateFreight(s, growth); }
+		};
+		/* A normal backlog (2 days of 200 = 400 units) and a steady fleet: the rate stays 1.0. */
+		{ CargoState s = settled(); freight_days(s, 120, 400); CHECK(s.freight_ppm >= 990'000 && s.freight_ppm <= 1'010'000); }
+		/* A big backlog (4x the normal) raises the rate, at most to the limit; the rate never passes FREIGHT_MAX_PPM. */
+		{ CargoState s = settled(); freight_days(s, 120, 1600); CHECK(s.freight_ppm > 1'200'000); CHECK(s.freight_ppm <= FREIGHT_MAX_PPM); }
+		/* Nothing waits at all: the rate falls, not below the limit. */
+		{ CargoState s = settled(); freight_days(s, 120, 0); CHECK(s.freight_ppm < 800'000); CHECK(s.freight_ppm >= FREIGHT_MIN_PPM); }
+		/* The rate comes back when the backlog is gone. */
+		{ CargoState s = settled(); freight_days(s, 100, 1600); const int64_t high = s.freight_ppm; freight_days(s, 200, 400);
+		  CHECK(high > 1'200'000); CHECK(s.freight_ppm < high); CHECK(s.freight_ppm < 1'050'000); }
+		/* A growing fleet lowers the rate, a shrinking fleet raises it. */
+		{ CargoState a = settled(), b = settled(); freight_days(a, 120, 400, 200'000); freight_days(b, 120, 400, -200'000);
+		  CHECK(a.freight_ppm < 900'000); CHECK(b.freight_ppm > 1'100'000); }
+		/* The rate moves slowly: after one day it is at most 5% of the way to its goal. */
+		{ CargoState s = settled(); freight_days(s, 1, 1600); CHECK(s.freight_ppm <= 1'020'000); }
+		/* During the baseline days the rate stays 1.0, whatever waits. */
+		{ CargoState s; Run(s, 10, 200); s.waiting_today = 100000; UpdateFreight(s, 0); CHECK(s.freight_ppm == PPM); }
+		/* A tiny trade does not swing: 20 units waiting, no deliveries, floor of 50 a day. */
+		{ CargoState s; Run(s, 200, 0); freight_days(s, 100, 20); CHECK(s.freight_ppm > 650'000 && s.freight_ppm < 900'000); }
+		/* Pressure and goal: limits and overflow. */
+		CHECK(BacklogPressurePpm(INT64_MAX, 0) == PPM);
+		CHECK(BacklogPressurePpm(-5, INT64_MAX) == -PPM);
+		CHECK(BacklogPressurePpm(0, 0) == -PPM);
+		CHECK(BacklogPressurePpm(10'000, 5'000) == 0);  // 100 units waiting, normal level is the floor 50/day x 2 days = 100
+		CHECK(FreightGoal(PPM, -200'000) == FREIGHT_MAX_PPM);
+		CHECK(FreightGoal(-PPM, 200'000) == FREIGHT_MIN_PPM);
+		CHECK(FreightGoal(0, 0) == PPM);
+		CHECK(FreightGoal(INT64_MAX, INT64_MIN) == FREIGHT_MAX_PPM);
+		/* Fleet: the first count starts both averages (growth 0); growth is limited; a tiny fleet does not swing. */
+		{
+			FleetState f; UpdateFleet(f, 50); CHECK(f.started); CHECK(FleetGrowthPpm(f) == 0);
+			for (int i = 0; i < 60; i++) UpdateFleet(f, 100);
+			CHECK(FleetGrowthPpm(f) > 100'000); CHECK(FleetGrowthPpm(f) <= FLEET_GROWTH_MAX_PPM);
+			FleetState g; UpdateFleet(g, 1); for (int i = 0; i < 30; i++) UpdateFleet(g, 3);
+			CHECK(FleetGrowthPpm(g) < FLEET_GROWTH_MAX_PPM);   // 1 -> 3 vehicles: without the floor of 10 vehicles this would be at the +20% limit
+			FleetState h; UpdateFleet(h, INT64_MAX); UpdateFleet(h, INT64_MAX);
+			CHECK(FleetGrowthPpm(h) == 0);
+		}
+		/* Total band of price x freight x local: 0.5 x 0.7 x 0.9 .. 2.0 x 1.5 x 1.2 (3.6) of the plain pay; no overflow at huge incomes. */
+		CHECK(ApplyPrice(ApplyPrice(ApplyPrice(1000, PRICE_MIN_PPM), FREIGHT_MIN_PPM), LOCAL_MIN_PPM) == 315);
+		CHECK(ApplyPrice(ApplyPrice(ApplyPrice(1000, PRICE_MAX_PPM), FREIGHT_MAX_PPM), LOCAL_MAX_PPM) == 3600);
+		CHECK(ApplyPrice(INT64_MAX / 4, FREIGHT_MAX_PPM) > 0);
+		/* Determinism: the same inputs give the same state. */
+		{ CargoState a = settled(), b = settled(); freight_days(a, 77, 900, 50'000); freight_days(b, 77, 900, 50'000);
+		  CHECK(a.freight_ppm == b.freight_ppm && a.backlog_x100 == b.backlog_x100); }
+	}
+
 	std::printf("%d checks, %d failed\n", _checks, _fail);
 	return _fail == 0 ? 0 : 1;
 }

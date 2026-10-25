@@ -62,7 +62,8 @@ enum StockRecordKind : uint8_t {
 	SRK_STATS = 16,   ///< Trading results of a company: a = company, v1 = closed trades, v2 = winning trades, v3 = total profit.
 	SRK_STATS_MONTH = 17, ///< Profit of one month: a = company, ym = month, v1 = profit, v2 = trades, v3 = winning trades.
 	SRK_HISTORY = 8,  ///< Closed trade: a = owner, b = target, ym = id, v1 = volume, v2 = open price, v3 = close price, v4 = profit, v5 = type | reason << 8 | closed month << 16.
-	SRK_CARGO_MARKET = 35, ///< Price of one cargo: a = cargo type, ym = game days counted (0 .. 31), v1 = price in ppm, v2 = normal deliveries per day x100, v3 = recent deliveries per day x100. Written only for a cargo with a state.
+	SRK_CARGO_MARKET = 35, ///< Price of one cargo: a = cargo type, ym = game days counted (0 .. 31), v1 = price in ppm, v2 = normal deliveries per day x100, v3 = recent deliveries per day x100, v4 = freight rate in ppm (0 in older savegames = 1.0), v5 = smoothed backlog at the stations x100. Written only for a cargo with a state.
+	SRK_FLEET = 39,   ///< The fleet size for the freight rate: v1 = recent vehicles x100, v2 = long average x100. Written once the first count has been made.
 	SRK_TOWN = 34,    ///< Account of a town: ym = index of the town, b = 1 when the groups have their start wealth, v4 = treasury, v5 = spent on development. v1..v3 (ounces, cost, savings) are only read from older savegames and go to the balanced group. Taxes collected are not saved.
 	SRK_TOWN_NEWS = 38, ///< What the daily town news scan remembers about a town: ym = index of the town, v1 = population at the start of the window, v2 = game day of that snapshot, v3 = number of population marks reached.
 	SRK_TOWN_POS = 37, ///< Open terminal position of a citizen group: a = group (citizengold::Style), b = symbol | 0x80 when long, ym = index of the town, v1 = volume, v2 = entry price, v3 = stop loss, v4 = take profit.
@@ -354,6 +355,15 @@ struct STCKChunkHandler : ChunkHandler {
 			r.v1 = c.price_ppm;
 			r.v2 = c.ref_x100;
 			r.v3 = c.fast_x100;
+			r.v4 = c.freight_ppm;
+			r.v5 = c.backlog_x100;
+			write(r);
+		}
+		if (_cargo_market.fleet.started) {
+			StockRecord r;
+			r.kind = SRK_FLEET;
+			r.v1 = _cargo_market.fleet.fast_x100;
+			r.v2 = _cargo_market.fleet.slow_x100;
 			write(r);
 		}
 
@@ -776,7 +786,15 @@ struct STCKChunkHandler : ChunkHandler {
 						c.price_ppm = std::clamp<int64_t>(r.v1, cargomarket::PRICE_MIN_PPM, cargomarket::PRICE_MAX_PPM);
 						c.ref_x100 = std::max<int64_t>(r.v2, 0);
 						c.fast_x100 = std::max<int64_t>(r.v3, 0);
+						c.freight_ppm = r.v4 == 0 ? cargomarket::PPM : std::clamp<int64_t>(r.v4, cargomarket::FREIGHT_MIN_PPM, cargomarket::FREIGHT_MAX_PPM);
+						c.backlog_x100 = std::max<int64_t>(r.v5, 0);
 					}
+					break;
+
+				case SRK_FLEET:
+					_cargo_market.fleet.fast_x100 = std::max<int64_t>(r.v1, 0);
+					_cargo_market.fleet.slow_x100 = std::max<int64_t>(r.v2, 0);
+					_cargo_market.fleet.started = true;
 					break;
 
 				case SRK_TOWN: {

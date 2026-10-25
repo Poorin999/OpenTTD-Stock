@@ -17,6 +17,7 @@
 #include "RetailMarketManager.h"
 #include "RetailMath.h"
 #include "economy_func.h"
+#include "economy_news.h"
 #include "game_time/game_time_manager.h"
 #include "safeguards.h"
 
@@ -79,10 +80,30 @@ int64_t CargoMarket::GetPricePpm(CargoType cargo_type) const
 	return this->cargo[i].price_ppm;
 }
 
+int64_t CargoMarket::GetFreightPpm(CargoType cargo_type) const
+{
+	const size_t i = static_cast<size_t>(cargo_type);
+	if (i >= this->cargo.size()) return cargomarket::PPM;
+	return this->cargo[i].freight_ppm;
+}
+
 void CargoMarket::UpdateDaily()
 {
 	const int64_t outside = cargomarket::OutsideFactor(_market_events.market_sentiment_ppm, MoneyFactorPpm());
 	const int64_t minute = static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes());
+
+	/* Freight rate, part 1: the backlog (cargo that waits at all the stations, per cargo) and the size of the fleet, counted once per day. */
+	std::array<int64_t, NUM_CARGO> waiting{};
+	for (const Station *st : Station::Iterate()) {
+		for (const CargoSpec *cs : CargoSpec::Iterate()) {
+			const size_t i = static_cast<size_t>(cs->Index());
+			if (i >= waiting.size()) continue;
+			waiting[i] += st->goods[i].CargoTotalCount();
+		}
+	}
+	cargomarket::UpdateFleet(this->fleet, CountAllVehicles());
+	const int64_t fleet_growth = cargomarket::FleetGrowthPpm(this->fleet);
+
 	for (const CargoSpec *cs : CargoSpec::Iterate()) {
 		const size_t i = static_cast<size_t>(cs->Index());
 		if (i >= this->cargo.size()) continue;
@@ -91,6 +112,9 @@ void CargoMarket::UpdateDaily()
 		const int64_t news_push = _market_events.CargoPushPpm(NewsGroupOf(cs), minute);
 		const int64_t outside_cargo = std::clamp<int64_t>(outside * (cargomarket::PPM + news_push) / cargomarket::PPM, cargomarket::PPM / 2, 2 * cargomarket::PPM);
 		cargomarket::UpdateDay(this->cargo[i], ElasticityPpm(cs), outside_cargo);
+		/* Freight rate, part 2: after the day of the price, because it uses the updated normal level and the day count. */
+		this->cargo[i].waiting_today = waiting[i];
+		cargomarket::UpdateFreight(this->cargo[i], fleet_growth);
 	}
 }
 
@@ -103,7 +127,9 @@ void CargoMarketOnDelivery(CargoType cargo_type, uint count)
 
 Money CargoMarketAdjustIncome(CargoType cargo_type, Money income)
 {
-	return static_cast<Money>(cargomarket::ApplyPrice(static_cast<int64_t>(income), _cargo_market.GetPricePpm(cargo_type)));
+	/* The price (supply and demand) and the freight rate (the service) are one factor: 35% .. 300% of the plain pay together. */
+	const int64_t factor = _cargo_market.GetPricePpm(cargo_type) * _cargo_market.GetFreightPpm(cargo_type) / cargomarket::PPM;
+	return static_cast<Money>(cargomarket::ApplyPrice(static_cast<int64_t>(income), factor));
 }
 
 int64_t CargoMarketLocalFactorPpm(CargoType cargo_type, TownID town)

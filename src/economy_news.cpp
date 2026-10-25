@@ -54,7 +54,7 @@ static std::string PnPpm(int64_t ppm)
 }
 
 /** Vehicles of all companies now: every primary vehicle (a train counts once, not per wagon). */
-static int64_t CountAllVehicles()
+int64_t CountAllVehicles()
 {
 	int64_t count = 0;
 	for (const Vehicle *v : Vehicle::Iterate()) {

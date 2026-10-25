@@ -120,7 +120,7 @@ static bool ConStockSkip(std::span<std::string_view> argv)
 static bool ConCargoPrices(std::span<std::string_view> argv)
 {
 	if (argv.empty()) {
-		IConsolePrint(CC_HELP, "Show the cargo prices of the mod. Usage: 'cargo_prices [town id]'. Per cargo: price now (100% = the normal pay of OpenTTD), normal and recent deliveries per day, game days counted. Then the push of the news on each group of cargo. With a town id: also the local factor of that town for each cargo (the demand of the town of the destination station) and the price a delivery there pays.");
+		IConsolePrint(CC_HELP, "Show the cargo prices of the mod. Usage: 'cargo_prices [town id]'. Per cargo: price now (100% = the normal pay of OpenTTD), the freight rate (the price of the service: waiting cargo and fleet size), normal and recent deliveries per day, game days counted. Then the push of the news on each group of cargo. With a town id: also the local factor of that town for each cargo (the demand of the town of the destination station) and the price a delivery there pays.");
 		return true;
 	}
 	/* Optional town id: show the local factor of that town too. */
@@ -142,11 +142,12 @@ static bool ConCargoPrices(std::span<std::string_view> argv)
 		const size_t i = static_cast<size_t>(cs->Index());
 		if (i >= _cargo_market.cargo.size()) continue;
 		const cargomarket::CargoState &c = _cargo_market.cargo[i];
-		IConsolePrint(CC_DEFAULT, "{}: price {}.{:02}%  normal {}.{:02}/day  recent {}.{:02}/day  days {}", GetString(cs->name),
-				c.price_ppm / 10000, c.price_ppm % 10000 / 100, c.ref_x100 / 100, c.ref_x100 % 100, c.fast_x100 / 100, c.fast_x100 % 100, c.days);
+		IConsolePrint(CC_DEFAULT, "{}: price {}.{:02}%  freight {}.{:02}%  normal {}.{:02}/day  recent {}.{:02}/day  waiting {}.{:02}  days {}", GetString(cs->name),
+				c.price_ppm / 10000, c.price_ppm % 10000 / 100, c.freight_ppm / 10000, c.freight_ppm % 10000 / 100, c.ref_x100 / 100, c.ref_x100 % 100,
+				c.fast_x100 / 100, c.fast_x100 % 100, c.backlog_x100 / 100, c.backlog_x100 % 100, c.days);
 		if (with_town) {
 			const int64_t local = CargoMarketLocalFactorPpm(cs->Index(), town);
-			const int64_t total = c.price_ppm * local / cargomarket::PPM;
+			const int64_t total = c.price_ppm * c.freight_ppm / cargomarket::PPM * local / cargomarket::PPM;
 			IConsolePrint(CC_DEFAULT, "    local {}.{:02}%  paid there {}.{:02}%", local / 10000, local % 10000 / 100, total / 10000, total % 10000 / 100);
 		}
 	}

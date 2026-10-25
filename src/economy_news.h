@@ -85,6 +85,9 @@ inline int64_t PayrollGoldPushPpm(int64_t surprise_x100, int64_t prev_avg_x100)
 	return -std::clamp<int64_t>(relative_ppm / PAYROLL_GOLD_DIV, -PAYROLL_GOLD_MAX_PPM, PAYROLL_GOLD_MAX_PPM);
 }
 
+/** Vehicles of all companies now: every primary vehicle (a train counts once). Also used by the freight rate of the cargo market. */
+int64_t CountAllVehicles();
+
 /** Open the news window (window number 5 of WC_CENTRAL_BANK), or bring it to the front. */
 void ShowPayrollNewsWindow();
 /** True while the news window is open (for the lowered state of its button). */
