@@ -20,6 +20,7 @@
 #include "../gold_reserve.h"
 #include "../valuables.h"
 #include "../town_treasury.h"
+#include "../town_news.h"
 #include "../citizen_gold.h"
 #include "../cargo_market.h"
 #include "../game_time/game_time_manager.h"
@@ -63,6 +64,7 @@ enum StockRecordKind : uint8_t {
 	SRK_HISTORY = 8,  ///< Closed trade: a = owner, b = target, ym = id, v1 = volume, v2 = open price, v3 = close price, v4 = profit, v5 = type | reason << 8 | closed month << 16.
 	SRK_CARGO_MARKET = 35, ///< Price of one cargo: a = cargo type, ym = game days counted (0 .. 31), v1 = price in ppm, v2 = normal deliveries per day x100, v3 = recent deliveries per day x100. Written only for a cargo with a state.
 	SRK_TOWN = 34,    ///< Account of a town: ym = index of the town, b = 1 when the groups have their start wealth, v4 = treasury, v5 = spent on development. v1..v3 (ounces, cost, savings) are only read from older savegames and go to the balanced group. Taxes collected are not saved.
+	SRK_TOWN_NEWS = 38, ///< What the daily town news scan remembers about a town: ym = index of the town, v1 = population at the start of the window, v2 = game day of that snapshot, v3 = number of population marks reached.
 	SRK_TOWN_POS = 37, ///< Open terminal position of a citizen group: a = group (citizengold::Style), b = symbol | 0x80 when long, ym = index of the town, v1 = volume, v2 = entry price, v3 = stop loss, v4 = take profit.
 	SRK_TOWN_BOOK = 36, ///< One group of citizens of a town: a = group (citizengold::Style), ym = index of the town, v1 = gold in hundredths of an ounce, v2 = what it cost, v3 = cash, v4 = profit of closed sales, v5 = wins | losses << 24 | cooldown << 48.
 };
@@ -325,8 +327,20 @@ struct STCKChunkHandler : ChunkHandler {
 			r.v1 = it->minute;
 			r.v2 = it->gold_ppm;
 			r.v3 = it->share_ppm;
-			r.v4 = static_cast<int64_t>(it->severity) | (static_cast<int64_t>(it->variant) << 8);
+			/* v4: severity | variant << 8 | (town + 1) << 16 (0 = no town; older savegames have 0 there). */
+			r.v4 = static_cast<int64_t>(it->severity) | (static_cast<int64_t>(it->variant) << 8)
+					| (it->town != MARKET_NO_TOWN ? (static_cast<int64_t>(it->town) + 1) << 16 : 0);
 			r.v5 = it->fact_ppm;
+			write(r);
+		}
+
+		for (const auto &[town, snap] : _town_news_snaps) {
+			StockRecord r;
+			r.kind = SRK_TOWN_NEWS;
+			r.ym = static_cast<int32_t>(town);
+			r.v1 = snap.pop_prev;
+			r.v2 = snap.day_prev;
+			r.v3 = snap.level_prev;
 			write(r);
 		}
 
@@ -732,7 +746,13 @@ struct STCKChunkHandler : ChunkHandler {
 					ev.share_ppm = std::clamp<int64_t>(r.v3, -MARKET_EVENT_SHARE_MAX_PPM, MARKET_EVENT_SHARE_MAX_PPM);
 					ev.severity = static_cast<uint8_t>(std::clamp<int64_t>(r.v4 & 0xFF, 1, 3));
 					ev.variant = static_cast<uint8_t>(std::clamp<int64_t>((r.v4 >> 8) & 0xFF, 0, 11));
-					ev.fact_ppm = std::clamp<int64_t>(r.v5, -MARKET_FACT_CAP_PPM, MARKET_FACT_CAP_PPM);
+					{
+						const int64_t town_plus_one = (r.v4 >> 16) & 0xFFFF;
+						if (town_plus_one != 0 && MarketKindHasTownField(ev.kind)) ev.town = static_cast<uint16_t>(town_plus_one - 1);
+					}
+					/* The damage of a storm or a meteorite is money, not a percentage: it has its own (wide) limit. */
+					ev.fact_ppm = MarketKindIsWeather(ev.kind) ? std::clamp<int64_t>(r.v5, 0, static_cast<int64_t>(1'000'000'000'000'000)) : std::clamp<int64_t>(r.v5, -MARKET_FACT_CAP_PPM, MARKET_FACT_CAP_PPM);
+					if (ev.kind == MarketEventKind::TownMilestone) ev.fact_ppm = std::max<int64_t>(r.v5, 0); // A population mark: people, not a percentage.
 					_market_events.log.push_front(ev); // Records come oldest first: the newest ends up in front.
 					if (_market_events.log.size() > MARKET_EVENT_KEEP) _market_events.log.pop_back();
 					break;
@@ -785,6 +805,16 @@ struct STCKChunkHandler : ChunkHandler {
 					bk.wins = static_cast<int32_t>(r.v5 & 0xFFFFFF);
 					bk.losses = static_cast<int32_t>((r.v5 >> 24) & 0xFFFFFF);
 					bk.cooldown = static_cast<int32_t>((r.v5 >> 48) & 0xFF);
+					break;
+				}
+
+				case SRK_TOWN_NEWS: {
+					if (r.ym < 0 || r.ym > 0xFFFF) break;
+					TownNewsSnap snap;
+					snap.pop_prev = std::max<int64_t>(r.v1, 0);
+					snap.day_prev = std::max<int64_t>(r.v2, 0);
+					snap.level_prev = static_cast<int>(std::clamp<int64_t>(r.v3, 0, MARKET_TOWN_LEVEL_COUNT));
+					_town_news_snaps[static_cast<uint32_t>(r.ym)] = snap;
 					break;
 				}
 

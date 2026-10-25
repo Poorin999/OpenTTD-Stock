@@ -9,7 +9,17 @@
  * @file market_events.h Random events of the world (boom, war, a new gold mine, an accident of a company ...). Every event is a news item. It moves the
  * gold price and the share prices for a while.
  *
- * Rules (integer only, the same on every client):
+ * NEWS ARE REAL (owner request 2026-10-25): with MARKET_ONLY_WAR_IS_RANDOM (default true) the ONLY news that come by chance are WAR and PEACE.
+ * Everything else is true and has no dice:
+ *  - COMPANY news (real figures, see CompanyEventFact), at most one per game hour, the biggest true story first.
+ *  - TOWN news (town_news.cpp): a town really grew / shrank by a real percentage, a town really passed a population mark.
+ *  - WEATHER (town_news.cpp): a storm, a meteorite or a drought that really hits a town and really changes it: the damage is taken from the town treasury,
+ *    the income of the citizens falls and the town stops growing while it lasts. The weather itself comes by chance (a hash of the game seed, the day and
+ *    the town, so nothing is saved for the dice and every client rolls the same); the story only tells what happened, with the real numbers.
+ * The old random world / gold / sector / cargo / diamond / town boom kinds stay in the table (their numbers are in savegames, their EFFECTS still work for every
+ * kind that is in the log, and the test tool stock_event can still make them) but they are not drawn any more. Set MARKET_ONLY_WAR_IS_RANDOM to false for the old way.
+ *
+ * Rules of the OLD random way (integer only, the same on every client):
  *  - Once per game hour (60 real seconds at normal speed) there is a chance of MARKET_EVENT_CHANCE_PERMILLE that an event happens (never in the first
  *    MARKET_EVENT_START_DELAY_HOURS hours, and never closer than MARKET_EVENT_MIN_GAP_HOURS hours to the last one).
  *  - The kind is drawn by weight from #MarketEventInfo. The severity is 1 (60%), 2 (30%) or 3 (10%) and makes the effect 1.0, 1.7 or 2.5 times bigger
@@ -32,6 +42,7 @@
 #include <array>
 #include <cstdint>
 #include <deque>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -42,7 +53,7 @@ static constexpr int64_t MARKET_EVENT_GOLD_MAX_PPM = 80'000;  ///< One event mov
 static constexpr int64_t MARKET_EVENT_SHARE_MAX_PPM = 100'000;///< One event moves the sentiment by 10% at most.
 static constexpr int64_t MARKET_SENTIMENT_MAX_PPM = 150'000;  ///< The sentiment of a share (market plus company) is never more than +-15%.
 static constexpr int MARKET_SENTIMENT_DECAY_DIV = 10;         ///< Every game hour the sentiment fades by one tenth (half life about 6.6 game hours).
-static constexpr size_t MARKET_EVENT_KEEP = 120;              ///< Events that are kept and saved (the company news guard needs this much history).
+static constexpr size_t MARKET_EVENT_KEEP = 300;              ///< Events that are kept and saved (the repeat guards and the weather windows need this much history).
 static constexpr int64_t MARKET_COMPANY_REPEAT_DAYS = 30;     ///< The same kind of company news about the same company is not made again within this many game days.
 static constexpr int64_t MARKET_FACT_MIN_BASE = 2'000;        ///< A change is only reported when the old figure was at least this many money units.
 static constexpr int64_t MARKET_FACT_CHANGE_MIN_PPM = 100'000;///< Revenue and company value: a change of 10% or more is news.
@@ -51,6 +62,12 @@ static constexpr int64_t MARKET_FACT_DEBT_MIN_PPM = 500'000;  ///< Debt at the c
 static constexpr int64_t MARKET_FACT_CAP_PPM = 9'990'000;     ///< A percentage in a story never says more than 999%.
 static constexpr size_t MARKET_SENTIMENT_SLOTS = 32;          ///< Room for the sentiment of the symbols (companies come first).
 static constexpr uint8_t MARKET_NO_TARGET = 255;              ///< Target of a world event.
+static constexpr uint16_t MARKET_NO_TOWN = 0xFFFF;            ///< Town of an event that is not about a town.
+static constexpr bool MARKET_ONLY_WAR_IS_RANDOM = true;       ///< true: only war and peace news come by chance, every other news is true. false: the old random news.
+static constexpr int MARKET_WAR_CHANCE_PERMILLE = 6;          ///< Chance per game hour that a war starts (when it is peace and the gap has passed).
+static constexpr int MARKET_PEACE_CHANCE_PERMILLE = 12;       ///< Chance per game hour that a war ends.
+static constexpr int64_t MARKET_WAR_MIN_GAP_DAYS = 8;         ///< At least this many game days from the last peace to the next war.
+static constexpr int64_t MARKET_PEACE_MIN_GAP_DAYS = 4;       ///< At least this many game days from the start of a war to its end.
 
 /** The kinds of events. The numbers are saved in savegames: add new kinds at the END, before Count. */
 enum class MarketEventKind : uint8_t {
@@ -92,6 +109,13 @@ enum class MarketEventKind : uint8_t {
 	DiamondMineFound,    ///< Diamonds: new diamonds come into the market stock (price down).
 	DiamondDemandSurge,  ///< Diamonds: the world buys diamonds out of the market stock (price up).
 	TownBoom,            ///< Town: one town grows faster for a while. The number of the town is in fact_ppm.
+	TownGrew,            ///< One town, REAL: its population grew by a real percentage (fact_ppm). The town is in MarketEvent::town. No effect on prices.
+	TownShrank,          ///< One town, REAL: its population fell by a real percentage (fact_ppm, negative).
+	TownMilestone,       ///< One town, REAL: its population passed a mark (fact_ppm = the mark, in people).
+	WeatherStorm,        ///< One town, REAL: a storm hit it. fact_ppm = the damage in money units (taken from the town treasury as far as it holds).
+	WeatherMeteor,       ///< One town, REAL: a meteorite hit it. fact_ppm = the damage in money units.
+	WeatherDrought,      ///< One town, REAL: a drought began. fact_ppm = its length in game days.
+	WeatherDroughtEnd,   ///< One town, REAL: the drought is over. fact_ppm = the days it lasted.
 	Count,
 };
 
@@ -152,6 +176,13 @@ inline const MarketEventDef &MarketEventInfo(MarketEventKind kind)
 		{  0,      0,      0,   0,      0,      0,  3, false }, // DiamondMineFound
 		{  0,      0,      0,   0,      0,      0,  3, false }, // DiamondDemandSurge
 		{  0,      0,      0,   0,      0,      0,  4, false }, // TownBoom
+		{  0,      0,      0,   0,      0,      0,  1, false }, // TownGrew (never drawn by weight: made from the real state of the towns)
+		{  0,      0,      0,   0,      0,      0,  1, false }, // TownShrank
+		{  0,      0,      0,   0,      0,      0,  1, false }, // TownMilestone
+		{  0,      0,      0,   0,      0,      0,  1, false }, // WeatherStorm
+		{  0,      0,      0,   0,      0,      0,  1, false }, // WeatherMeteor
+		{  0,      0,      0,   0,      0,      0,  1, false }, // WeatherDrought
+		{  0,      0,      0,   0,      0,      0,  1, false }, // WeatherDroughtEnd
 	};
 	const size_t i = static_cast<size_t>(kind);
 	return table[i < MARKET_EVENT_KIND_COUNT ? i : 0];
@@ -285,10 +316,11 @@ struct MarketEvent {
 	uint8_t variant = 0;                 ///< Chooses the wording (headline, body, reporter) of the story.
 	uint8_t severity = 1;                ///< 1 small, 2 medium, 3 big.
 	uint8_t target = MARKET_NO_TARGET;   ///< The company of a company event, MARKET_NO_TARGET for a world event.
+	uint16_t town = MARKET_NO_TOWN;      ///< The town of a town news or weather event (TownBoom keeps its town in fact_ppm), MARKET_NO_TOWN otherwise.
 	int64_t minute = 0;                  ///< Game minute (since the start of the game) at which it happened.
 	int64_t gold_ppm = 0;                ///< Push on the gold demand (negative: down).
 	int64_t share_ppm = 0;               ///< Push on the sentiment of the shares (negative: down).
-	int64_t fact_ppm = 0;                ///< Company events: the REAL number of the story (a change or a ratio in ppm; months for a bankruptcy). 0 for world events and old savegames.
+	int64_t fact_ppm = 0;                ///< The REAL number of the story: company events a change or a ratio in ppm (months for a bankruptcy); town events a change in ppm or the population mark; storm and meteor the damage in money units; drought the days. 0 for world events and old savegames.
 };
 
 /** The real figures of one company, taken from the game when the dice ask for company news. Money units. */
@@ -320,6 +352,146 @@ inline bool MarketKindIsCompany(MarketEventKind kind)
 {
 	const size_t k = static_cast<size_t>(kind);
 	return k >= static_cast<size_t>(MarketEventKind::CompanyRevenueUp) && k <= static_cast<size_t>(MarketEventKind::CompanyBankruptcy);
+}
+
+/** True for the kinds that are about the real population of one town (town_news.cpp). */
+inline bool MarketKindIsTown(MarketEventKind kind)
+{
+	const size_t k = static_cast<size_t>(kind);
+	return k >= static_cast<size_t>(MarketEventKind::TownGrew) && k <= static_cast<size_t>(MarketEventKind::TownMilestone);
+}
+
+/** True for the kinds of weather: they really happen to one town (town_news.cpp). */
+inline bool MarketKindIsWeather(MarketEventKind kind)
+{
+	const size_t k = static_cast<size_t>(kind);
+	return k >= static_cast<size_t>(MarketEventKind::WeatherStorm) && k <= static_cast<size_t>(MarketEventKind::WeatherDroughtEnd);
+}
+
+/** True for the two kinds that are always by chance: war and peace. */
+inline bool MarketKindIsWar(MarketEventKind kind)
+{
+	return kind == MarketEventKind::WarTension || kind == MarketEventKind::PeaceDeal;
+}
+
+/** True when the event has a town in MarketEvent::town (not TownBoom: that one keeps its town in fact_ppm). */
+inline bool MarketKindHasTownField(MarketEventKind kind)
+{
+	return MarketKindIsTown(kind) || MarketKindIsWeather(kind);
+}
+
+/* ---- Real town news and weather -------------------------------------------------------------------------------------------------------------- */
+static constexpr int64_t MARKET_TOWN_WINDOW_DAYS = 6;          ///< Town news compare the population with this many game days ago.
+static constexpr int64_t MARKET_TOWN_MIN_BASE = 300;           ///< A change is only reported for a town that had at least this many people at the start of the window.
+static constexpr int64_t MARKET_TOWN_GROW_MIN_PPM = 100'000;   ///< Growth of 10% or more in the window is news.
+static constexpr int64_t MARKET_TOWN_SHRINK_MIN_PPM = 50'000;  ///< A fall of 5% or more in the window is news.
+static constexpr int64_t MARKET_TOWN_REPEAT_DAYS = 12;         ///< The same kind of growth news about the same town is not made again within this many game days.
+static constexpr int64_t MARKET_WEATHER_MAX_DAYS = 40;         ///< No weather effect lasts longer than this (the log is only searched this far back).
+static constexpr int64_t MARKET_WEATHER_INCOME_MAX_DROP_PPM = 500'000; ///< All the weather together never takes more than half of the income of the citizens.
+static constexpr int64_t MARKET_DROUGHT_MIN_DAYS = 10;         ///< A drought lasts 10 .. 25 game days.
+static constexpr int64_t MARKET_DROUGHT_SPAN_DAYS = 16;
+/** Chance per town per game day, in 1/10,000: storm 0.66%, meteorite 0.03%, drought 0.40%. */
+static constexpr uint64_t MARKET_STORM_CHANCE = 66;
+static constexpr uint64_t MARKET_METEOR_CHANCE = 3;
+static constexpr uint64_t MARKET_DROUGHT_CHANCE = 40;
+
+/** The real figures of one town, taken from the game once per game day (see town_news.cpp). */
+struct TownFacts {
+	uint16_t town = 0;
+	int64_t pop_now = 0;      ///< Population now.
+	int64_t pop_prev = 0;     ///< Population at the start of the window (0 = no snapshot yet).
+	int level_prev = 0;       ///< Number of population marks that were reached before (see TownLevelOf).
+	int64_t days = 0;         ///< Game days since the snapshot.
+};
+
+/** Population marks. Passing one is news. */
+inline constexpr int MARKET_TOWN_LEVEL_COUNT = 8;
+inline constexpr int64_t MARKET_TOWN_LEVELS[MARKET_TOWN_LEVEL_COUNT] = { 500, 1'000, 2'000, 5'000, 10'000, 20'000, 50'000, 100'000 };
+
+/** The number of marks that a population has reached (0 .. MARKET_TOWN_LEVEL_COUNT). */
+inline int TownLevelOf(int64_t pop)
+{
+	int level = 0;
+	for (int i = 0; i < MARKET_TOWN_LEVEL_COUNT; i++) if (pop >= MARKET_TOWN_LEVELS[i]) level = i + 1;
+	return level;
+}
+
+/** The population of a mark (level 1 = 500 ...). 0 for level 0 or a level that does not exist. */
+inline int64_t TownLevelPopulation(int level)
+{
+	return level >= 1 && level <= MARKET_TOWN_LEVEL_COUNT ? MARKET_TOWN_LEVELS[level - 1] : 0;
+}
+
+/** The mark that is remembered after a day: it goes up at once, it goes down only when the town is 10% below the mark (a town on the line must not repeat the news). */
+inline int TownLevelNext(int prev, int64_t pop)
+{
+	const int now = TownLevelOf(pop);
+	if (now >= prev) return now;
+	while (prev > now && pop * 10 < TownLevelPopulation(prev) * 9) prev--;
+	return prev;
+}
+
+/** How a weather event hits a town. */
+struct MarketWeatherEffect {
+	int64_t days = 0;                ///< How long it lasts, in game days (0 = a kind that is not weather, or the end of a drought).
+	int64_t income_drop_ppm = 0;     ///< The citizens earn this much less while it lasts.
+	bool halts_growth = false;       ///< The town does not grow while it lasts.
+	int64_t damage_per_capita = 0;   ///< Damage per citizen in money units at price index 1.0, at severity 1 (0 = no damage).
+};
+
+inline MarketWeatherEffect MarketWeatherOf(MarketEventKind kind, int severity, int64_t fact)
+{
+	const int64_t pct = severity >= 3 ? 250 : (severity == 2 ? 170 : 100);
+	const int64_t sev = severity >= 3 ? 3 : (severity == 2 ? 2 : 1);
+	MarketWeatherEffect w;
+	switch (kind) {
+		case MarketEventKind::WeatherStorm:
+			w.days = 2 + sev; w.income_drop_ppm = 100'000 * pct / 100; w.halts_growth = true; w.damage_per_capita = 1;
+			break;
+		case MarketEventKind::WeatherMeteor:
+			w.days = 6 + 2 * sev; w.income_drop_ppm = 200'000 * pct / 100; w.halts_growth = true; w.damage_per_capita = 3;
+			break;
+		case MarketEventKind::WeatherDrought:
+			w.days = std::clamp<int64_t>(fact, 1, MARKET_WEATHER_MAX_DAYS); w.income_drop_ppm = 120'000 * pct / 100; w.halts_growth = true;
+			break;
+		default:
+			break;
+	}
+	w.income_drop_ppm = std::min<int64_t>(w.income_drop_ppm, MARKET_WEATHER_INCOME_MAX_DROP_PPM);
+	return w;
+}
+
+/** The damage of a storm or a meteorite in money units: population x per-capita damage x severity x price index. 0 for the other kinds. */
+inline int64_t MarketWeatherDamage(MarketEventKind kind, int severity, int64_t population, int64_t index_ppm)
+{
+	const MarketWeatherEffect w = MarketWeatherOf(kind, severity, 0);
+	if (w.damage_per_capita <= 0 || population <= 0) return 0;
+	const int64_t pct = severity >= 3 ? 250 : (severity == 2 ? 170 : 100);
+	return population * w.damage_per_capita * pct / 100 * std::max<int64_t>(index_ppm, 0) / 1'000'000;
+}
+
+/** An integer hash (splitmix64) of three numbers: the dice of the weather. The same on every client, nothing to save. */
+inline uint64_t MarketHash(uint64_t seed, uint64_t a, uint64_t b)
+{
+	uint64_t x = seed + 0x9E3779B97F4A7C15ULL * (a + 1) + 0xBF58476D1CE4E5B9ULL * (b + 1);
+	x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
+	x = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
+	return x ^ (x >> 31);
+}
+
+/** Does weather hit this town on this game day? @param[out] kind Storm, meteorite or drought. @param[out] severity 1, 2, 3. @param[out] drought_days Length of a drought. */
+inline bool MarketWeatherRoll(uint64_t seed, int64_t day, uint32_t town, MarketEventKind &kind, int &severity, int64_t &drought_days)
+{
+	const uint64_t h = MarketHash(seed ^ 0x77EA7E5ULL, static_cast<uint64_t>(day), town);
+	const uint64_t v = (h >> 8) % 10'000;
+	if (v < MARKET_STORM_CHANCE) kind = MarketEventKind::WeatherStorm;
+	else if (v < MARKET_STORM_CHANCE + MARKET_METEOR_CHANCE) kind = MarketEventKind::WeatherMeteor;
+	else if (v < MARKET_STORM_CHANCE + MARKET_METEOR_CHANCE + MARKET_DROUGHT_CHANCE) kind = MarketEventKind::WeatherDrought;
+	else return false;
+	const uint64_t sr = (h >> 40) % 100;
+	severity = sr < 60 ? 1 : (sr < 90 ? 2 : 3);
+	drought_days = MARKET_DROUGHT_MIN_DAYS + static_cast<int64_t>((h >> 52) % static_cast<uint64_t>(MARKET_DROUGHT_SPAN_DAYS));
+	return true;
 }
 
 /**
@@ -394,6 +566,43 @@ inline bool CompanyEventFact(MarketEventKind kind, const CompanyFacts &f, int64_
 			fact_ppm = static_cast<int64_t>(f.months_bankrupt);
 			severity = 3;
 			return true;
+		default:
+			return false;
+	}
+}
+
+/**
+ * Whether a kind of town news is TRUE for a town now, and the real number for the story.
+ * @param[out] fact_ppm Growth / shrink: the change of the population in ppm. Milestone: the population mark.
+ * @param[out] severity 1, 2 or 3 from the size of the real change (milestone: from the size of the mark).
+ */
+inline bool TownEventFact(MarketEventKind kind, const TownFacts &f, int64_t &fact_ppm, int &severity)
+{
+	fact_ppm = 0;
+	severity = 1;
+	auto sev_of = [](int64_t mag, int64_t mid, int64_t big) { return mag >= big ? 3 : (mag >= mid ? 2 : 1); };
+	switch (kind) {
+		case MarketEventKind::TownMilestone: {
+			const int level = TownLevelOf(f.pop_now);
+			if (level <= f.level_prev) return false;
+			fact_ppm = TownLevelPopulation(level);
+			severity = level >= 5 ? 3 : (level >= 3 ? 2 : 1);
+			return true;
+		}
+		case MarketEventKind::TownGrew:
+		case MarketEventKind::TownShrank: {
+			if (f.pop_prev < MARKET_TOWN_MIN_BASE || f.days < MARKET_TOWN_WINDOW_DAYS) return false;
+			const int64_t ch = MarketChangePpm(f.pop_now, f.pop_prev);
+			if (kind == MarketEventKind::TownGrew) {
+				if (ch < MARKET_TOWN_GROW_MIN_PPM) return false;
+				severity = sev_of(ch, 250'000, 600'000);
+			} else {
+				if (ch > -MARKET_TOWN_SHRINK_MIN_PPM) return false;
+				severity = sev_of(-ch, 150'000, 300'000);
+			}
+			fact_ppm = ch;
+			return true;
+		}
 		default:
 			return false;
 	}
@@ -478,6 +687,7 @@ struct MarketEvents {
 		}
 		auto allowed = [&](size_t k) {
 			if (static_cast<MarketEventKind>(k) == MarketEventKind::TownBoom) return town_count > 0;
+			if (MarketKindHasTownField(static_cast<MarketEventKind>(k))) return false; // Made from the real state of the towns, never drawn.
 			return !MarketEventInfo(static_cast<MarketEventKind>(k)).company || !candidates[k].empty();
 		};
 
@@ -596,6 +806,164 @@ struct MarketEvents {
 		return std::clamp<int64_t>(sum, MARKET_CREDIT_MIN_BP, MARKET_CREDIT_MAX_BP);
 	}
 
+	/* ---- The real news (no dice, except war and peace) ---- */
+
+	/** An empty event with the next id. The wording variant comes from the id and the subject, so no random number is used. */
+	MarketEvent NewEvent(MarketEventKind kind, int64_t minute, int severity, uint32_t subject = 0)
+	{
+		MarketEvent e;
+		e.id = this->next_id++;
+		e.kind = kind;
+		e.minute = minute;
+		e.severity = static_cast<uint8_t>(std::clamp(severity, 1, 3));
+		e.variant = static_cast<uint8_t>((e.id + subject * 5) % 12);
+		return e;
+	}
+
+	/** Fill the push on gold and shares of an event from its kind and severity, without dice (the middle of the range). */
+	static void FillPush(MarketEvent &e)
+	{
+		const MarketEventDef &def = MarketEventInfo(e.kind);
+		const int pct = MarketSeverityPercent(e.severity);
+		if (def.gold_dir != 0) e.gold_ppm = def.gold_dir * std::min<int64_t>((static_cast<int64_t>(def.gold_min) + def.gold_max) / 2 * pct / 100, MARKET_EVENT_GOLD_MAX_PPM);
+		if (def.share_dir != 0) e.share_ppm = def.share_dir * std::min<int64_t>((static_cast<int64_t>(def.share_min) + def.share_max) / 2 * pct / 100, MARKET_EVENT_SHARE_MAX_PPM);
+	}
+
+	/** The newest war or peace event in the log, or nullptr. */
+	const MarketEvent *LastWarOrPeace() const
+	{
+		for (const MarketEvent &e : this->log) if (MarketKindIsWar(e.kind)) return &e;
+		return nullptr;
+	}
+
+	/** True while a war is on (the newest war / peace event is a war). */
+	bool WarIsOn() const
+	{
+		const MarketEvent *w = this->LastWarOrPeace();
+		return w != nullptr && w->kind == MarketEventKind::WarTension;
+	}
+
+	/**
+	 * Once per game hour: the dice of war and peace, the ONLY news that come by chance. The numbers are drawn every hour whether or not an event follows, so the
+	 * row of random numbers does not depend on anything else. A war can only start when it is peace and the gap has passed, a peace only ends a war.
+	 * @return The event when one has to happen now.
+	 */
+	std::optional<MarketEvent> GenerateWar(int64_t minute)
+	{
+		const uint32_t roll = static_cast<uint32_t>(this->Next() >> 11) % 1000;
+		const uint32_t sev_roll = static_cast<uint32_t>(this->Next() >> 11) % 100;
+		const int64_t gold_draw = static_cast<int64_t>(this->Next() >> 11);
+		const int64_t share_draw = static_cast<int64_t>(this->Next() >> 11);
+		if (minute < static_cast<int64_t>(MARKET_EVENT_START_DELAY_HOURS) * 60) return std::nullopt;
+		const MarketEvent *last = this->LastWarOrPeace();
+		const bool on = last != nullptr && last->kind == MarketEventKind::WarTension;
+		const int64_t gap = on ? MARKET_PEACE_MIN_GAP_DAYS : MARKET_WAR_MIN_GAP_DAYS;
+		if (last != nullptr && minute - last->minute < gap * MARKET_MINUTES_PER_DAY) return std::nullopt;
+		if (static_cast<int>(roll) >= (on ? MARKET_PEACE_CHANCE_PERMILLE : MARKET_WAR_CHANCE_PERMILLE)) return std::nullopt;
+
+		MarketEvent e = this->NewEvent(on ? MarketEventKind::PeaceDeal : MarketEventKind::WarTension, minute, sev_roll < 60 ? 1 : (sev_roll < 90 ? 2 : 3));
+		const MarketEventDef &def = MarketEventInfo(e.kind);
+		const int pct = MarketSeverityPercent(e.severity);
+		auto draw = [](int64_t lo, int64_t hi, int64_t r) { return hi <= lo ? lo : lo + r % (hi - lo + 1); };
+		e.gold_ppm = def.gold_dir * std::min<int64_t>(draw(def.gold_min, def.gold_max, gold_draw) * pct / 100, MARKET_EVENT_GOLD_MAX_PPM);
+		e.share_ppm = def.share_dir * std::min<int64_t>(draw(def.share_min, def.share_max, share_draw) * pct / 100, MARKET_EVENT_SHARE_MAX_PPM);
+		return e;
+	}
+
+	/**
+	 * Once per game hour: the true company story, if there is one. No dice: of all the stories that are TRUE now (and not told about the same company within
+	 * MARKET_COMPANY_REPEAT_DAYS) the biggest one is told; a tie goes to the lower kind, then to the lower company. At most one per call.
+	 */
+	std::optional<MarketEvent> GenerateCompanyNews(int64_t minute, const std::vector<CompanyFacts> &facts)
+	{
+		bool found = false;
+		int best_sev = 0;
+		size_t best_kind = 0, best_i = 0;
+		int64_t best_fact = 0;
+		for (size_t k = 0; k < MARKET_EVENT_KIND_COUNT; k++) {
+			const MarketEventKind kind = static_cast<MarketEventKind>(k);
+			if (!MarketKindIsCompany(kind)) continue;
+			for (size_t i = 0; i < facts.size(); i++) {
+				int64_t fact = 0; int sev = 1;
+				if (!CompanyEventFact(kind, facts[i], fact, sev)) continue;
+				if (this->RecentlyReported(kind, facts[i].company, minute)) continue;
+				if (!found || sev > best_sev) { found = true; best_sev = sev; best_kind = k; best_i = i; best_fact = fact; }
+			}
+		}
+		if (!found) return std::nullopt;
+		MarketEvent e = this->NewEvent(static_cast<MarketEventKind>(best_kind), minute, best_sev, facts[best_i].company);
+		e.target = facts[best_i].company;
+		e.fact_ppm = best_fact;
+		FillPush(e);
+		return e;
+	}
+
+	/** True when the log already has this kind of news about this town within `days` game days. */
+	bool RecentlyReportedTown(MarketEventKind kind, uint32_t town, int64_t minute, int64_t days) const
+	{
+		for (const MarketEvent &e : this->log) {
+			if (minute - e.minute > days * MARKET_MINUTES_PER_DAY) break; // newest first
+			if (e.kind == kind && e.town == town) return true;
+		}
+		return false;
+	}
+
+	/** The weather that is on a town now (one callback per active weather event). */
+	template <typename F>
+	void ForEachActiveWeather(uint32_t town, int64_t minute, F &&fn) const
+	{
+		for (const MarketEvent &e : this->log) {
+			const int64_t age = minute - e.minute;
+			if (age >= MARKET_WEATHER_MAX_DAYS * MARKET_MINUTES_PER_DAY) break; // newest first
+			if (age < 0 || e.town != town || !MarketKindIsWeather(e.kind)) continue;
+			const MarketWeatherEffect w = MarketWeatherOf(e.kind, e.severity, e.fact_ppm);
+			if (w.days <= 0 || age >= w.days * MARKET_MINUTES_PER_DAY) continue;
+			fn(e, w);
+		}
+	}
+
+	/** True while a storm, a meteorite or a drought is on the town. */
+	bool WeatherActive(uint32_t town, int64_t minute) const
+	{
+		bool on = false;
+		this->ForEachActiveWeather(town, minute, [&on](const MarketEvent &, const MarketWeatherEffect &) { on = true; });
+		return on;
+	}
+
+	/** True while the weather keeps the town from growing. */
+	bool TownGrowthHalted(uint32_t town, int64_t minute) const
+	{
+		bool halt = false;
+		this->ForEachActiveWeather(town, minute, [&halt](const MarketEvent &, const MarketWeatherEffect &w) { if (w.halts_growth) halt = true; });
+		return halt;
+	}
+
+	/** How much less the citizens of a town earn now because of the weather, in ppm (0 .. MARKET_WEATHER_INCOME_MAX_DROP_PPM). */
+	int64_t TownIncomeDropPpm(uint32_t town, int64_t minute) const
+	{
+		int64_t sum = 0;
+		this->ForEachActiveWeather(town, minute, [&sum](const MarketEvent &, const MarketWeatherEffect &w) { sum += w.income_drop_ppm; });
+		return std::min<int64_t>(sum, MARKET_WEATHER_INCOME_MAX_DROP_PPM);
+	}
+
+	/** A drought of this town has run its course and its end has not been reported yet. @param[out] days How long it lasted. */
+	bool DroughtEndDue(uint32_t town, int64_t minute, int64_t &days) const
+	{
+		for (const MarketEvent &e : this->log) {
+			const int64_t age = minute - e.minute;
+			if (age >= (MARKET_WEATHER_MAX_DAYS + 5) * MARKET_MINUTES_PER_DAY) break;
+			if (e.town != town) continue;
+			if (e.kind == MarketEventKind::WeatherDroughtEnd) return false; // The newest drought of this town has its end already.
+			if (e.kind != MarketEventKind::WeatherDrought) continue;
+			const MarketWeatherEffect w = MarketWeatherOf(e.kind, e.severity, e.fact_ppm);
+			if (age < w.days * MARKET_MINUTES_PER_DAY) return false; // Still on.
+			days = w.days;
+			return true;
+		}
+		return false;
+	}
+
+
 	/** The sentiment that moves the goal price of a symbol (market plus own), limited. 0 for a symbol that is not a company. */
 	int64_t SentimentPpm(size_t symbol) const
 	{
@@ -609,8 +977,11 @@ extern MarketEvents _market_events;
 /** The sentiment of a share in ppm, for the price formula of stock_base.cpp. Companies only: valuables follow the gold price. */
 int64_t MarketEventSentimentPpm(size_t symbol);
 
-/** The name of what a story is about: the company of a company event, the town of a town boom, "" for the rest. */
+/** The name of what a story is about: the company of a company event, the town of a town / weather news or a town boom, "" for the rest. */
 std::string MarketEventSubjectName(const MarketEvent &e);
+
+/** Put an event into the game: sentiment, gold pressure, diamond stock, the log and the news item. Used by market_events.cpp and town_news.cpp. */
+void PublishMarketEvent(const MarketEvent &e);
 
 /** Test tool (console command stock_event): make an event now. @param kind Number of the kind, -1 = by weight. @return The event that happened. */
 MarketEvent FireMarketEventNow(int kind);

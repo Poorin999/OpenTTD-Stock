@@ -163,7 +163,7 @@ static bool ConGoldFactors(std::span<std::string_view> argv)
 static bool ConStockEvent(std::span<std::string_view> argv)
 {
 	if (argv.empty()) {
-		IConsolePrint(CC_HELP, "Make a market news event now (test tool, single player, after 'stock_dev on'). Usage: 'stock_event' (a random kind) or 'stock_event <0-37>' (a kind: 0 boom, 1 recession, 2 inflation, 3 rate cut hope, 4 war, 5 peace, 6 bank scare, 7 gold mine found, 8 mine strike, 9 central banks buy gold, 10 jewellery demand, 11 fuel up, 12 fuel down, 13 technology, 14 tourism, 15 storm, 16 company revenue up, 17 company profit down, 18 company distress, 19 company profit up, 20 company revenue down, 21 company loss, 22 company value up, 23 company value down, 24 company bankruptcy, 25 rate hike, 26 central banks sell gold, 27 jewellery demand drop, 28 profit taking, 29 coal shortage, 30 coal glut, 31 harvest failure, 32 bumper harvest, 33 construction boom, 34 construction slump, 35 diamond mine found, 36 diamond demand surge, 37 town boom). Company kinds (16-24) are made only when TRUE for a company now, otherwise a kind is drawn by weight.");
+		IConsolePrint(CC_HELP, "Make a market news event now (test tool, single player, after 'stock_dev on'). Usage: 'stock_event' (a random kind) or 'stock_event <0-44>' (a kind: 0 boom, 1 recession, 2 inflation, 3 rate cut hope, 4 war, 5 peace, 6 bank scare, 7 gold mine found, 8 mine strike, 9 central banks buy gold, 10 jewellery demand, 11 fuel up, 12 fuel down, 13 technology, 14 tourism, 15 storm, 16 company revenue up, 17 company profit down, 18 company distress, 19 company profit up, 20 company revenue down, 21 company loss, 22 company value up, 23 company value down, 24 company bankruptcy, 25 rate hike, 26 central banks sell gold, 27 jewellery demand drop, 28 profit taking, 29 coal shortage, 30 coal glut, 31 harvest failure, 32 bumper harvest, 33 construction boom, 34 construction slump, 35 diamond mine found, 36 diamond demand surge, 37 town boom, 38 town grew, 39 town shrank, 40 town milestone, 41 storm, 42 meteorite, 43 drought, 44 drought over). Company kinds (16-24) are made only when TRUE for a company now, otherwise a kind is drawn by weight. Kinds 38-44 are made about the first town that has a treasury and have their real effects (treasury, income, growth). The game itself only draws war and peace by chance: every other news is true (see market_events.h).");
 		return true;
 	}
 	if (argv.size() > 2) return false;
@@ -182,7 +182,7 @@ static bool ConStockEvent(std::span<std::string_view> argv)
 		const std::string_view text = argv[1];
 		const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
 		if (error != std::errc() || end != text.data() + text.size() || value >= MARKET_EVENT_KIND_COUNT) {
-			IConsolePrint(CC_ERROR, "The kind must be a whole number from 0 to 37.");
+			IConsolePrint(CC_ERROR, "The kind must be a whole number from 0 to 44.");
 			return true;
 		}
 		kind = static_cast<int>(value);

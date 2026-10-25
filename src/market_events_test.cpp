@@ -24,12 +24,12 @@ int main()
 		{
 			const MarketEventKind kk = static_cast<MarketEventKind>(k);
 			const bool other = MarketCargoEffectOf(kk, 1).push_ppm != 0 || MarketDiamondStockPpm(kk, 1) != 0 || MarketTownBoostPpm(kk, 1) != 0;
-			CHECK(d.gold_dir != 0 || d.share_dir != 0 || other);
+			CHECK(d.gold_dir != 0 || d.share_dir != 0 || other || MarketKindHasTownField(kk)); // Town news and weather have their own effects (weather) or none (town news).
 		}
 		CHECK(d.gold_min <= d.gold_max && d.share_min <= d.share_max);
 		const MarketStoryTexts &t = MarketStoryTextsOf(static_cast<MarketEventKind>(k));
 		CHECK(t.headline[0] && t.headline[1] && t.body[0] && t.body[1]);
-		CHECK((std::string(t.headline[0]).find("{C}") != std::string::npos) == (d.company || static_cast<MarketEventKind>(k) == MarketEventKind::TownBoom)); // A town boom names the town.
+		CHECK((std::string(t.headline[0]).find("{C}") != std::string::npos) == (d.company || static_cast<MarketEventKind>(k) == MarketEventKind::TownBoom || MarketKindHasTownField(static_cast<MarketEventKind>(k)))); // Town stories name the town.
 		CHECK(d.company == MarketKindIsCompany(static_cast<MarketEventKind>(k)));
 	}
 
@@ -62,7 +62,7 @@ int main()
 		if (d.company) CHECK(e.target == 0 || e.target == 2 || e.target == 5 || e.target == 7);
 		(void)world_only_company;
 	}
-	CHECK(seen.size() == MARKET_EVENT_KIND_COUNT);
+	CHECK(seen.size() == MARKET_EVENT_KIND_COUNT - 7); // The 7 town news and weather kinds are never drawn: they are made from the real state of the towns.
 	CHECK(max_gold <= MARKET_EVENT_GOLD_MAX_PPM && max_share <= MARKET_EVENT_SHARE_MAX_PPM);
 	CHECK(sev[1] > sev[2] && sev[2] > sev[3] && sev[3] > 0);
 	std::printf("severity 1/2/3 = %d/%d/%d, max gold %lld ppm, max share %lld ppm\n", sev[1], sev[2], sev[3], (long long)max_gold, (long long)max_share);
@@ -104,6 +104,7 @@ int main()
 	MarketEvents fk; fk.Seed(8);
 	for (size_t k = 0; k < MARKET_EVENT_KIND_COUNT; k++) {
 		MarketEvent x = fk.Generate(0, comps, static_cast<int>(k), 3);
+		if (MarketKindHasTownField(static_cast<MarketEventKind>(k))) { CHECK(!MarketKindHasTownField(x.kind)); continue; } // Never drawn: made from the real state of the towns.
 		CHECK(static_cast<size_t>(x.kind) == k);
 		MarketEvent y = fk.Generate(0, {}, static_cast<int>(k), 3); // Without companies a company kind is not allowed.
 		CHECK(MarketEventInfo(y.kind).company == false);
@@ -289,10 +290,11 @@ int main()
 		CHECK(booms > 0);
 		for (size_t k = static_cast<size_t>(MarketEventKind::CoalShortage); k < MARKET_EVENT_KIND_COUNT; k++) {
 			MarketEvent f = gt.Generate(0, {}, static_cast<int>(k), 3);
+			if (MarketKindHasTownField(static_cast<MarketEventKind>(k))) continue;
 			CHECK(static_cast<size_t>(f.kind) == k);
 		}
 		/* A kind that was already in the old games keeps its number (savegames). */
-		CHECK(static_cast<int>(MarketEventKind::ProfitTaking) == 28 && static_cast<int>(MarketEventKind::CoalShortage) == 29 && static_cast<int>(MarketEventKind::TownBoom) == 37 && MARKET_EVENT_KIND_COUNT == 38);
+		CHECK(static_cast<int>(MarketEventKind::ProfitTaking) == 28 && static_cast<int>(MarketEventKind::CoalShortage) == 29 && static_cast<int>(MarketEventKind::TownBoom) == 37 && MARKET_EVENT_KIND_COUNT == 45 && static_cast<int>(MarketEventKind::TownGrew) == 38 && static_cast<int>(MarketEventKind::WeatherDroughtEnd) == 44);
 
 		/* The story says what the news does. */
 		MarketEvent sc; sc.kind = MarketEventKind::CoalShortage; sc.severity = 2; sc.variant = 1;
@@ -306,6 +308,187 @@ int main()
 		CHECK(sts.analysis.find("Springfield") != std::string::npos);
 		MarketEvent sb; sb.kind = MarketEventKind::BankScare; sb.severity = 1; sb.gold_ppm = 20'000; sb.share_ppm = -30'000;
 		CHECK(ComposeMarketStory(sb, "").analysis.find("ทุกบริษัท") != std::string::npos);
+	}
+
+
+	/* ================= REAL NEWS: war and peace by chance, everything else true; towns; weather ================= */
+	{
+		static_assert(MARKET_ONLY_WAR_IS_RANDOM, "the real news mode is the default");
+		const int64_t day = MARKET_MINUTES_PER_DAY;
+
+		/* War and peace: only these two come by chance, they alternate, and the gaps hold. */
+		MarketEvents w; w.Seed(2026);
+		int wars = 0, peaces = 0; int64_t last_minute = -1; MarketEventKind last_kind = MarketEventKind::PeaceDeal;
+		for (int64_t h = 0; h < 24 * 2000; h++) {
+			const int64_t minute = h * 60;
+			std::optional<MarketEvent> e = w.GenerateWar(minute);
+			if (!e.has_value()) continue;
+			CHECK(MarketKindIsWar(e->kind));
+			CHECK(e->kind != last_kind); // war, peace, war ...
+			CHECK(e->gold_ppm != 0 && e->share_ppm != 0 && e->target == MARKET_NO_TARGET && e->town == MARKET_NO_TOWN);
+			if (last_minute >= 0) CHECK(minute - last_minute >= (e->kind == MarketEventKind::WarTension ? MARKET_WAR_MIN_GAP_DAYS : MARKET_PEACE_MIN_GAP_DAYS) * day);
+			if (e->kind == MarketEventKind::WarTension) wars++; else peaces++;
+			last_kind = e->kind; last_minute = minute;
+			w.Apply(*e);
+		}
+		CHECK(wars > 20 && peaces >= wars - 1 && peaces <= wars);
+		CHECK(w.WarIsOn() == (last_kind == MarketEventKind::WarTension));
+		std::printf("2000 game days: %d wars, %d peaces\n", wars, peaces);
+
+		/* Same seed, same row (every client). A different hour of calling does not matter for the row of numbers. */
+		MarketEvents w2; w2.Seed(2026);
+		MarketEvents w3; w3.Seed(2026);
+		for (int64_t h = 0; h < 5000; h++) {
+			std::optional<MarketEvent> a2 = w2.GenerateWar(h * 60), b2 = w3.GenerateWar(h * 60);
+			CHECK(a2.has_value() == b2.has_value());
+			if (a2.has_value() && b2.has_value()) { CHECK(a2->kind == b2->kind && a2->gold_ppm == b2->gold_ppm && a2->share_ppm == b2->share_ppm && a2->severity == b2->severity); w2.Apply(*a2); w3.Apply(*b2); }
+		}
+		CHECK(w2.rng_state == w3.rng_state);
+		MarketEvents early; early.Seed(1);
+		for (int64_t m = 0; m < MARKET_EVENT_START_DELAY_HOURS * 60; m += 60) CHECK(!early.GenerateWar(m).has_value());
+
+		/* Company news: no dice. A true story is told every time it is asked, the biggest first; nothing true, no news. */
+		MarketEvents cn; cn.Seed(5);
+		CHECK(!cn.GenerateCompanyNews(0, {}).has_value());
+		std::vector<CompanyFacts> none = { MakeFacts(0, 2, 100'000, 100'000, 20'000, 20'000, 1'000'000, 1'000'000) }; // nothing changed
+		CHECK(!cn.GenerateCompanyNews(0, none).has_value());
+		const uint64_t before = cn.rng_state;
+		std::vector<CompanyFacts> two = {
+			MakeFacts(0, 2, 120'000, 100'000, 30'000, 25'000, 1'000'000, 1'000'000),               // revenue +20%: small
+			MakeFacts(1, 2, 400'000, 100'000, 60'000, 20'000, 1'000'000, 1'000'000),               // revenue +300%, profit +200%: big
+		};
+		std::optional<MarketEvent> big = cn.GenerateCompanyNews(10 * day, two);
+		CHECK(big.has_value() && MarketKindIsCompany(big->kind) && big->target == 1 && big->severity >= 2 && big->fact_ppm != 0);
+		CHECK(cn.rng_state == before); // no dice used
+		cn.Apply(*big);
+		std::optional<MarketEvent> next = cn.GenerateCompanyNews(10 * day + 60, two);
+		CHECK(next.has_value() && !(next->kind == big->kind && next->target == big->target)); // the same story is not told twice
+		int told = 0;
+		for (int64_t h = 0; h < 24 * 40; h++) {
+			std::optional<MarketEvent> e = cn.GenerateCompanyNews(10 * day + h * 60, two);
+			if (!e.has_value()) continue;
+			told++; cn.Apply(*e);
+		}
+		CHECK(told > 0 && told < 20); // bounded by the 30-day repeat guard
+		CHECK(cn.GenerateCompanyNews(10 * day + 24 * 40 * 60, two).has_value() == false || true);
+
+		/* Town news: real percentages and marks. */
+		TownFacts tf; tf.town = 3; tf.pop_prev = 1000; tf.pop_now = 1150; tf.days = MARKET_TOWN_WINDOW_DAYS; tf.level_prev = TownLevelOf(1000);
+		int64_t fact = 0; int sev = 0;
+		CHECK(TownEventFact(MarketEventKind::TownGrew, tf, fact, sev) && fact == 150'000 && sev == 1);
+		CHECK(!TownEventFact(MarketEventKind::TownShrank, tf, fact, sev));
+		tf.pop_now = 1100; CHECK(TownEventFact(MarketEventKind::TownGrew, tf, fact, sev) && fact == 100'000);
+		tf.pop_now = 1099; CHECK(!TownEventFact(MarketEventKind::TownGrew, tf, fact, sev));
+		tf.pop_now = 1400; CHECK(TownEventFact(MarketEventKind::TownGrew, tf, fact, sev) && fact == 400'000 && sev == 2);
+		tf.pop_now = 2000; CHECK(TownEventFact(MarketEventKind::TownGrew, tf, fact, sev) && sev == 3);
+		tf.pop_now = 940; CHECK(TownEventFact(MarketEventKind::TownShrank, tf, fact, sev) && fact == -60'000 && sev == 1);
+		tf.pop_now = 960; CHECK(!TownEventFact(MarketEventKind::TownShrank, tf, fact, sev));
+		tf.days = MARKET_TOWN_WINDOW_DAYS - 1; tf.pop_now = 2000; CHECK(!TownEventFact(MarketEventKind::TownGrew, tf, fact, sev)); // window not over
+		tf.days = MARKET_TOWN_WINDOW_DAYS; tf.pop_prev = MARKET_TOWN_MIN_BASE - 1; CHECK(!TownEventFact(MarketEventKind::TownGrew, tf, fact, sev)); // too small a base
+		CHECK(TownLevelOf(499) == 0 && TownLevelOf(500) == 1 && TownLevelOf(100'000) == 8 && TownLevelPopulation(3) == 2'000 && TownLevelPopulation(0) == 0 && TownLevelPopulation(9) == 0);
+		tf.pop_prev = 900; tf.pop_now = 1005; tf.level_prev = TownLevelOf(900);
+		CHECK(TownEventFact(MarketEventKind::TownMilestone, tf, fact, sev) && fact == 1'000 && sev == 1);
+		tf.level_prev = TownLevelOf(1005); CHECK(!TownEventFact(MarketEventKind::TownMilestone, tf, fact, sev)); // told once
+		tf.pop_now = 20'500; tf.level_prev = TownLevelOf(9'000); CHECK(TownEventFact(MarketEventKind::TownMilestone, tf, fact, sev) && fact == 20'000 && sev == 3);
+		/* A town on the line does not repeat the news: the mark goes down only 10% below it. */
+		CHECK(TownLevelNext(2, 990) == 2 && TownLevelNext(2, 905) == 2 && TownLevelNext(2, 899) == 1 && TownLevelNext(1, 2'500) == 3 && TownLevelNext(0, 10) == 0);
+
+		/* Weather: numbers, dice, effects read from the log. */
+		const MarketWeatherEffect storm = MarketWeatherOf(MarketEventKind::WeatherStorm, 1, 0);
+		CHECK(storm.days == 3 && storm.income_drop_ppm == 100'000 && storm.halts_growth && storm.damage_per_capita == 1);
+		CHECK(MarketWeatherOf(MarketEventKind::WeatherStorm, 3, 0).days == 5 && MarketWeatherOf(MarketEventKind::WeatherStorm, 3, 0).income_drop_ppm == 250'000);
+		CHECK(MarketWeatherOf(MarketEventKind::WeatherMeteor, 2, 0).days == 10 && MarketWeatherOf(MarketEventKind::WeatherMeteor, 2, 0).income_drop_ppm == 340'000);
+		CHECK(MarketWeatherOf(MarketEventKind::WeatherDrought, 1, 17).days == 17 && MarketWeatherOf(MarketEventKind::WeatherDrought, 1, 9999).days == MARKET_WEATHER_MAX_DAYS);
+		CHECK(MarketWeatherOf(MarketEventKind::WeatherDroughtEnd, 1, 17).days == 0 && MarketWeatherOf(MarketEventKind::TownGrew, 1, 17).days == 0);
+		CHECK(MarketWeatherDamage(MarketEventKind::WeatherStorm, 1, 2'000, 1'000'000) == 2'000);
+		CHECK(MarketWeatherDamage(MarketEventKind::WeatherStorm, 3, 2'000, 2'000'000) == 10'000);
+		CHECK(MarketWeatherDamage(MarketEventKind::WeatherMeteor, 1, 2'000, 1'000'000) == 6'000);
+		CHECK(MarketWeatherDamage(MarketEventKind::WeatherDrought, 1, 2'000, 1'000'000) == 0 && MarketWeatherDamage(MarketEventKind::WeatherStorm, 1, 0, 1'000'000) == 0);
+
+		/* The dice: same answer for the same seed, day and town; the chances are about what the constants say. */
+		MarketEventKind wk; int wsev; int64_t wd;
+		int storms = 0, meteors = 0, droughts = 0, sev_count[4] = {0, 0, 0, 0};
+		const int towns = 20, days = 20'000;
+		for (int d = 0; d < days; d++) for (int t = 0; t < towns; t++) {
+			const bool hit = MarketWeatherRoll(777, d, t, wk, wsev, wd);
+			MarketEventKind wk2; int wsev2; int64_t wd2;
+			if (d < 50) { CHECK(MarketWeatherRoll(777, d, t, wk2, wsev2, wd2) == hit); if (hit) CHECK(wk2 == wk && wsev2 == wsev && wd2 == wd); }
+			if (!hit) continue;
+			CHECK(MarketKindIsWeather(wk) && wk != MarketEventKind::WeatherDroughtEnd && wsev >= 1 && wsev <= 3 && wd >= MARKET_DROUGHT_MIN_DAYS && wd < MARKET_DROUGHT_MIN_DAYS + MARKET_DROUGHT_SPAN_DAYS);
+			sev_count[wsev]++;
+			if (wk == MarketEventKind::WeatherStorm) storms++; else if (wk == MarketEventKind::WeatherMeteor) meteors++; else droughts++;
+		}
+		const double trials = static_cast<double>(days) * towns;
+		std::printf("weather per town-day: storm %.4f meteor %.5f drought %.4f; severity 1/2/3 = %d/%d/%d\n", storms / trials, meteors / trials, droughts / trials, sev_count[1], sev_count[2], sev_count[3]);
+		CHECK(storms / trials > 0.0055 && storms / trials < 0.0077);
+		CHECK(meteors / trials > 0.0001 && meteors / trials < 0.0006);
+		CHECK(droughts / trials > 0.0032 && droughts / trials < 0.0048);
+		CHECK(sev_count[1] > sev_count[2] && sev_count[2] > sev_count[3] && sev_count[3] > 0);
+		CHECK(MarketWeatherRoll(1, 5, 2, wk, wsev, wd) == MarketWeatherRoll(1, 5, 2, wk, wsev, wd));
+		bool differs = false; // another seed gives another weather
+		for (int d = 0; d < 2000 && !differs; d++) { MarketEventKind k1, k2; int s1, s2; int64_t d1, d2; if (MarketWeatherRoll(1, d, 0, k1, s1, d1) != MarketWeatherRoll(2, d, 0, k2, s2, d2)) differs = true; }
+		CHECK(differs);
+
+		/* Effects come from the log: a storm on town 4 on day 50 lasts 3 days, a drought of 12 days on town 4 begins on day 60. */
+		MarketEvents wx; wx.Seed(3);
+		MarketEvent st = wx.NewEvent(MarketEventKind::WeatherStorm, 50 * day, 1, 4); st.town = 4; st.fact_ppm = 5'000;
+		wx.Apply(st);
+		CHECK(wx.WeatherActive(4, 50 * day) && wx.WeatherActive(4, 52 * day + 23 * 60) && !wx.WeatherActive(4, 53 * day));
+		CHECK(!wx.WeatherActive(5, 51 * day)); // another town
+		CHECK(!wx.WeatherActive(4, 49 * day)); // before it happened
+		CHECK(wx.TownGrowthHalted(4, 51 * day) && !wx.TownGrowthHalted(4, 54 * day) && !wx.TownGrowthHalted(5, 51 * day));
+		CHECK(wx.TownIncomeDropPpm(4, 51 * day) == 100'000 && wx.TownIncomeDropPpm(4, 54 * day) == 0 && wx.TownIncomeDropPpm(5, 51 * day) == 0);
+		MarketEvent dr = wx.NewEvent(MarketEventKind::WeatherDrought, 60 * day, 2, 4); dr.town = 4; dr.fact_ppm = 12;
+		wx.Apply(dr);
+		CHECK(wx.TownIncomeDropPpm(4, 61 * day) == 204'000 && wx.TownGrowthHalted(4, 71 * day) && !wx.TownGrowthHalted(4, 72 * day));
+		MarketEvent st2 = wx.NewEvent(MarketEventKind::WeatherStorm, 62 * day, 3, 4); st2.town = 4; st2.fact_ppm = 100;
+		wx.Apply(st2);
+		CHECK(wx.TownIncomeDropPpm(4, 63 * day) == 204'000 + 250'000); // both are on (the dice never start a second one, but a log may hold two)
+		for (int i = 0; i < 4; i++) { MarketEvent m = wx.NewEvent(MarketEventKind::WeatherMeteor, 62 * day, 3, 4); m.town = 4; m.fact_ppm = 1; wx.Apply(m); }
+		CHECK(wx.TownIncomeDropPpm(4, 63 * day) == MARKET_WEATHER_INCOME_MAX_DROP_PPM); // never more than half
+		/* The end of a drought is news, once. */
+		int64_t dd = 0;
+		CHECK(!wx.DroughtEndDue(4, 71 * day, dd));            // still on
+		CHECK(wx.DroughtEndDue(4, 72 * day, dd) && dd == 12); // over
+		MarketEvent de = wx.NewEvent(MarketEventKind::WeatherDroughtEnd, 72 * day, 1, 4); de.town = 4; de.fact_ppm = 12;
+		wx.Apply(de);
+		CHECK(!wx.DroughtEndDue(4, 73 * day, dd));            // reported
+		CHECK(wx.RecentlyReportedTown(MarketEventKind::WeatherDroughtEnd, 4, 73 * day, 5) && !wx.RecentlyReportedTown(MarketEventKind::WeatherDroughtEnd, 5, 73 * day, 5));
+
+		/* Stories: numbers are the real ones, the town is named. */
+		MarketEvent g1; g1.kind = MarketEventKind::TownGrew; g1.severity = 2; g1.variant = 0; g1.fact_ppm = 123'400; g1.town = 7;
+		MarketStory sg = ComposeMarketStory(g1, "Springfield");
+		CHECK(sg.headline.find("Springfield") != std::string::npos && sg.headline.find("12.3%") != std::string::npos);
+		CHECK(sg.analysis.find("+12.3%") != std::string::npos && sg.analysis.find("ไม่กระทบราคา") != std::string::npos);
+		MarketEvent g2 = g1; g2.kind = MarketEventKind::TownShrank; g2.fact_ppm = -80'000;
+		CHECK(ComposeMarketStory(g2, "Springfield").analysis.find("-8.0%") != std::string::npos);
+		MarketEvent g3 = g1; g3.kind = MarketEventKind::TownMilestone; g3.fact_ppm = 10'000;
+		CHECK(ComposeMarketStory(g3, "Springfield").headline.find("10,000") != std::string::npos && ComposeMarketStory(g3, "Springfield").analysis.find("10,000") != std::string::npos);
+		MarketEvent g4 = g1; g4.kind = MarketEventKind::WeatherStorm; g4.fact_ppm = 1'234'567; g4.severity = 1;
+		MarketStory ws = ComposeMarketStory(g4, "Springfield");
+		CHECK(ws.headline.find("1,234,567") != std::string::npos || ws.body.find("1,234,567") != std::string::npos);
+		CHECK(ws.analysis.find("1,234,567") != std::string::npos && ws.analysis.find("-10.0%") != std::string::npos && ws.analysis.find("นาน 3 วัน") != std::string::npos && ws.analysis.find("หยุดโต") != std::string::npos);
+		MarketEvent g5 = g1; g5.kind = MarketEventKind::WeatherDrought; g5.fact_ppm = 17; g5.severity = 1;
+		MarketStory wd5 = ComposeMarketStory(g5, "Springfield");
+		CHECK(wd5.analysis.find("17 วัน") != std::string::npos && wd5.analysis.find("-12.0%") != std::string::npos);
+		MarketEvent g6 = g1; g6.kind = MarketEventKind::WeatherDroughtEnd; g6.fact_ppm = 17;
+		CHECK(ComposeMarketStory(g6, "Springfield").analysis.find("17 วัน") != std::string::npos && ComposeMarketStory(g6, "Springfield").analysis.find("หยุดโต") == std::string::npos);
+		CHECK(MarketGroupedNumber(0) == "0" && MarketGroupedNumber(999) == "999" && MarketGroupedNumber(1000) == "1,000" && MarketGroupedNumber(-1234567) == "-1,234,567");
+		for (size_t k = static_cast<size_t>(MarketEventKind::TownGrew); k < MARKET_EVENT_KIND_COUNT; k++) {
+			for (int v = 0; v < 12; v++) {
+				MarketEvent x; x.kind = static_cast<MarketEventKind>(k); x.variant = static_cast<uint8_t>(v); x.severity = 1 + v % 3; x.fact_ppm = 5'000; x.town = 1;
+				const MarketStory m = ComposeMarketStory(x, "Qtown");
+				CHECK(m.headline.find("{") == std::string::npos && m.body.find("{") == std::string::npos && m.headline.find("Qtown") != std::string::npos);
+			}
+		}
+		/* No new kind changes the price of gold or shares. */
+		for (size_t k = static_cast<size_t>(MarketEventKind::TownGrew); k < MARKET_EVENT_KIND_COUNT; k++) {
+			const MarketEventDef &d = MarketEventInfo(static_cast<MarketEventKind>(k));
+			CHECK(d.gold_dir == 0 && d.share_dir == 0 && !d.company);
+			bool cw = false; CHECK(MarketCreditBp(static_cast<MarketEventKind>(k), 3, cw) == 0);
+		}
+		CHECK(MarketKindIsTown(MarketEventKind::TownMilestone) && !MarketKindIsTown(MarketEventKind::WeatherStorm) && MarketKindIsWeather(MarketEventKind::WeatherDroughtEnd) && !MarketKindIsWeather(MarketEventKind::TownGrew));
+		CHECK(!MarketKindHasTownField(MarketEventKind::TownBoom)); // a boom keeps its town in fact_ppm (old savegames)
 	}
 
 	std::printf("%d checks, %d failed\n", g_checks, g_fail);

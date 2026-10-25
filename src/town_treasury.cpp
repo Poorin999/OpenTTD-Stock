@@ -19,6 +19,7 @@
 #include "news_func.h"
 #include "strings_func.h"
 #include "town.h"
+#include "market_events.h"
 #include "table/strings.h"
 
 #include <algorithm>
@@ -362,7 +363,9 @@ static void TownsDaily(const GameTimeSnapshot &now)
 		}
 
 		/* Income of the citizens and the town income tax. The income goes to the four groups by their share of the town. */
-		const int64_t income = pop * TOWN_INCOME_CENTS_PER_CAPITA_DAY * index_ppm / 100 / 1'000'000;
+		int64_t income = pop * TOWN_INCOME_CENTS_PER_CAPITA_DAY * index_ppm / 100 / 1'000'000;
+		/* A storm, a meteorite or a drought on the town (the news log, market_events.h): the citizens earn less while it lasts. */
+		income -= income * _market_events.TownIncomeDropPpm(t->index.base(), static_cast<int64_t>(now.total_minutes)) / 1'000'000;
 		const int64_t tax = income * TOWN_INCOME_TAX_PERCENT / 100;
 		const auto share = citizengold::GroupSharePpm(CitizenSeed(), t->index.base());
 		int64_t given = 0;

@@ -13,7 +13,8 @@
  * and one of three presenters, and the analyst line is built from the real numbers of the event (the push on gold and on the shares). The result
  * depends only on the event, so every client of a network game shows the same story, and a savegame needs to keep only the numbers.
  * Thai text. (English texts are not written yet.)
- * COMPANY stories are written from REAL figures (MarketEvent::fact_ppm printed as {P}); see CompanyEventFact in market_events.h.
+ * COMPANY, TOWN and WEATHER stories are written from REAL figures (MarketEvent::fact_ppm printed as {P}); see CompanyEventFact, TownEventFact in market_events.h and town_news.cpp.
+ * {C} = the company or the town of the story.
  * This file needs only the standard library.
  */
 
@@ -195,6 +196,34 @@ inline const MarketStoryTexts &MarketStoryTextsOf(MarketEventKind kind)
 		{ { "{C} เศรษฐกิจคึกคัก เมืองเติบโตเร็วขึ้น", "นักลงทุนแห่เข้า {C} เมืองขยายตัวเร็ว" },
 		  { "เศรษฐกิจของ {C} ขยายตัวต่อเนื่อง ธุรกิจและผู้อยู่อาศัยใหม่ย้ายเข้ามา ทำให้เมืองเติบโตเร็วกว่าปกติในช่วงนี้",
 		    "การลงทุนใน {C} เพิ่มขึ้นแรง มีการสร้างบ้านและร้านค้าเพิ่ม เมืองจึงขยายตัวเร็วขึ้นชั่วคราว" } },
+		/* TownGrew ({P} = real change of the population) */
+		{ { "{C} เติบโตเร็ว ประชากรเพิ่มขึ้น {P}", "ประชากรของ {C} เพิ่มขึ้น {P} ในช่วงที่ผ่านมา" },
+		  { "จำนวนประชากรของ {C} เพิ่มขึ้น {P} เมื่อเทียบกับตอนต้นช่วง ตัวเลขนี้นับจากประชากรจริงของเมืองในเกม",
+		    "{C} มีคนอาศัยเพิ่มขึ้น {P} จากตอนต้นช่วง เมืองที่ใหญ่ขึ้นมีผู้โดยสารและรายได้ภาษีมากขึ้นตามไปด้วย" } },
+		/* TownShrank */
+		{ { "{C} ประชากรลดลง {P}", "คนย้ายออกจาก {C} ประชากรหายไป {P}" },
+		  { "จำนวนประชากรของ {C} ลดลง {P} เมื่อเทียบกับตอนต้นช่วง ตัวเลขนี้นับจากประชากรจริงของเมืองในเกม",
+		    "{C} มีคนอาศัยน้อยลง {P} จากตอนต้นช่วง เมืองที่เล็กลงมีผู้โดยสารและรายได้ภาษีน้อยลงตามไปด้วย" } },
+		/* TownMilestone ({P} = the population mark) */
+		{ { "{C} มีประชากรเกิน {P} คนแล้ว", "เมือง {C} ผ่านหลักประชากร {P} คน" },
+		  { "ประชากรของ {C} ผ่านหลัก {P} คน นับจากประชากรจริงของเมืองในเกม",
+		    "{C} ขยายตัวจนมีประชากรเกิน {P} คน เมืองนี้กลายเป็นตลาดผู้โดยสารที่ใหญ่ขึ้น" } },
+		/* WeatherStorm ({P} = the damage) */
+		{ { "พายุถล่ม {C} ความเสียหายประเมิน {P}", "{C} ถูกพายุฝนฟ้าคะนองโจมตี" },
+		  { "พายุที่พัดถล่ม {C} สร้างความเสียหายประเมิน {P} ทางการหักเงินซ่อมแซมจากคลังเมืองเท่าที่มี ประชาชนหยุดงานชั่วคราว รายได้จึงลดลงและเมืองหยุดขยายตัวระหว่างพายุ",
+		    "{C} รับมือพายุใหญ่ ความเสียหายประเมิน {P} ถูกหักจากคลังเมืองเท่าที่มี ระหว่างพายุผู้คนหารายได้ได้น้อยลงและการก่อสร้างหยุดชะงัก" } },
+		/* WeatherMeteor */
+		{ { "อุกกาบาตตก {C} ความเสียหายประเมิน {P}", "ลูกไฟจากฟ้าพุ่งชน {C}" },
+		  { "อุกกาบาตตกใส่ {C} สร้างความเสียหายประเมิน {P} ทางการหักเงินจากคลังเมืองเท่าที่มี เมืองหยุดเติบโตและรายได้ของประชาชนลดลงชั่วคราวระหว่างฟื้นฟู",
+		    "เหตุอุกกาบาตที่ {C} ทำให้เมืองเสียหาย ประเมิน {P} คลังเมืองถูกหักตามที่มี และเมืองหยุดขยายตัวช่วงหนึ่ง" } },
+		/* WeatherDrought ({P} = days) */
+		{ { "{C} เผชิญภัยแล้ง คาดนาน {P} วัน", "ภัยแล้งเริ่มที่ {C} เมืองหยุดโต" },
+		  { "ภัยแล้งเริ่มขึ้นที่ {C} คาดว่าจะยาว {P} วัน ผลผลิตและรายได้ของประชาชนลดลงตลอดช่วงแล้ง และเมืองหยุดขยายตัวจนกว่าฝนจะกลับมา",
+		    "{C} ขาดน้ำอย่างหนัก ภัยแล้งจะอยู่ราว {P} วัน ประชาชนมีรายได้น้อยลงและการเติบโตของเมืองหยุดชะงัก" } },
+		/* WeatherDroughtEnd ({P} = days it lasted) */
+		{ { "ภัยแล้งที่ {C} สิ้นสุดแล้ว หลังผ่านไป {P} วัน", "ฝนกลับมาที่ {C} ภัยแล้งจบ" },
+		  { "ภัยแล้งที่ {C} สิ้นสุดลงหลังยาวนาน {P} วัน รายได้ของประชาชนกลับสู่ปกติและเมืองเริ่มขยายตัวได้อีกครั้ง",
+		    "ฝนตกที่ {C} ในที่สุด ภัยแล้งนาน {P} วันจบลง เมืองกลับมาเติบโตตามเดิม" } },
 	};
 	const size_t i = static_cast<size_t>(kind);
 	return table[i < MARKET_EVENT_KIND_COUNT ? i : 0];
@@ -231,10 +260,28 @@ inline std::string MarketPercentText(int64_t ppm)
 	return std::to_string(tenths / 10) + "." + std::to_string(tenths % 10) + "%";
 }
 
-/** The real number of a company story as printed: months for a bankruptcy, otherwise a percentage; "" when not known. */
+/** A whole number with a comma between the thousands, for example 12,345. */
+inline std::string MarketGroupedNumber(int64_t n)
+{
+	const bool neg = n < 0;
+	std::string digits = std::to_string(neg ? -n : n);
+	std::string out;
+	for (size_t i = 0; i < digits.size(); i++) {
+		if (i > 0 && (digits.size() - i) % 3 == 0) out += ',';
+		out += digits[i];
+	}
+	return neg ? "-" + out : out;
+}
+
+/** The real number of a story as printed: months for a bankruptcy, a percentage for a company or a town change, the mark for a milestone, money for a storm or a meteorite, days for a drought; "" when not known. */
 inline std::string MarketFactText(MarketEventKind kind, int64_t fact_ppm)
 {
-	if (fact_ppm == 0 || !MarketKindIsCompany(kind)) return std::string();
+	if (fact_ppm == 0) return std::string();
+	if (kind == MarketEventKind::TownMilestone) return MarketGroupedNumber(fact_ppm);
+	if (kind == MarketEventKind::TownGrew || kind == MarketEventKind::TownShrank) return MarketPercentText(fact_ppm);
+	if (kind == MarketEventKind::WeatherStorm || kind == MarketEventKind::WeatherMeteor) return MarketGroupedNumber(fact_ppm);
+	if (kind == MarketEventKind::WeatherDrought || kind == MarketEventKind::WeatherDroughtEnd) return std::to_string(fact_ppm);
+	if (!MarketKindIsCompany(kind)) return std::string();
 	if (kind == MarketEventKind::CompanyBankruptcy) return std::to_string(fact_ppm);
 	return MarketPercentText(fact_ppm);
 }
@@ -251,9 +298,22 @@ inline std::string MarketReplaceFact(std::string text, const std::string &fact)
 	return text;
 }
 
-/** The real figure as one line of the analyst text of a company story. */
+/** The real figure as one line of the analyst text of a company, town or weather story. */
 inline std::string MarketFactLine(const MarketEvent &e)
 {
+	if (MarketKindIsTown(e.kind) || MarketKindIsWeather(e.kind)) {
+		const std::string tp = MarketFactText(e.kind, e.fact_ppm);
+		switch (e.kind) {
+			case MarketEventKind::TownGrew:
+			case MarketEventKind::TownShrank: return "ข้อมูลจริงจากเมือง: ประชากรเทียบกับ " + std::to_string(MARKET_TOWN_WINDOW_DAYS) + " วันก่อน " + (e.fact_ppm > 0 ? "+" : "-") + tp;
+			case MarketEventKind::TownMilestone: return "ข้อมูลจริงจากเมือง: ประชากรผ่านหลัก " + tp + " คน";
+			case MarketEventKind::WeatherStorm:
+			case MarketEventKind::WeatherMeteor: return "เหตุการณ์จริงในเมือง: ประเมินความเสียหาย " + tp + " (หักจากคลังเมืองเท่าที่มี)";
+			case MarketEventKind::WeatherDrought: return "เหตุการณ์จริงในเมือง: ภัยแล้งคาดนาน " + tp + " วัน";
+			case MarketEventKind::WeatherDroughtEnd: return "เหตุการณ์จริงในเมือง: ภัยแล้งสิ้นสุดหลัง " + tp + " วัน";
+			default: return std::string();
+		}
+	}
 	if (!MarketKindIsCompany(e.kind)) return std::string();
 	const std::string p = MarketFactText(e.kind, e.fact_ppm);
 	const std::string signed_p = p.empty() ? std::string("-") : std::string(e.fact_ppm > 0 ? "+" : "-") + p;
@@ -341,6 +401,14 @@ inline MarketStory ComposeMarketStory(const MarketEvent &e, const std::string &c
 		std::string pct = std::to_string(a_bp / 100) + "." + (a_bp % 100 < 10 ? "0" : "") + std::to_string(a_bp % 100) + "%";
 		add(std::string("ดอกเบี้ยเงินกู้") + (credit_world ? "ของทุกบริษัท" : std::string(" ") + company) + ": " + (credit_bp > 0 ? "+" : "-") + pct + " (มีแนวโน้ม" + (credit_bp > 0 ? "แพงขึ้น" : "ถูกลง") + " ค่อยๆ ลดลงใน " + std::to_string(MARKET_CREDIT_NEWS_DAYS) + " วัน)");
 	}
+	/* Weather: what it really does to the town (the same numbers that the game uses, see MarketWeatherOf). */
+	const MarketWeatherEffect weather = MarketWeatherOf(e.kind, e.severity, e.fact_ppm);
+	if (weather.days > 0) {
+		std::string w = "ผลจริงต่อเมือง " + company + ": รายได้ประชาชน -" + MarketPercentText(weather.income_drop_ppm) + " นาน " + std::to_string(weather.days) + " วัน";
+		if (weather.halts_growth) w += " เมืองหยุดโตตลอดช่วงนี้";
+		add(w);
+	}
+	if (MarketKindIsTown(e.kind)) add("ข่าวเมือง ไม่กระทบราคาหุ้นหรือทองคำ");
 	if (a.empty()) a = "ยังไม่มีผลต่อราคา";
 	s.analysis = a;
 	return s;

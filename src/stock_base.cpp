@@ -21,6 +21,7 @@
 #include "RetailMarketManager.h"
 #include "game_time/game_time_manager.h"
 #include "market_events.h"
+#include "town_news.h"
 #include "command_type.h"
 #include "company_base.h"
 #include "company_func.h"
@@ -60,6 +61,7 @@ void StockMarket::Reset()
 	_town_treasury.Reset();
 	_cargo_market.Reset();
 	_market_events.Reset();
+	TownNewsReset();
 	RetailMarketManager::Get().Reset(); // The retail investors start again with every new game and every load.
 	GameTimeManager::Get().Reset();
 	for (auto &list : this->daily) list.clear();

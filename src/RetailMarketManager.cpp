@@ -58,7 +58,7 @@ int64_t TownCoveragePpm(const Town *t)
  * shortens that rate by the boost and writes it back every day, and it remembers the original rate to start from again.
  * A town that does not grow at all (no service) stays as it is.
  */
-void ApplyGrowthBoost(Town *t, int64_t boost_ppm, int64_t &base_rate, int64_t &applied_rate)
+void ApplyGrowthBoost(Town *t, int64_t boost_ppm, int64_t &base_rate, int64_t &applied_rate, bool halt = false)
 {
 	if (t->growth_rate == TOWN_GROWTH_RATE_NONE) {
 		applied_rate = 0;
@@ -66,7 +66,8 @@ void ApplyGrowthBoost(Town *t, int64_t boost_ppm, int64_t &base_rate, int64_t &a
 	}
 	if (applied_rate == 0 || static_cast<int64_t>(t->growth_rate) != applied_rate) base_rate = t->growth_rate; // OpenTTD has calculated a new rate.
 
-	const int64_t boosted = std::min<int64_t>(TOWN_GROWTH_RATE_NONE - 1, retail::BoostedGrowthRate(base_rate, boost_ppm));
+	/* halt = bad weather (a storm, a meteorite, a drought: market_events.h): the slowest rate there is, so the town does not grow until it is over. */
+	const int64_t boosted = halt ? static_cast<int64_t>(TOWN_GROWTH_RATE_NONE - 1) : std::min<int64_t>(TOWN_GROWTH_RATE_NONE - 1, retail::BoostedGrowthRate(base_rate, boost_ppm));
 	t->growth_rate = static_cast<decltype(t->growth_rate)>(boosted);
 	applied_rate = boosted;
 	if (t->grow_counter > t->growth_rate) t->grow_counter = t->growth_rate;
@@ -463,7 +464,8 @@ void RetailMarketManager::ApplyMacroFeedback()
 		rec.boost_ppm = NextBoost(rec.boost_ppm, BoostIncrease(share, rec.input));
 		/* A town boom in the news (market_events.h) adds to the boost for a while. It is read from the news log, so it is not part of rec.boost_ppm and fades by itself. */
 		const int64_t news_boost = _market_events.TownBoostPpm(t->index.base(), static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes()));
-		ApplyGrowthBoost(t, std::min<int64_t>(MAX_BOOST_PPM, rec.boost_ppm + news_boost), rec.base_growth_rate, rec.applied_growth_rate);
+		const int64_t now_minute = static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes());
+		ApplyGrowthBoost(t, std::min<int64_t>(MAX_BOOST_PPM, rec.boost_ppm + news_boost), rec.base_growth_rate, rec.applied_growth_rate, _market_events.TownGrowthHalted(t->index.base(), now_minute));
 	}
 	if (weight_sum > 0) this->wealth_pool = 0;
 }

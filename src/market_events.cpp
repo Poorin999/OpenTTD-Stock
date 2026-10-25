@@ -10,6 +10,7 @@
 #include "stdafx.h"
 #include "market_events.h"
 #include "market_news_ai.h"
+#include "town_news.h"
 #include "stock_base.h"
 #include "gold_reserve.h"
 #include "central_bank.h"
@@ -39,6 +40,10 @@ int64_t MarketEventSentimentPpm(size_t symbol)
 
 std::string MarketEventSubjectName(const MarketEvent &e)
 {
+	if (MarketKindHasTownField(e.kind)) {
+		if (e.town != MARKET_NO_TOWN && Town::IsValidID(TownID{e.town})) return GetString(STR_TOWN_NAME, TownID{e.town});
+		return std::string("เมืองที่หายไปแล้ว"); // The town is gone (a story in the log may be older than the town).
+	}
 	if (e.kind == MarketEventKind::TownBoom) {
 		if (e.fact_ppm >= 0 && e.fact_ppm < 0xFFFF && Town::IsValidID(TownID{static_cast<uint16_t>(e.fact_ppm)})) return GetString(STR_TOWN_NAME, TownID{static_cast<uint16_t>(e.fact_ppm)});
 		return std::string();
@@ -67,7 +72,7 @@ static void ResolveTownBoom(MarketEvent &e)
 }
 
 /** Put an event into the game: the sentiment, the gold pressure, the diamond stock and the news item. */
-static void PublishMarketEvent(const MarketEvent &e)
+void PublishMarketEvent(const MarketEvent &e)
 {
 	_market_events.Apply(e);
 
@@ -132,13 +137,24 @@ MarketEvent FireMarketEventNow(int kind)
 {
 	MarketEvents &ev = _market_events;
 	ev.Seed(static_cast<uint64_t>(_settings_game.game_creation.generation_seed));
+	/* Town news and weather are made from the real state of a town (town_news.cpp), also by the test tool. */
+	if (kind >= 0 && static_cast<size_t>(kind) < MARKET_EVENT_KIND_COUNT && MarketKindHasTownField(static_cast<MarketEventKind>(kind))) {
+		MarketEvent t;
+		if (TownNewsForce(static_cast<MarketEventKind>(kind), t)) return t;
+		kind = -1; // No town with a treasury: make an ordinary event instead.
+	}
 	MarketEvent e = ev.Generate(static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes()), CollectCompanyFacts(), kind, CountTowns());
 	ResolveTownBoom(e);
 	PublishMarketEvent(e);
 	return e;
 }
 
-/** Every game hour: the sentiment fades, then the dice. */
+/**
+ * Every game hour: the sentiment fades, then
+ *  - MARKET_ONLY_WAR_IS_RANDOM: the dice of war and peace (the only chance news), and the biggest TRUE company story, if there is one (no dice).
+ *    Town news and weather come once per game day from town_news.cpp.
+ *  - otherwise: the old dice for every kind.
+ */
 static const GameTimeSubscription _market_events_hour(GameTimeEvent::Hour, [](const GameTimeSnapshot &now)
 {
 	MarketEvents &ev = _market_events;
@@ -146,8 +162,12 @@ static const GameTimeSubscription _market_events_hour(GameTimeEvent::Hour, [](co
 	ev.DecayHour();
 
 	const int64_t minute = static_cast<int64_t>(now.total_minutes);
-	if (!ev.ShouldFire(minute)) return;
-	MarketEvent e = ev.Generate(minute, CollectCompanyFacts(), -1, CountTowns());
-	ResolveTownBoom(e);
-	PublishMarketEvent(e);
+	if (MARKET_ONLY_WAR_IS_RANDOM) {
+		if (const std::optional<MarketEvent> war = ev.GenerateWar(minute); war.has_value()) PublishMarketEvent(*war);
+		if (const std::optional<MarketEvent> news = ev.GenerateCompanyNews(minute, CollectCompanyFacts()); news.has_value()) PublishMarketEvent(*news);
+	} else if (ev.ShouldFire(minute)) {
+		MarketEvent e = ev.Generate(minute, CollectCompanyFacts(), -1, CountTowns());
+		ResolveTownBoom(e);
+		PublishMarketEvent(e);
+	}
 });
