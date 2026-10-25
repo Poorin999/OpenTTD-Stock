@@ -162,10 +162,10 @@ static int64_t BankWithdrawCash(int64_t amount)
 void CentralBank::TradeGold(int64_t day)
 {
 	if (_gold_reserve.GetPriceCents() <= 0) return; // The gold market has not started.
-	const int64_t cash = _gold_reserve.GetCirculatingCash();
+	const int64_t cash = _gold_reserve.GetNotesInCirculation();
 	if (cash <= 0) return;
 	const int64_t backing = _gold_reserve.GetBackingBp();
-	const int64_t value = _gold_reserve.GetReserveValue();
+	const int64_t value = _gold_reserve.GetBackingValue(); // The gold that backs the notes (the bank's own, see GoldReserveManager::BACKING_COUNTS_COMPANY_GOLD).
 
 	int64_t ounces = 0;       // Positive: buy. Negative: sell.
 	int64_t price_cents = 0;
@@ -176,7 +176,7 @@ void CentralBank::TradeGold(int64_t day)
 		int64_t missing = std::max<int64_t>(0, cash / 10'000 * BANK_GOLD_BUY_BELOW_BP + cash % 10'000 * BANK_GOLD_BUY_BELOW_BP / 10'000 - value); // Money units to reach the target if the cash stayed the same.
 		if (BANK_GOLD_MOVES_CASH) missing = missing * 10'000 / (10'000 - BANK_GOLD_BUY_BELOW_BP); // The money that the bank creates is cash in circulation too.
 		ounces = (missing * 100 + price_cents - 1) / price_cents;
-		ounces = std::min({ounces, BANK_GOLD_MAX_DAILY_OZ, _gold_reserve.market_stock_oz});
+		ounces = std::min({ounces, BankGoldDailyCapOz(_gold_reserve.bank_reserve_oz), _gold_reserve.market_stock_oz});
 		if (BANK_GOLD_MOVES_CASH) {
 			ounces = std::min(ounces, (cash / 100 * BANK_GOLD_CREATE_MAX_PERCENT) * 100 / price_cents); // Never more money created than the daily limit.
 		} else {
@@ -200,7 +200,7 @@ void CentralBank::TradeGold(int64_t day)
 		int64_t excess = std::max<int64_t>(0, value - (cash / 10'000 * BANK_GOLD_SELL_ABOVE_BP + cash % 10'000 * BANK_GOLD_SELL_ABOVE_BP / 10'000));
 		if (BANK_GOLD_MOVES_CASH) excess = excess * 10'000 / (10'000 - BANK_GOLD_SELL_ABOVE_BP); // The money that leaves circulation makes the cash smaller.
 		ounces = excess * 100 / price_cents;
-		ounces = std::min({ounces, BANK_GOLD_MAX_DAILY_OZ, _gold_reserve.bank_reserve_oz});
+		ounces = std::min({ounces, BankGoldDailyCapOz(_gold_reserve.bank_reserve_oz), _gold_reserve.bank_reserve_oz});
 		if (BANK_GOLD_MOVES_CASH) ounces = std::min(ounces, BankWithdrawCapacity() * 100 / price_cents); // The buyers can only pay with their unborrowed cash.
 		if (ounces <= 0) return;
 		if (BANK_GOLD_MOVES_CASH) {
@@ -238,7 +238,7 @@ int64_t GetPriceIndexPpm()
 	int64_t money_factor = POLICY_PPM;
 	const int64_t baseline = _gold_reserve.baseline_supply;
 	if (baseline > 0) {
-		const int64_t supply = _gold_reserve.GetCirculatingCash();
+		const int64_t supply = _gold_reserve.GetNotesInCirculation();
 		money_factor = std::clamp<int64_t>(POLICY_PPM + (supply - baseline) * POLICY_PPM / baseline * POLICY_MONEY_WEIGHT_PERCENT / 100, POLICY_PPM / 2, 3 * POLICY_PPM);
 	}
 	return game * money_factor / POLICY_PPM;
@@ -913,7 +913,7 @@ void CentralBank::PayIorb()
 	int64_t available;
 	if (BANK_IORB_CREATES_MONEY) {
 		/* New money: only a safety limit against a bug or a huge rate. */
-		const int64_t circulating = _gold_reserve.GetCirculatingCash();
+		const int64_t circulating = _gold_reserve.GetNotesInCirculation();
 		available = circulating > 0 ? std::max<int64_t>(1, circulating / 100 * BANK_IORB_CREATE_MAX_PERCENT) : total;
 	} else {
 		available = std::max<int64_t>(0, this->trading_revenue_cents / 100 - BANK_IORB_BUDGET_FLOOR);

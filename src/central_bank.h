@@ -484,7 +484,7 @@ inline int64_t BankCreditPercentForPenalty(int level)
  *     is at most BANK_GOLD_CREATE_MAX_PERCENT of the cash in circulation per day.
  *   - Above BANK_GOLD_SELL_ABOVE_BP it SELLS gold of its own reserve at the bid price. The buyers pay with their UNBORROWED
  *     liquid cash, at most BANK_GOLD_CASH_MAX_PERCENT of the total of it per day; the money is destroyed (money leaves circulation).
- *   - The bank never sells the gold of the companies. At most BANK_GOLD_MAX_DAILY_OZ ounces a day. Integer only, no random numbers.
+ *   - The bank never sells the gold of the companies. At most BankGoldDailyCapOz ounces a day (0.5% of its own gold). Integer only, no random numbers.
  *     The trades also move the gold price like the trades of the companies do (the market stock and the demand pressure).
  * The bank has its own money too (CentralBank::trading_revenue_cents, 1/100 of a money unit), separate from the cash of the companies:
  * the start capital BANK_START_CAPITAL, plus the commission and the spread of the gold trades of the companies, plus the loan
@@ -492,9 +492,17 @@ inline int64_t BankCreditPercentForPenalty(int level)
  * disappears (bankruptcy, bought) with a debt, the debt is written off against the own money (CentralBank::WriteOffRemoved). The own
  * money never goes below 0; what it cannot cover is simply lost. The gold trade does not use it.
  */
-static constexpr int64_t BANK_GOLD_BUY_BELOW_BP = 1200;   ///< Buy while the backing is below 12% (credit standing A).
-static constexpr int64_t BANK_GOLD_SELL_ABOVE_BP = 3000;  ///< Sell while the backing is above 30% (credit standing AAA).
-static constexpr int64_t BANK_GOLD_MAX_DAILY_OZ = 500;    ///< At most this many ounces per game day.
+static constexpr int64_t BANK_GOLD_BUY_BELOW_BP = 6000;   ///< Buy while the backing is below 60% (the lower edge of credit standing A; the game starts at 80%).
+static constexpr int64_t BANK_GOLD_SELL_ABOVE_BP = 10000; ///< Sell while the backing is above 100% (credit standing AAA).
+static constexpr int64_t BANK_GOLD_MAX_DAILY_OZ = 500;    ///< Never more than this many ounces per game day (absolute ceiling).
+static constexpr int64_t BANK_GOLD_DAILY_PERMILLE = 5;    ///< A trade is at most 0.5% of the gold that the bank holds per game day (the bank holds hundreds of ounces, not thousands), at least 1 oz.
+
+/** The most ounces that the bank trades in one game day: 0.5% of its own gold, at least 1, at most BANK_GOLD_MAX_DAILY_OZ. */
+inline int64_t BankGoldDailyCapOz(int64_t bank_reserve_oz)
+{
+	const int64_t cap = bank_reserve_oz / 1000 * BANK_GOLD_DAILY_PERMILLE + bank_reserve_oz % 1000 * BANK_GOLD_DAILY_PERMILLE / 1000;
+	return std::clamp<int64_t>(cap, 1, BANK_GOLD_MAX_DAILY_OZ);
+}
 static constexpr int64_t BANK_GOLD_CREATE_MAX_PERCENT = 1; ///< The bank never creates more than 1% of the cash in circulation in one day.
 static constexpr int64_t BANK_GOLD_CASH_MAX_PERCENT = 5;  ///< The bank never takes more than 5% of the unborrowed liquid cash of all companies in one day.
 static constexpr int64_t BANK_START_CAPITAL = 25'000;     ///< Own money of the bank at the start of a game, in money units (5% of the 500,000 that a company starts with).

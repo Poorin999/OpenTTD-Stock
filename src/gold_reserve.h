@@ -20,11 +20,11 @@
 
 /** Credit standing of the money system, from the backing of the cash by gold. */
 enum class CreditTier : uint8_t {
-	C,   ///< Less than 6% backing.
-	B,   ///< 6% and more.
-	A,   ///< 12% and more.
-	AA,  ///< 20% and more.
-	AAA, ///< 30% and more.
+	C,   ///< Less than 40% backing.
+	B,   ///< 40% and more.
+	A,   ///< 60% and more.
+	AA,  ///< 85% and more.
+	AAA, ///< 100% and more.
 };
 
 /**
@@ -47,12 +47,20 @@ struct GoldFactors {
 	int64_t target_cents = 0;    ///< The target after the soft and the hard limit around the anchor.
 };
 
+/** Credit standing limits, in bp of the notes in circulation. The start (80%) is standing A, like before; the bank buys gold at the lower edge of A and sells at the edge of AAA. */
+static constexpr int64_t TIER_AAA_BP = 10000; ///< 100% and more.
+static constexpr int64_t TIER_AA_BP = 8500;   ///< 85% and more.
+static constexpr int64_t TIER_A_BP = 6000;    ///< 60% and more.
+static constexpr int64_t TIER_B_BP = 4000;    ///< 40% and more; below it C.
+
 struct GoldReserveManager {
 	static constexpr int64_t BASE_PRICE_CENTS = 2000 * 100; ///< Price of one ounce at the start (no inflation, baseline cash supply, no demand), in 1/100 of a money unit.
 	static constexpr int64_t OUNCES_PER_TON = 32151;        ///< Troy ounces in one metric ton (rounded).
 	static constexpr int64_t PPM = 1000000;                 ///< 1.0 in the factors of the price.
 	static constexpr int64_t DEPTH_OUNCES = 20000;          ///< Market depth: buying this many ounces moves the price by +100%.
 	static constexpr int64_t PRESSURE_MAX_PPM = 300000;     ///< The demand effect never moves the price more than 30%.
+	static constexpr int64_t START_BACKING_PERCENT = 80;    ///< The central bank starts with gold worth 80% of the notes in circulation (US 1950: gold 22.7 bn against 27.7 bn money in circulation, about 82%; was 8%).
+	static constexpr bool BACKING_COUNTS_COMPANY_GOLD = false; ///< false: only the gold of the central bank backs the notes (a company cannot buy a better credit standing for everybody); true: the old rule, the gold of the companies counts too.
 	static constexpr int64_t MARKET_STOCK_START = 1000 * OUNCES_PER_TON; ///< Ounces that the market has for sale at the start: 1000 metric tons (32,151,000 oz). Buying takes from it, selling gives back.
 	static constexpr int64_t SPREAD_MIN_PPM = 2000;         ///< Smallest total spread: 0.2% of the base price (calm market, low inflation).
 	static constexpr int64_t SPREAD_MAX_PPM = 5000;         ///< Largest total spread: 0.5% (heavy buying or selling, high inflation).
@@ -111,6 +119,10 @@ struct GoldReserveManager {
 	int64_t GetTotalReserveOunces() const;
 	int64_t GetReserveValue() const;
 	int64_t GetCirculatingCash() const;
+	/** The money that the gold backs. Today this is the cash of the companies; when the game changes to real banknotes issued by the bank, change ONLY this function. */
+	int64_t GetNotesInCirculation() const { return this->GetCirculatingCash(); }
+	int64_t GetBackingOunces() const;
+	int64_t GetBackingValue() const;
 	int64_t GetBackingBp() const;
 	CreditTier GetCreditTier() const;
 	int64_t ComputeSpreadPpm() const;

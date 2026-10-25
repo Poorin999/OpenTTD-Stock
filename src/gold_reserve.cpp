@@ -86,16 +86,16 @@ int64_t GoldReserveManager::GetCirculatingCash() const
 	return sum;
 }
 
-/** Start the market with the first update: the baseline cash and the reserve of the central bank (8% of the cash in gold). */
+/** Start the market with the first update: the baseline cash and the reserve of the central bank (START_BACKING_PERCENT of the notes in gold). */
 bool GoldReserveManager::EnsureStarted()
 {
 	if (this->price_cents > 0) return true;
-	const int64_t supply = this->GetCirculatingCash();
+	const int64_t supply = this->GetNotesInCirculation();
 	if (supply <= 0) return false;
 	this->price_cents = BASE_PRICE_CENTS;
 	this->market_stock_oz = MARKET_STOCK_START;
 	this->baseline_supply = supply;
-	this->bank_reserve_oz = std::max<int64_t>(1, supply * 8 / 100 / (BASE_PRICE_CENTS / 100));
+	this->bank_reserve_oz = std::max<int64_t>(1, supply * START_BACKING_PERCENT / 100 / (BASE_PRICE_CENTS / 100));
 	this->PushHistory(); // The first point of the gold chart: the price at the start.
 	return true;
 }
@@ -118,21 +118,32 @@ int64_t GoldReserveManager::GetReserveValue() const
 	return this->GetTotalReserveOunces() * this->price_cents / 100;
 }
 
+/** The ounces that back the notes: the gold of the central bank (and the gold of the companies only with BACKING_COUNTS_COMPANY_GOLD). */
+int64_t GoldReserveManager::GetBackingOunces() const
+{
+	return BACKING_COUNTS_COMPANY_GOLD ? this->GetTotalReserveOunces() : this->bank_reserve_oz;
+}
+
+int64_t GoldReserveManager::GetBackingValue() const
+{
+	return this->GetBackingOunces() * this->price_cents / 100;
+}
+
 /** Backing ratio in basis points: value of the gold reserve / cash in circulation (10000 = 100%). */
 int64_t GoldReserveManager::GetBackingBp() const
 {
-	const int64_t cash = this->GetCirculatingCash();
+	const int64_t cash = this->GetNotesInCirculation();
 	if (cash <= 0) return 0;
-	return std::min<int64_t>(1000000, this->GetReserveValue() * 10000 / cash);
+	return std::min<int64_t>(1000000, this->GetBackingValue() * 10000 / cash);
 }
 
 CreditTier GoldReserveManager::GetCreditTier() const
 {
 	const int64_t bp = this->GetBackingBp();
-	if (bp >= 3000) return CreditTier::AAA;
-	if (bp >= 2000) return CreditTier::AA;
-	if (bp >= 1200) return CreditTier::A;
-	if (bp >= 600) return CreditTier::B;
+	if (bp >= TIER_AAA_BP) return CreditTier::AAA;
+	if (bp >= TIER_AA_BP) return CreditTier::AA;
+	if (bp >= TIER_A_BP) return CreditTier::A;
+	if (bp >= TIER_B_BP) return CreditTier::B;
 	return CreditTier::C;
 }
 
@@ -272,7 +283,7 @@ GoldFactors GoldReserveManager::GetFactors() const
 	f.anchor_cents = BASE_PRICE_CENTS * f.inflation_ppm / PPM;
 
 	/* 2. Cash in circulation against the cash that inflation explains: half of the difference goes into the price. */
-	const int64_t supply = this->GetCirculatingCash();
+	const int64_t supply = this->GetNotesInCirculation();
 	const int64_t expected = this->baseline_supply * f.inflation_ppm / PPM;
 	f.cash_ppm = expected > 0 ? std::clamp<int64_t>(PPM + (supply - expected) * PPM / expected / 2, PPM / 2, 3 * PPM) : PPM;
 

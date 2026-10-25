@@ -567,14 +567,14 @@ int main()
 			CHECK(so.headline.find("123,456") == std::string::npos && so.headline.find('{') == std::string::npos);
 		}
 		/* The story of a bank sale: ounces sold, backing, the level, the share of its own gold. */
-		MarketEvent bank; bank.kind = MarketEventKind::CentralBanksSellGold; bank.fact_ppm = 80; bank.fact2 = MarketBankFact2(3141, 500); bank.gold_ppm = -50'000; bank.severity = 2;
+		MarketEvent bank; bank.kind = MarketEventKind::CentralBanksSellGold; bank.fact_ppm = 80; bank.fact2 = MarketBankFact2(10141, 500); bank.gold_ppm = -50'000; bank.severity = 2;
 		for (uint8_t v = 0; v < 12; v++) {
 			bank.variant = v;
 			const MarketStory st = ComposeMarketStory(bank, "");
 			CHECK(st.headline.find("80 ") != std::string::npos);
-			CHECK(st.body.find("31.4%") != std::string::npos || st.headline.find("31.4%") != std::string::npos || st.body.find("30.0%") != std::string::npos);
+			CHECK(st.body.find("101.4%") != std::string::npos || st.headline.find("101.4%") != std::string::npos || st.body.find("100.0%") != std::string::npos);
 			CHECK(st.headline.find('{') == std::string::npos && st.body.find('{') == std::string::npos && st.analysis.find('{') == std::string::npos);
-			CHECK(st.analysis.find("31.4%") != std::string::npos && st.analysis.find("50.0%") != std::string::npos && st.analysis.find("30.0%") != std::string::npos);
+			CHECK(st.analysis.find("101.4%") != std::string::npos && st.analysis.find("50.0%") != std::string::npos && st.analysis.find("100.0%") != std::string::npos);
 		}
 		CHECK(MarketFactText(MarketEventKind::CentralBanksSellGold, 1'234) == "1,234 ออนซ์" && MarketFactText(MarketEventKind::GoldMineFound, 0).empty());
 
@@ -590,7 +590,7 @@ int main()
 		CHECK(!m.RecentlyReportedGold(MarketEventKind::CentralBanksSellGold, 11 * MARKET_MINUTES_PER_DAY, MARKET_GOLD_NEWS_GAP_DAYS));
 
 		/* The start stock and the level that the story uses are the numbers of the game (the static_asserts in market_events.cpp check this against the code). */
-		CHECK(MARKET_GOLD_STOCK_START_OZ == 1000 * 32'151 && MARKET_BANK_SELL_LEVEL_BP == 3000);
+		CHECK(MARKET_GOLD_STOCK_START_OZ == 1000 * 32'151 && MARKET_BANK_SELL_LEVEL_BP == 10000);
 	}
 
 	std::printf("%d checks, %d failed\n", g_checks, g_fail);

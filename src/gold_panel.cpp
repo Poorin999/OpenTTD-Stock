@@ -485,10 +485,10 @@ void GoldPanel::DrawInfo(const Rect &r) const
 	{
 		const Rect card = at(l.table);
 		DrawCard(card, c.paper, c);
-		DrawTableRow(card, 0, l.row_h, GpText("ทองสำรองทั้งหมด", "Gold reserves (all)"), GpMoney(_gold_reserve.GetReserveValue()) + " (" + ounces(_gold_reserve.GetTotalReserveOunces()) + ")", TC_BLACK, c);
+		DrawTableRow(card, 0, l.row_h, GpText("ทองหนุนหลัง (ธนาคาร)", "Backing gold (bank)"), GpMoney(_gold_reserve.GetBackingValue()) + " (" + ounces(_gold_reserve.GetBackingOunces()) + ")", TC_BLACK, c);
 		DrawTableRow(card, 1, l.row_h, GpText("ทองในตลาดที่ขาย", "Market stock for sale"), ounces(_gold_reserve.market_stock_oz), TC_BLACK, c);
-		DrawTableRow(card, 2, l.row_h, GpText("เงินสดหมุนเวียน", "Circulating cash"), GpMoney(_gold_reserve.GetCirculatingCash()), TC_BLACK, c);
-		DrawTableRow(card, 3, l.row_h, GpText("อัตราหนุนหลัง (ทองสำรอง / เงินสด)", "Backing ratio (reserves / cash)"), fmt::format("{}.{:02}%", backing / 100, backing % 100), TC_BLACK, c);
+		DrawTableRow(card, 2, l.row_h, GpText("เงินสดหมุนเวียน", "Circulating cash"), GpMoney(_gold_reserve.GetNotesInCirculation()), TC_BLACK, c);
+		DrawTableRow(card, 3, l.row_h, GpText("อัตราหนุนหลัง (ทองธนาคาร / เงินสด)", "Backing ratio (bank gold / cash)"), fmt::format("{}.{:02}%", backing / 100, backing % 100), TC_BLACK, c);
 		DrawTierRow(card, 4, l.row_h, GpText("ระดับเครดิต", "Credit standing"), tier, c);
 	}
 

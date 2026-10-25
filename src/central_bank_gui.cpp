@@ -773,6 +773,17 @@ struct CentralBankStatementWindow : Window {
 	}
 };
 
+/*
+ * Colours of the monetary policy page. All of them are in ONE place so that the look can be tuned with one edit.
+ * The page is toned down (owner request 2026-10-26: the old blue panel with bright white, orange, red and light blue text was too glaring):
+ * a grey panel like the rest of the bank windows, soft silver text, cream card titles, and the loud colours only where they mean something.
+ */
+static constexpr TextColour CBP_TEXT = TC_SILVER;  ///< Labels and plain numbers (was bright white).
+static constexpr TextColour CBP_TITLE = TC_CREAM;  ///< Card titles (was light blue).
+static constexpr TextColour CBP_GOOD = TC_GREEN;   ///< Good / eased / more room.
+static constexpr TextColour CBP_WARN = TC_GOLD;    ///< Tighter / fewer room / plain warnings (was orange).
+static constexpr TextColour CBP_BAD = TC_RED;      ///< A real alarm only: emergency mode, inflation far off target, falling jobs, bad debt that the budget did not cover.
+
 /**
  * Draw the monetary policy page as cards: a row of five key numbers, three columns of cards (policy and rates, credit and decision log, gold of the bank)
  * and a wide card with the rules of the bank. Only the old colours are used: the colour of the panel, the grey lines of the old separators and the old text colours.
@@ -815,24 +826,24 @@ static int DrawMonetaryPolicy(const Rect *r)
 			GfxDrawLine(x0, bottom, x1, bottom, line_colour);
 			GfxDrawLine(x0, top, x0, bottom, line_colour);
 			GfxDrawLine(x1, top, x1, bottom, line_colour);
-			DrawString(x0 + pad_h, x1 - pad_h, top + pad_v, title, TC_LIGHT_BLUE, SA_LEFT);
+			DrawString(x0 + pad_h, x1 - pad_h, top + pad_v, title, CBP_TITLE, SA_LEFT);
 			GfxDrawLine(x0 + pad_h, top + pad_v + row_h, x1 - pad_h, top + pad_v + row_h, line_colour);
 		}
 		y = top + pad_v + title_h;
 	};
 	/* One row: label left, number right. The label gets only the room that the number leaves, so the two never overlap. */
-	auto row = [&](int x0, int x1, const std::string &label, const std::string &value, TextColour colour = TC_WHITE) {
+	auto row = [&](int x0, int x1, const std::string &label, const std::string &value, TextColour colour = CBP_TEXT) {
 		if (paint) {
 			const int vw = static_cast<int>(GetStringBoundingBox(value).width);
 			DrawString(x0, x1, y, value, colour, SA_RIGHT);
-			DrawString(x0, std::max(x0 + 1, x1 - vw - text_gap), y, label, TC_WHITE, SA_LEFT);
+			DrawString(x0, std::max(x0 + 1, x1 - vw - text_gap), y, label, CBP_TEXT, SA_LEFT);
 		}
 		y += row_h;
 	};
 	/* A row of two lines for a long text: the label, and under it the text on the whole width. */
-	auto row2 = [&](int x0, int x1, const std::string &label, const std::string &value, TextColour colour = TC_WHITE) {
+	auto row2 = [&](int x0, int x1, const std::string &label, const std::string &value, TextColour colour = CBP_TEXT) {
 		if (paint) {
-			DrawString(x0, x1, y, label, TC_WHITE, SA_LEFT);
+			DrawString(x0, x1, y, label, CBP_TEXT, SA_LEFT);
 			DrawString(x0, x1, y + row_h, value, colour, SA_RIGHT);
 		}
 		y += 2 * row_h;
@@ -852,23 +863,23 @@ static int DrawMonetaryPolicy(const Rect *r)
 				GfxDrawLine(x0, y + kpi_h - 1, x1, y + kpi_h - 1, line_colour);
 				GfxDrawLine(x0, y, x0, y + kpi_h - 1, line_colour);
 				GfxDrawLine(x1, y, x1, y + kpi_h - 1, line_colour);
-				DrawString(x0 + pad_h, x1 - pad_h, y + pad_v, label, TC_WHITE, SA_LEFT);
+				DrawString(x0 + pad_h, x1 - pad_h, y + pad_v, label, CBP_TEXT, SA_LEFT);
 				DrawString(x0 + pad_h, x1 - pad_h, y + pad_v + GetCharacterHeight(FS_NORMAL) + ScaleGUITrad(2), value, colour, SA_LEFT, false, FS_LARGE);
 			}
 		};
 		const int64_t idx = GetPriceIndexPpm();
-		kpi(0, CbText("ดัชนีราคา", "Price index"), fmt::format("{}.{:03}", idx / 1'000'000, (idx % 1'000'000) / 1000), TC_WHITE);
+		kpi(0, CbText("ดัชนีราคา", "Price index"), fmt::format("{}.{:03}", idx / 1'000'000, (idx % 1'000'000) / 1000), CBP_TEXT);
 		if (p.measured) {
 			const int64_t err = p.inflation_bp > POLICY_TARGET_INFLATION_BP ? p.inflation_bp - POLICY_TARGET_INFLATION_BP : POLICY_TARGET_INFLATION_BP - p.inflation_bp;
-			kpi(1, CbText("เงินเฟ้อ (ต่อปี)", "Inflation (yearly)"), pct(p.inflation_bp), err <= POLICY_DEADBAND_BP ? TC_GREEN : (err <= 3 * POLICY_DEADBAND_BP ? TC_ORANGE : TC_RED));
-			kpi(2, CbText("เติบโตที่ใช้ตัดสินใจ (ต่อปี)", "Growth used (yearly)"), pct(p.growth_bp), TC_WHITE);
-			kpi(3, CbText("Payroll (ต่อปี)", "Payrolls (yearly)"), p.has_jobs ? pct(p.jobs_bp, true) : std::string("-"), p.has_jobs ? (p.jobs_bp < 0 ? TC_RED : TC_GREEN) : TC_GREY);
+			kpi(1, CbText("เงินเฟ้อ (ต่อปี)", "Inflation (yearly)"), pct(p.inflation_bp), err <= POLICY_DEADBAND_BP ? CBP_GOOD : (err <= 3 * POLICY_DEADBAND_BP ? CBP_WARN : CBP_BAD));
+			kpi(2, CbText("เติบโตที่ใช้ตัดสินใจ (ต่อปี)", "Growth used (yearly)"), pct(p.growth_bp), CBP_TEXT);
+			kpi(3, CbText("Payroll (ต่อปี)", "Payrolls (yearly)"), p.has_jobs ? pct(p.jobs_bp, true) : std::string("-"), p.has_jobs ? (p.jobs_bp < 0 ? CBP_BAD : CBP_GOOD) : TC_GREY);
 		} else {
 			kpi(1, CbText("เงินเฟ้อ (ต่อปี)", "Inflation (yearly)"), CbText("กำลังวัด...", "measuring..."), TC_GREY);
 			kpi(2, CbText("เติบโตที่ใช้ตัดสินใจ (ต่อปี)", "Growth used (yearly)"), CbText("กำลังวัด...", "measuring..."), TC_GREY);
 			kpi(3, CbText("Payroll (ต่อปี)", "Payrolls (yearly)"), CbText("กำลังวัด...", "measuring..."), TC_GREY);
 		}
-		kpi(4, CbText("เป้าหมายเงินเฟ้อ", "Inflation target"), pct(POLICY_TARGET_INFLATION_BP), TC_WHITE);
+		kpi(4, CbText("เป้าหมายเงินเฟ้อ", "Inflation target"), pct(POLICY_TARGET_INFLATION_BP), CBP_TEXT);
 	}
 	y += kpi_h + gap;
 
@@ -882,13 +893,13 @@ static int DrawMonetaryPolicy(const Rect *r)
 		const int n1 = 6;
 		card(cx[0], cx[0] + cw, col_top, n1, CbText("นโยบายดอกเบี้ย (POLICY RATE)", "POLICY RATE"));
 		const int a0 = cx[0] + pad_h, a1 = cx[0] + cw - pad_h;
-		row(a0, a1, CbText("ช่วงอัตราดอกเบี้ย (Target range)", "Target range"), fmt::format("{} - {}", pct(PolicyLowerBp(p.shift_bp)), pct(PolicyUpperBp(p.shift_bp))), p.shift_bp > 0 ? TC_ORANGE : (p.shift_bp < 0 ? TC_GREEN : TC_WHITE));
+		row(a0, a1, CbText("ช่วงอัตราดอกเบี้ย (Target range)", "Target range"), fmt::format("{} - {}", pct(PolicyLowerBp(p.shift_bp)), pct(PolicyUpperBp(p.shift_bp))), p.shift_bp > 0 ? CBP_WARN : (p.shift_bp < 0 ? CBP_GOOD : CBP_TEXT));
 		row(a0, a1, p.last_unscheduled ? CbText("ประชุมล่าสุด (นอกรอบ!)", "Last meeting (UNSCHEDULED!)") : CbText("การประชุมล่าสุด", "Last meeting"),
 				p.measured ? (p.last_step_bp > 0 ? fmt::format("{} {} bp", CbText("ขึ้น", "raised"), p.last_step_bp) : (p.last_step_bp < 0 ? fmt::format("{} {} bp", CbText("ลด", "lowered"), -p.last_step_bp) : std::string(CbText("คงที่", "held")))) : std::string("-"),
-				p.last_step_bp > 0 ? TC_ORANGE : (p.last_step_bp < 0 ? TC_GREEN : TC_GREY));
+				p.last_step_bp > 0 ? CBP_WARN : (p.last_step_bp < 0 ? CBP_GOOD : TC_GREY));
 		row(a0, a1, CbText("ทิศทาง (Bias)", "Bias"), p.measured ? (p.wanted_gap_bp >= POLICY_HOLD_BAND_BP ? std::string(CbText("ตึงตัว (อยากขึ้น)", "tightening")) : (p.wanted_gap_bp <= -POLICY_HOLD_BAND_BP ? std::string(CbText("ผ่อนคลาย (อยากลด)", "easing")) : std::string(CbText("เป็นกลาง", "neutral")))) : std::string("-"), TC_GREY);
-		row(a0, a1, CbText("ผลต่อตลาดล่าสุด (ทอง / หุ้น)", "Last market push (gold / shares)"), p.measured ? fmt::format("{} / {}", pct(p.last_gold_push_ppm / 100, true), pct(p.last_share_push_ppm / 100, true)) : std::string("-"), p.last_gold_push_ppm > 0 ? TC_GREEN : (p.last_gold_push_ppm < 0 ? TC_ORANGE : TC_GREY));
-		row(a0, a1, CbText("โหมดนโยบาย", "Policy mode"), p.emergency ? CbText("ฉุกเฉิน (เงินเฟ้อสูง)", "EMERGENCY (high inflation)") : (p.Extended() ? CbText("กำลังกลับสู่ปกติ", "returning to normal") : CbText("ปกติ", "Normal")), p.emergency ? TC_RED : (p.Extended() ? TC_ORANGE : TC_GREY));
+		row(a0, a1, CbText("ผลต่อตลาดล่าสุด (ทอง / หุ้น)", "Last market push (gold / shares)"), p.measured ? fmt::format("{} / {}", pct(p.last_gold_push_ppm / 100, true), pct(p.last_share_push_ppm / 100, true)) : std::string("-"), p.last_gold_push_ppm > 0 ? CBP_GOOD : (p.last_gold_push_ppm < 0 ? CBP_WARN : TC_GREY));
+		row(a0, a1, CbText("โหมดนโยบาย", "Policy mode"), p.emergency ? CbText("ฉุกเฉิน (เงินเฟ้อสูง)", "EMERGENCY (high inflation)") : (p.Extended() ? CbText("กำลังกลับสู่ปกติ", "returning to normal") : CbText("ปกติ", "Normal")), p.emergency ? CBP_BAD : (p.Extended() ? CBP_WARN : TC_GREY));
 		row(a0, a1, CbText("ประชุม FOMC ครั้งต่อไป", "Next FOMC meeting"), fmt::format("{} {}", p.last_decision_day < 0 ? POLICY_DECISION_DAYS : PolicyDaysToNextMeeting(today), CbText("วัน", "days")), TC_GREY);
 		col_bottom[0] = col_top + card_height(n1);
 
@@ -898,10 +909,10 @@ static int DrawMonetaryPolicy(const Rect *r)
 		card(cx[0], cx[0] + cw, top2, n2, CbText("อัตราดอกเบี้ย (RATES)", "RATES"));
 		row(a0, a1, CbText("Prime rate (ช่วงบน + 3.00%)", "Prime rate (upper + 3.00%)"), pct(PolicyPrimeBp(p.shift_bp)));
 		row(a0, a1, "Discount rate / IORB", fmt::format("{} / {}", pct(PolicyDiscountBp(p.shift_bp)), pct(PolicyIorbBp(p.shift_bp))));
-		row(a0, a1, BANK_IORB_CREATES_MONEY ? CbText("IORB ที่จ่ายแล้ว (เงินใหม่)", "IORB paid so far (new money)") : CbText("IORB ที่จ่ายแล้ว (จากงบธนาคาร)", "IORB paid so far (bank budget)"), GetString(STR_JUST_CURRENCY_LONG, _central_bank.iorb_created), TC_GREEN);
+		row(a0, a1, BANK_IORB_CREATES_MONEY ? CbText("IORB ที่จ่ายแล้ว (เงินใหม่)", "IORB paid so far (new money)") : CbText("IORB ที่จ่ายแล้ว (จากงบธนาคาร)", "IORB paid so far (bank budget)"), GetString(STR_JUST_CURRENCY_LONG, _central_bank.iorb_created), CBP_GOOD);
 		row(a0, a1, CbText("ดอกเบี้ยเงินกู้ เครดิตดี", "Loan rate, good credit"), fmt::format("{} - {}", pct(BankShiftedRateBp(BANK_RATE_GOOD_MIN_BP, p.shift_bp)), pct(BankShiftedRateBp(BANK_RATE_GOOD_MAX_BP, p.shift_bp))));
 		row(a0, a1, CbText("ดอกเบี้ยเงินกู้ เครดิตต่ำ", "Loan rate, poor credit"), fmt::format("{} - {}", pct(BankShiftedRateBp(BANK_RATE_POOR_MIN_BP, p.shift_bp)), pct(BankShiftedRateBp(BANK_RATE_POOR_MAX_BP, p.shift_bp))));
-		row(a0, a1, CbText("ดอกเบี้ยผิดนัด", "Penalty rate"), fmt::format("{} - {}", pct(BankPenaltyRateBp(1, p.shift_bp)), pct(BankPenaltyRateBp(BANK_PENALTY_LEVEL_MAX, p.shift_bp))), TC_RED);
+		row(a0, a1, CbText("ดอกเบี้ยผิดนัด", "Penalty rate"), fmt::format("{} - {}", pct(BankPenaltyRateBp(1, p.shift_bp)), pct(BankPenaltyRateBp(BANK_PENALTY_LEVEL_MAX, p.shift_bp))), CBP_WARN);
 		col_bottom[0] = top2 + card_height(n2);
 	}
 	{
@@ -911,10 +922,10 @@ static int DrawMonetaryPolicy(const Rect *r)
 		const int a0 = cx[1] + pad_h, a1 = cx[1] + cw - pad_h;
 		const int64_t share = BankPolicyCreditPercent(p.shift_bp);
 		const int64_t tier_percent = GetCentralBankTierCreditPercent();
-		row(a0, a1, CbText("วงเงินกู้ต่อส่วนของเจ้าของ", "Credit limit, share of equity"), fmt::format("{}%", share), share < CENTRAL_BANK_CREDIT_PERCENT ? TC_ORANGE : (share > CENTRAL_BANK_CREDIT_PERCENT ? TC_GREEN : TC_WHITE));
-		row(a0, a1, CbText("ระดับเครดิตปรับวงเงิน", "Credit standing scales the limit"), fmt::format("{} x{}%", GetCreditTierName(_gold_reserve.GetCreditTier()), tier_percent), tier_percent < 100 ? TC_ORANGE : (tier_percent > 100 ? TC_GREEN : TC_WHITE));
+		row(a0, a1, CbText("วงเงินกู้ต่อส่วนของเจ้าของ", "Credit limit, share of equity"), fmt::format("{}%", share), share < CENTRAL_BANK_CREDIT_PERCENT ? CBP_WARN : (share > CENTRAL_BANK_CREDIT_PERCENT ? CBP_GOOD : CBP_TEXT));
+		row(a0, a1, CbText("ระดับเครดิตปรับวงเงิน", "Credit standing scales the limit"), fmt::format("{} x{}%", GetCreditTierName(_gold_reserve.GetCreditTier()), tier_percent), tier_percent < 100 ? CBP_WARN : (tier_percent > 100 ? CBP_GOOD : CBP_TEXT));
 		if (Company::IsValidID(_local_company)) {
-			row(a0, a1, CbText("วงเงินกู้ของบริษัทคุณตอนนี้", "Your credit limit now"), GetString(STR_JUST_CURRENCY_LONG, GetCentralBankCreditLimit(_local_company)), TC_GREEN);
+			row(a0, a1, CbText("วงเงินกู้ของบริษัทคุณตอนนี้", "Your credit limit now"), GetString(STR_JUST_CURRENCY_LONG, GetCentralBankCreditLimit(_local_company)), CBP_GOOD);
 		} else {
 			row(a0, a1, CbText("วงเงินกู้ของบริษัทคุณตอนนี้", "Your credit limit now"), std::string("-"), TC_GREY);
 		}
@@ -943,9 +954,9 @@ static int DrawMonetaryPolicy(const Rect *r)
 			const PolicyDecision &d = p.log[i];
 			const char *what_th = d.shift_after > d.shift_before ? "ขึ้น" : (d.shift_after < d.shift_before ? "ลด" : "คงที่");
 			const char *what_en = d.shift_after > d.shift_before ? "hike" : (d.shift_after < d.shift_before ? "cut" : "hold");
-			const TextColour colour = d.shift_after > d.shift_before ? TC_ORANGE : (d.shift_after < d.shift_before ? TC_GREEN : TC_GREY);
+			const TextColour colour = d.shift_after > d.shift_before ? CBP_WARN : (d.shift_after < d.shift_before ? CBP_GOOD : TC_GREY);
 			if (paint) {
-				DrawString(c_day, c_act - 2, y, fmt::format("D{}{}{}", d.day + 1, d.emergency ? "!" : "", d.unscheduled ? "*" : ""), TC_WHITE, SA_LEFT);
+				DrawString(c_day, c_act - 2, y, fmt::format("D{}{}{}", d.day + 1, d.emergency ? "!" : "", d.unscheduled ? "*" : ""), CBP_TEXT, SA_LEFT);
 				DrawString(c_act, c_infl - 2, y, CbText(what_th, what_en), colour, SA_LEFT);
 				DrawString(c_infl, c_grow - 2, y, pct(d.inflation_bp), TC_GREY, SA_LEFT);
 				DrawString(c_grow, c_chg - 2, y, pct(d.growth_bp), TC_GREY, SA_LEFT);
@@ -963,8 +974,8 @@ static int DrawMonetaryPolicy(const Rect *r)
 		const int a0 = cx[2] + pad_h, a1 = cx[2] + cw - pad_h;
 		const int64_t backing = _gold_reserve.GetBackingBp();
 		row2(a0, a1, CbText("สำรองทองต่อเงินสดในระบบ (ซื้อ-ขาย)", "Gold backing (buy .. sell band)"), fmt::format("{}.{:02}%  ({} .. {})", backing / 100, backing % 100, pct(BANK_GOLD_BUY_BELOW_BP), pct(BANK_GOLD_SELL_ABOVE_BP)));
-		row(a0, a1, CbText("เงินของธนาคารเอง (ทุน + กำไร)", "Own money of the bank"), GetString(STR_JUST_CURRENCY_LONG, _central_bank.trading_revenue_cents / 100), TC_GREEN);
-		row(a0, a1, CbText("หนี้สูญที่ตัดแล้ว (เกินงบ)", "Bad debt written off (beyond budget)"), GetString(STR_JUST_CURRENCY_LONG, _central_bank.written_off) + " (" + GetString(STR_JUST_CURRENCY_LONG, _central_bank.uncovered_loss) + ")", _central_bank.uncovered_loss > 0 ? TC_RED : TC_GREY);
+		row(a0, a1, CbText("เงินของธนาคารเอง (ทุน + กำไร)", "Own money of the bank"), GetString(STR_JUST_CURRENCY_LONG, _central_bank.trading_revenue_cents / 100), CBP_GOOD);
+		row(a0, a1, CbText("หนี้สูญที่ตัดแล้ว (เกินงบ)", "Bad debt written off (beyond budget)"), GetString(STR_JUST_CURRENCY_LONG, _central_bank.written_off) + " (" + GetString(STR_JUST_CURRENCY_LONG, _central_bank.uncovered_loss) + ")", _central_bank.uncovered_loss > 0 ? CBP_BAD : TC_GREY);
 		const int bottom5 = col_top + card_height(n5);
 
 		/* Column 3, card 6: the latest gold trades of the bank. 3 rows. */
@@ -980,7 +991,7 @@ static int DrawMonetaryPolicy(const Rect *r)
 			const BankGoldTrade &t = _central_bank.gold_log[i];
 			row(a0, a1, fmt::format("D{} {} {} oz", t.day + 1, t.ounces >= 0 ? CbText("ซื้อ", "bought") : CbText("ขาย", "sold"), t.ounces >= 0 ? t.ounces : -t.ounces),
 					fmt::format("@ {}{}", GetString(STR_JUST_CURRENCY_LONG, t.price_cents / 100), t.cash == 0 ? std::string() : fmt::format(" ({}{})", t.cash > 0 ? "+" : "-", GetString(STR_JUST_CURRENCY_LONG, t.cash > 0 ? t.cash : -t.cash))),
-					t.ounces >= 0 ? TC_ORANGE : TC_GREEN);
+					t.ounces >= 0 ? CBP_WARN : CBP_GOOD);
 		}
 		col_bottom[2] = top6 + card_height(n6);
 	}
@@ -1155,16 +1166,16 @@ static constexpr std::initializer_list<NWidgetPart> _nested_central_bank_stateme
 	EndContainer(),
 };
 
-/* The monetary policy window has its own look: a dark blue bar with the title on the left, and the close button in the top right corner
+/* The monetary policy window has its own look: a grey bar with the title (the strong blue was too glaring) on the left, and the close button in the top right corner
  * (the close box works by its widget type, so its place in the row does not matter). */
 static constexpr std::initializer_list<NWidgetPart> _nested_central_bank_policy_widgets = {
 	NWidget(NWID_HORIZONTAL),
-		NWidget(WWT_CAPTION, COLOUR_DARK_BLUE, WID_CBP_CAPTION), SetStringTip(STR_CENTRAL_BANK_POLICY_CAPTION, STR_TOOLTIP_WINDOW_TITLE_DRAG_THIS), SetAlignment(SA_LEFT | SA_VERT_CENTER),
-		NWidget(WWT_SHADEBOX, COLOUR_DARK_BLUE),
-		NWidget(WWT_STICKYBOX, COLOUR_DARK_BLUE),
-		NWidget(WWT_CLOSEBOX, COLOUR_DARK_BLUE),
+		NWidget(WWT_CAPTION, COLOUR_GREY, WID_CBP_CAPTION), SetStringTip(STR_CENTRAL_BANK_POLICY_CAPTION, STR_TOOLTIP_WINDOW_TITLE_DRAG_THIS), SetAlignment(SA_LEFT | SA_VERT_CENTER),
+		NWidget(WWT_SHADEBOX, COLOUR_GREY),
+		NWidget(WWT_STICKYBOX, COLOUR_GREY),
+		NWidget(WWT_CLOSEBOX, COLOUR_GREY),
 	EndContainer(),
-	NWidget(WWT_PANEL, COLOUR_DARK_BLUE, WID_CBP_PANEL), SetMinimalSize(380, 120), SetFill(1, 1), SetResize(1, 0),
+	NWidget(WWT_PANEL, COLOUR_GREY, WID_CBP_PANEL), SetMinimalSize(380, 120), SetFill(1, 1), SetResize(1, 0),
 	EndContainer(),
 };
 

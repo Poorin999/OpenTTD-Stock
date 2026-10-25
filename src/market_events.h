@@ -73,7 +73,7 @@ static constexpr int64_t MARKET_PEACE_MIN_GAP_DAYS = 4;       ///< At least this
  * ---- REAL GOLD NEWS (owner request 2026-10-26): gold falls for a reason that really happened in the gold market ------------------------------
  * Two kinds of the old table are now made from the real figures of `_gold_reserve` (no dice). They keep their kind numbers, so no savegame changes:
  *  - CentralBanksSellGold: the central bank really sold gold of its own reserve (CentralBank::TradeGold) because the gold reserve of the whole system is
- *    above the level (BANK_GOLD_SELL_ABOVE_BP, 30% of the cash in circulation). fact_ppm = ounces sold. fact2 = backing (bp) | share of its gold sold (permille) << 20.
+ *    above the level (BANK_GOLD_SELL_ABOVE_BP, 100% of the notes in circulation). fact_ppm = ounces sold. fact2 = backing (bp) | share of its gold sold (permille) << 20.
  *  - GoldMineFound: the mines really delivered gold to the market stock (GoldFromDelivery adds the ounces to GoldReserveManager::mine_news_oz). When the
  *    ounces reach MARKET_MINE_NEWS_MIN_OZ there is news. fact_ppm = ounces delivered. fact2 = ounces in the market stock now.
  * The size of the push on gold comes from the REAL ounces (MarketGoldDropPpm), not from a dice and not from a table. A news event of this kind has
@@ -87,9 +87,9 @@ static constexpr int64_t MARKET_GOLD_NEWS_MIN_PPM = 15'000;    ///< The smallest
 static constexpr int64_t MARKET_MINE_NEWS_MIN_OZ = 80'000;     ///< Mines must have put this many ounces into the market stock (about 0.25% of the start stock) before it is news.
 static constexpr int64_t MARKET_MINE_NEWS_FULL_OZ = 400'000;   ///< From this many ounces on the news pushes with the full 8%.
 static constexpr int64_t MARKET_MINE_NEWS_DECAY_PERCENT = 5;   ///< Every game day without news the counted ounces fade by 5%, so only deliveries of the last weeks count.
-static constexpr int64_t MARKET_BANK_SELL_LEVEL_BP = 3000;     ///< The reserve level of the story: 30% of the cash in circulation (= BANK_GOLD_SELL_ABOVE_BP, a static_assert in market_events.cpp keeps them equal).
-static constexpr int64_t MARKET_BANK_NEWS_MIN_OZ = 5;          ///< A sale of fewer ounces is not news.
-static constexpr int64_t MARKET_BANK_NEWS_MIN_SHARE_PERMILLE = 100; ///< The bank must have sold at least 10% of the gold that it held (the size of its sale against its own reserve).
+static constexpr int64_t MARKET_BANK_SELL_LEVEL_BP = 10000;    ///< The reserve level of the story: 100% of the notes in circulation (= BANK_GOLD_SELL_ABOVE_BP, a static_assert in market_events.cpp keeps them equal).
+static constexpr int64_t MARKET_BANK_NEWS_MIN_OZ = 1;          ///< A sale of fewer ounces is not news (the bank sells at most 0.5% of its gold a day, so this is small).
+static constexpr int64_t MARKET_BANK_NEWS_MIN_SHARE_PERMILLE = 5;  ///< The bank must have sold at least 0.5% of the gold that it held (its daily limit is exactly 0.5%, so every sale at the limit is news, at most once per MARKET_GOLD_NEWS_GAP_DAYS).
 
 /** The kinds of events. The numbers are saved in savegames: add new kinds at the END, before Count. */
 enum class MarketEventKind : uint8_t {
