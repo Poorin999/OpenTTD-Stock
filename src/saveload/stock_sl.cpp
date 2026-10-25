@@ -45,7 +45,7 @@ enum StockRecordKind : uint8_t {
 	SRK_TIMEFRAME_VOL = 21, ///< Traded volume of the SRK_TIMEFRAME row just before it: a = company, v1 = volume. Only written when it is not 0.
 	SRK_LEDGER = 22,  ///< Line of the account statement: a = company, b = line (LedgerItem), ym = economy year, v1 = income, v2 = expense.
 	SRK_GOLD = 24,    ///< Gold market: v1 = price in 1/100 money units, v2 = baseline cash supply, v3 = ounces of the central bank, v4 = demand pressure in ppm, v5 = ounces for sale in the market plus 1 (0 = savegame from before the stock).
-	SRK_VALUABLES = 29, ///< State of the price model of a valuable: a = index of the valuable, v1 = slow drift in ppm, v2 = fast noise in ppm, v3 = state of the random number generator (the same in every row).
+	SRK_VALUABLES = 29, ///< State of the price model of a valuable: a = index of the valuable, v1 = slow drift in ppm, v2 = fast noise in ppm, v3 = state of the random number generator (the same in every row), v4 of the diamond row = diamond stock in carats + 1 (0 = old savegame).
 	SRK_POLICY = 28,  ///< Monetary policy: ym = bit 0 set when a decision was measured, bit 1 set in emergency mode, v1 = shift in bp, v2 = price index at the last decision in ppm, v3 = game day of the last decision plus 1 (0 = none), v4 = measured inflation in bp, v5 = measured growth in bp.
 	SRK_EVENT = 32,   ///< Random market event (news): a = kind, b = target company (255 = none), ym = id, v1 = game minute, v2 = push on gold in ppm, v3 = push on the sentiment of the shares in ppm, v4 = severity | variant << 8. Written oldest first.
 	SRK_EVENT_STATE = 33, ///< State of the events: a = 255: v1 = random number generator, v2 = sentiment of the whole market in ppm, v3 = id of the next event, v4 = game minute of the last event plus 1 (0 = none). a = 0 .. 31: v1 = sentiment of that symbol in ppm.
@@ -217,7 +217,7 @@ struct STCKChunkHandler : ChunkHandler {
 		}
 
 		/* The price model of the valuables: one row each, the state of the random number generator is the same in every row. */
-		if (_valuables.rng_state != 0) {
+		if (_valuables.rng_state != 0 || _valuables.diamond_stock_carats != ValuablesManager::DIAMOND_STOCK_START) {
 			for (size_t k = 0; k < VALUABLE_COUNT; k++) {
 				StockRecord r;
 				r.kind = SRK_VALUABLES;
@@ -225,6 +225,7 @@ struct STCKChunkHandler : ChunkHandler {
 				r.v1 = _valuables.drift_ppm[k];
 				r.v2 = _valuables.noise_ppm[k];
 				r.v3 = static_cast<int64_t>(_valuables.rng_state);
+				if (k == static_cast<size_t>(ValuableId::Diamond)) r.v4 = _valuables.diamond_stock_carats + 1; // 0 = a savegame from before: the start stock.
 				write(r);
 			}
 		}
@@ -675,6 +676,7 @@ struct STCKChunkHandler : ChunkHandler {
 					_valuables.drift_ppm[r.a] = std::clamp<int64_t>(r.v1, -ValuablesManager::Info(r.a).drift_max_ppm, ValuablesManager::Info(r.a).drift_max_ppm);
 					_valuables.noise_ppm[r.a] = std::clamp<int64_t>(r.v2, -4 * ValuablesManager::Info(r.a).noise_ppm, 4 * ValuablesManager::Info(r.a).noise_ppm);
 					if (r.v3 != 0) _valuables.rng_state = static_cast<uint64_t>(r.v3);
+					if (r.a == static_cast<size_t>(ValuableId::Diamond) && r.v4 > 0) _valuables.diamond_stock_carats = r.v4 - 1;
 					break;
 
 				case SRK_PAYROLL: {

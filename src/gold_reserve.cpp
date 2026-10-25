@@ -9,6 +9,7 @@
 
 #include "stdafx.h"
 #include "gold_reserve.h"
+#include "valuables.h"
 #include "tax.h"
 #include "central_bank.h"
 #include "game_time/game_time_manager.h"
@@ -192,6 +193,7 @@ void GoldFromDelivery(CargoType cargo, uint count)
 {
 	if (count == 0 || !IsValidCargoType(cargo)) return;
 	const CargoLabel label = CargoSpec::Get(cargo)->label;
+	if (label == CargoLabel{'DIAM'}) { DiamondsFromDelivery(count); return; } // Diamonds have a stock of their own (valuables.cpp).
 	if (label != CT_GOLD && label != CargoLabel{'VALU'}) return;
 	if (_gold_reserve.price_cents <= 0) return; // The market has not started.
 
@@ -250,17 +252,19 @@ GoldFactors GoldReserveManager::GetFactors() const
 	int64_t raw = f.anchor_cents;
 	raw = raw * f.cash_ppm / PPM;
 	raw = raw * f.demand_ppm / PPM;
-	raw = raw * f.scarcity_ppm / PPM;
 	raw = raw * f.haven_ppm / PPM;
-	f.raw_cents = std::max<int64_t>(raw, 1);
+	const int64_t raw_without_scarcity = std::max<int64_t>(raw, 1);
+	f.raw_cents = std::max<int64_t>(raw_without_scarcity * f.scarcity_ppm / PPM, 1); // Everything, before the limit.
 
-	/* The limit around the anchor. */
-	int64_t dev = f.anchor_cents > 0 ? (f.raw_cents - f.anchor_cents) * PPM / f.anchor_cents : 0;
+	/* The limit around the anchor holds for cash, demand and safe haven. Scarcity comes AFTER it: the less gold the market has, the dearer it gets
+	 * (x0.5 .. x4 by the stock), also beyond +-50% of the anchor. */
+	int64_t dev = f.anchor_cents > 0 ? (raw_without_scarcity - f.anchor_cents) * PPM / f.anchor_cents : 0;
 	const int64_t sign = dev < 0 ? -1 : 1;
 	int64_t mag = dev < 0 ? -dev : dev;
 	if (mag > TARGET_SOFT_DEV_PPM) mag = TARGET_SOFT_DEV_PPM + (mag - TARGET_SOFT_DEV_PPM) / 3;
 	mag = std::min(mag, TARGET_MAX_DEV_PPM);
-	f.target_cents = std::max<int64_t>(f.anchor_cents * (PPM + sign * mag) / PPM, BASE_PRICE_CENTS / 10);
+	const int64_t limited_cents = f.anchor_cents * (PPM + sign * mag) / PPM;
+	f.target_cents = std::max<int64_t>(limited_cents * f.scarcity_ppm / PPM, BASE_PRICE_CENTS / 10);
 	return f;
 }
 

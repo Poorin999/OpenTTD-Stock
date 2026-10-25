@@ -51,14 +51,14 @@ struct GoldReserveManager {
 	static constexpr int64_t PPM = 1000000;                 ///< 1.0 in the factors of the price.
 	static constexpr int64_t DEPTH_OUNCES = 20000;          ///< Market depth: buying this many ounces moves the price by +100%.
 	static constexpr int64_t PRESSURE_MAX_PPM = 300000;     ///< The demand effect never moves the price more than 30%.
-	static constexpr int64_t MARKET_STOCK_START = 200000;   ///< Ounces that the market has for sale at the start. Buying takes from it, selling gives back.
+	static constexpr int64_t MARKET_STOCK_START = 1000 * OUNCES_PER_TON; ///< Ounces that the market has for sale at the start: 1000 metric tons (32,151,000 oz). Buying takes from it, selling gives back.
 	static constexpr int64_t SPREAD_MIN_PPM = 2000;         ///< Smallest total spread: 0.2% of the base price (calm market, low inflation).
 	static constexpr int64_t SPREAD_MAX_PPM = 5000;         ///< Largest total spread: 0.5% (heavy buying or selling, high inflation).
 	static constexpr int64_t COMMISSION_PPM = 1000;         ///< Commission: 0.1% of the value of the order.
 	static constexpr int64_t COMMISSION_MIN = 100;          ///< Smallest commission of one order, in money units (applies to small orders).
-	static constexpr int64_t OUNCES_PER_DELIVERED_UNIT = 5;  ///< Gold or valuables delivered to a station: one unit of cargo (one bag) adds at most this many ounces to the market stock (was 10). The real yield falls as the stock fills, see MineYieldPpm.
+	static constexpr int64_t OUNCES_PER_DELIVERED_UNIT = 800;  ///< Gold or valuables delivered to a station: one unit of cargo (one bag) adds at most this many ounces to the market stock (was 5 with a start stock of 200,000 oz; scaled 160x with the 1000 ton start stock). The real yield falls as the stock fills, see MineYieldPpm.
 	static constexpr int64_t MARKET_STOCK_CAP = MARKET_STOCK_START * 3 / 2; ///< Deliveries never fill the market stock above this (1.5 x the start stock, was 2 x).
-	static constexpr int64_t MINE_DAILY_INTAKE_MAX_OZ = 400; ///< The market takes at most this many ounces from mines per game day (0.2% of the start stock); more is not added.
+	static constexpr int64_t MINE_DAILY_INTAKE_MAX_OZ = 64300; ///< The market takes at most this many ounces from mines per game day (0.2% of the start stock); more is not added.
 	static constexpr int64_t SCARCITY_FLOOR_DIV = 4;        ///< The scarcity factor stops growing when the stock is 1/4 of the start stock (price x4).
 	static constexpr int64_t TARGET_SOFT_DEV_PPM = 250'000; ///< The target may be 25% away from anchor (base price x inflation) without any limit; further away it moves only a third as fast.
 	static constexpr int64_t TARGET_MAX_DEV_PPM = 500'000;  ///< The target is never more than 50% above or below the anchor (the scarcity, cash and demand together can not run away).

@@ -72,6 +72,19 @@ struct ValuablesManager {
 	std::array<int64_t, VALUABLE_COUNT> noise_ppm{};  ///< Fast noise, in ppm; renewed every economy day.
 	uint64_t rng_state = 0;                           ///< State of the random number generator; 0 = not seeded yet.
 
+	/* The diamond market has a stock of its own (carats), separate from the gold stock. Mines add to it (DiamondsFromDelivery), the world
+	 * cuts and sells diamonds out of it every hour; the less is left, the dearer the diamonds (GetBaseFixed). */
+	static constexpr int64_t DIAMOND_STOCK_START = 10'000'000;                 ///< Carats that the market has at the start.
+	static constexpr int64_t DIAMOND_STOCK_CAP = DIAMOND_STOCK_START * 3 / 2;  ///< Deliveries never fill the stock above this (1.5 x the start stock).
+	static constexpr int64_t DIAMOND_CARATS_PER_UNIT = 500;                    ///< One delivered unit of cargo adds at most this many carats.
+	static constexpr int64_t DIAMOND_MINE_DAILY_MAX = 20'000;                  ///< The market takes at most this many carats from mines per game day (0.2% of the start stock; a bucket that fills every hour).
+	static constexpr int64_t DIAMOND_DEMAND_DAILY = 15'000;                    ///< The world takes this many carats a game day (0.15% of the start stock): cutting, jewellery.
+	static constexpr int64_t DIAMOND_SCARCITY_FLOOR_DIV = 4;                   ///< The scarcity factor stops growing at 1/4 of the start stock (price x4).
+	int64_t diamond_stock_carats = DIAMOND_STOCK_START; ///< Carats that the market still has. Saved (v4 of the SRK_VALUABLES row of the diamond, +1).
+	int64_t diamond_mine_allowance = DIAMOND_MINE_DAILY_MAX; ///< Carats that mines may still add (a bucket, +1/24 of the daily maximum every hour). Not saved.
+	int64_t DiamondScarcityPpm() const;
+	static int64_t DiamondYieldPpm(int64_t stock_carats);
+
 	void Reset();
 	void StepFast();
 	void StepSlow();
@@ -83,6 +96,15 @@ struct ValuablesManager {
 };
 
 extern ValuablesManager _valuables;
+
+/** Diamonds that are delivered to a station add to the diamond stock (hook: GoldFromDelivery in gold_reserve.cpp). */
+void DiamondsFromDelivery(uint count);
+
+/** The symbol number of the diamonds (XDI) in the terminal. */
+static constexpr size_t STOCK_DIAMOND_SYMBOL = STOCK_FIRST_VALUABLE + static_cast<size_t>(ValuableId::Diamond);
+
+/** A trade in the terminal moves the real diamond stock: a buy (a long opens, a short closes) takes carats out of it, a sell (a short opens, a long closes) gives them back. */
+void DiamondTerminalTrade(bool buy, uint32_t carats);
 
 /** The leverage of a symbol as the divisor of the margin (10 for the shares of a company). */
 int64_t GetStockMarginDivisor(size_t symbol);

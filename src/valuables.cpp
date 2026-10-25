@@ -49,6 +49,40 @@ void ValuablesManager::Reset()
 	this->drift_ppm.fill(0);
 	this->noise_ppm.fill(0);
 	this->rng_state = 0;
+	this->diamond_stock_carats = DIAMOND_STOCK_START;
+	this->diamond_mine_allowance = DIAMOND_MINE_DAILY_MAX;
+}
+
+/** The price factor of the diamond stock: start stock / stock now, x0.5 .. x4 (half the stock = twice the price). */
+int64_t ValuablesManager::DiamondScarcityPpm() const
+{
+	const int64_t floor_stock = DIAMOND_STOCK_START / DIAMOND_SCARCITY_FLOOR_DIV;
+	return std::clamp<int64_t>(PPM * DIAMOND_STOCK_START / std::max(this->diamond_stock_carats, floor_stock), PPM / 2, DIAMOND_SCARCITY_FLOOR_DIV * PPM);
+}
+
+/** What mines may add: all of it up to the start stock, falling in a straight line to 0 at the cap (a full market does not want more). */
+int64_t ValuablesManager::DiamondYieldPpm(int64_t stock_carats)
+{
+	if (stock_carats <= DIAMOND_STOCK_START) return PPM;
+	if (stock_carats >= DIAMOND_STOCK_CAP) return 0;
+	return PPM * (DIAMOND_STOCK_CAP - stock_carats) / (DIAMOND_STOCK_CAP - DIAMOND_STOCK_START);
+}
+
+void DiamondTerminalTrade(bool buy, uint32_t carats)
+{
+	_valuables.diamond_stock_carats = buy ? std::max<int64_t>(0, _valuables.diamond_stock_carats - carats) : _valuables.diamond_stock_carats + carats;
+}
+
+void DiamondsFromDelivery(uint count)
+{
+	if (count == 0) return;
+	const int64_t room = ValuablesManager::DIAMOND_STOCK_CAP - _valuables.diamond_stock_carats;
+	if (room <= 0) return; // A stock above the cap (should not happen) is not cut, it gets nothing more.
+	int64_t carats = static_cast<int64_t>(count) * ValuablesManager::DIAMOND_CARATS_PER_UNIT * ValuablesManager::DiamondYieldPpm(_valuables.diamond_stock_carats) / PPM;
+	carats = std::min({carats, room, _valuables.diamond_mine_allowance});
+	if (carats <= 0) return;
+	_valuables.diamond_stock_carats += carats;
+	_valuables.diamond_mine_allowance -= carats;
 }
 
 /**
@@ -93,6 +127,9 @@ void ValuablesManager::StepFast()
  */
 void ValuablesManager::StepSlow()
 {
+	/* Diamond stock: the world takes its share every hour; the bucket of what mines may add fills by 1/24 of the daily maximum. */
+	this->diamond_stock_carats = std::max<int64_t>(0, this->diamond_stock_carats - DIAMOND_DEMAND_DAILY / DRIFT_STEPS_PER_DAY);
+	this->diamond_mine_allowance = std::min(DIAMOND_MINE_DAILY_MAX, this->diamond_mine_allowance + DIAMOND_MINE_DAILY_MAX / DRIFT_STEPS_PER_DAY);
 	for (size_t k = 0; k < VALUABLE_COUNT; k++) {
 		const ValuableInfo &info = Info(k);
 		int64_t pull = this->drift_ppm[k] / (DRIFT_PULL_DAYS * DRIFT_STEPS_PER_DAY);
@@ -141,6 +178,7 @@ int64_t ValuablesManager::GetBaseFixed(size_t index) const
 	price = price * (PPM + cycle) / PPM;
 	price = price * (PPM + this->drift_ppm[index]) / PPM;
 	price = price * (PPM + this->noise_ppm[index]) / PPM;
+	if (index == static_cast<size_t>(ValuableId::Diamond)) price = price * this->DiamondScarcityPpm() / PPM; // The less diamonds in the market, the dearer.
 	return std::max<int64_t>(STOCK_MIN_PRICE * STOCK_PRICE_SCALE, price);
 }
 

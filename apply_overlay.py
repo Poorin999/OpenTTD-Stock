@@ -42,7 +42,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "tax.h": "src", "tax.cpp": "src",
     "cargo_market.h": "src", "cargo_market.cpp": "src", "CargoMarketMath.h": "src",
     "town_treasury.h": "src", "town_treasury.cpp": "src",
-    "gold_reserve.h": "src", "gold_reserve.cpp": "src",
+    "gold_reserve.h": "src", "gold_reserve.cpp": "src", "gold_industry.cpp": "src",
     "valuables.h": "src", "valuables.cpp": "src",
     "gold_panel.h": "src", "gold_panel.cpp": "src", "gold_buy_gui.cpp": "src",
     "economy_news.h": "src", "economy_news.cpp": "src",
@@ -70,7 +70,7 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_GOLD_BUY", "buy gold for the reserve"),
     ("CMD_GOLD_SELL", "sell gold of the reserve"),
 ]
-NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "gold_reserve.cpp", "gold_reserve.h", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
+NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
                "RetailMath.h", "RetailMarketManager.h", "RetailMarketManager.cpp",
                "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]
@@ -703,6 +703,60 @@ def patch_vat(tree):
     print("economy.cpp: VAT hook added")
 
 
+GOLD_INDUSTRY_MARKER = "GOLD_INDUSTRY_PATCH"
+
+
+def patch_gold_industries(tree):
+    """Gold mines in every climate and banks that take the gold cargo (gold_industry.cpp): one declaration before ResetIndustries() and one call at
+    the end of it, in industry_cmd.cpp (in place, at an anchor; nothing is written when the anchor is missing)."""
+    p = tree / "src" / "industry_cmd.cpp"
+    if not p.is_file():
+        sys.exit(f"ERROR: {p} not found in the OpenTTD tree")
+    t, crlf = _read_lf(p)
+    if GOLD_INDUSTRY_MARKER in t:
+        print("industry_cmd.cpp: gold industries hook already there")
+        return
+    m = re.search(r"^void ResetIndustries\(\)\n\{\n", t, re.M)
+    if not m:
+        sys.exit("ERROR: void ResetIndustries() not found in industry_cmd.cpp (anchor of the gold industries patch)")
+    end = t.find("\n}\n", m.end())
+    if end < 0:
+        sys.exit("ERROR: end of ResetIndustries() not found (gold industries patch)")
+    t = t[:end + 1] + f"\tApplyGoldIndustries(); /* {GOLD_INDUSTRY_MARKER} */\n" + t[end + 1:]
+    t = t[:m.start()] + f"void ApplyGoldIndustries(); /* {GOLD_INDUSTRY_MARKER}: gold_industry.cpp */\n\n" + t[m.start():]
+    _write_like(p, t, crlf)
+    print("industry_cmd.cpp: gold industries hook added")
+
+
+COMPANY_YEAR_MARKER = "GAME_COMPANY_YEAR_PATCH"
+
+
+def patch_company_yearly(tree):
+    """The yearly work of the companies (CompaniesYearlyLoop: the yearly_expenses table is shifted by one year, so 'This Year' and 'Last Year' of the
+    account statement) ran on the economy year of OpenTTD (365 economy days of 74 ticks, about 13 real minutes). It now runs on the Year event of
+    the clock (365 game days), the same year as the ledger lines and the dates of the statement. In place, at an anchor: the one timer
+    'IntervalTimer<TimerGameEconomy> ... {TimerGameEconomy::YEAR, TimerGameEconomy::Priority::COMPANY}' in src/*.cpp; nothing is written when
+    it is not found exactly once."""
+    rx = re.compile(r"static const IntervalTimer<TimerGameEconomy> (\w+)\(\{ ?TimerGameEconomy::YEAR, TimerGameEconomy::Priority::COMPANY ?\}, \[\]\(auto\)")
+    hits = []
+    for f in sorted((tree / "src").glob("*.cpp")):
+        t, crlf = _read_lf(f)
+        if COMPANY_YEAR_MARKER in t:
+            print(f"{f.name}: company yearly work already on the game year")
+            return
+        m = rx.search(t)
+        if m:
+            hits.append((f, t, crlf, m))
+    if len(hits) != 1:
+        sys.exit(f"ERROR: the yearly company timer (YEAR, Priority::COMPANY) was found {len(hits)} times in src/*.cpp, expected 1 (company yearly patch): {[h[0].name for h in hits]}")
+    f, t, crlf, m = hits[0]
+    new = f"static const GameTimeSubscription {m.group(1)}(GameTimeEvent::Year, [](const GameTimeSnapshot &) /* {COMPANY_YEAR_MARKER} */"
+    t = t[:m.start()] + new + t[m.end():]
+    t = ensure_include(t, '#include "game_time/game_time_manager.h"', ['#include "company_func.h"', '#include "stdafx.h"'])
+    _write_like(f, t, crlf)
+    print(f"{f.name}: company yearly work ({m.group(1)}) runs on the game year")
+
+
 def main(tree):
     patch_graph_files(tree)
     patch_graph_window_name(tree)
@@ -713,6 +767,8 @@ def main(tree):
     patch_vehicle_time(tree)
     patch_world_time(tree)
     patch_company_hourly(tree)
+    patch_company_yearly(tree)
+    patch_gold_industries(tree)
     patch_console_file(tree)
     for name, folder in FILES.items():
         src = find(name, folder)

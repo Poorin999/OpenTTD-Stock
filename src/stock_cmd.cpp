@@ -69,6 +69,8 @@ CommandCost CmdStockOpen(DoCommandFlags flags, CompanyID target, StockOrderType 
 	const int64_t ask = GetStockAsk(target);
 	const bool market = type == StockOrderType::Buy || type == StockOrderType::Sell;
 	const bool buy = IsStockBuy(type);
+	/* Diamonds are real: a long cannot take more carats than the market has. */
+	if (market && buy && target.base() == STOCK_DIAMOND_SYMBOL && _valuables.diamond_stock_carats < static_cast<int64_t>(volume)) return CommandCost(STR_GOLD_ERROR_NO_STOCK);
 
 	int64_t entry = 0;
 	if (market) {
