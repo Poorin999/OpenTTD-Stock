@@ -15,9 +15,12 @@
 #include "../stock_base.h"
 #include "../central_bank.h"
 #include "../economy_news.h"
+#include "../market_events.h"
 #include "../wallet_base.h"
 #include "../gold_reserve.h"
 #include "../valuables.h"
+#include "../town_treasury.h"
+#include "../cargo_market.h"
 #include "../game_time/game_time_manager.h"
 
 #include "../safeguards.h"
@@ -44,6 +47,8 @@ enum StockRecordKind : uint8_t {
 	SRK_GOLD = 24,    ///< Gold market: v1 = price in 1/100 money units, v2 = baseline cash supply, v3 = ounces of the central bank, v4 = demand pressure in ppm, v5 = ounces for sale in the market plus 1 (0 = savegame from before the stock).
 	SRK_VALUABLES = 29, ///< State of the price model of a valuable: a = index of the valuable, v1 = slow drift in ppm, v2 = fast noise in ppm, v3 = state of the random number generator (the same in every row).
 	SRK_POLICY = 28,  ///< Monetary policy: ym = bit 0 set when a decision was measured, bit 1 set in emergency mode, v1 = shift in bp, v2 = price index at the last decision in ppm, v3 = game day of the last decision plus 1 (0 = none), v4 = measured inflation in bp, v5 = measured growth in bp.
+	SRK_EVENT = 32,   ///< Random market event (news): a = kind, b = target company (255 = none), ym = id, v1 = game minute, v2 = push on gold in ppm, v3 = push on the sentiment of the shares in ppm, v4 = severity | variant << 8. Written oldest first.
+	SRK_EVENT_STATE = 33, ///< State of the events: a = 255: v1 = random number generator, v2 = sentiment of the whole market in ppm, v3 = id of the next event, v4 = game minute of the last event plus 1 (0 = none). a = 0 .. 31: v1 = sentiment of that symbol in ppm.
 	SRK_PAYROLL = 31, ///< Transport Payrolls report: ym = bit 0 set for the baseline, v1 = game day, v2 = average vehicles x100, v3 = actual x100, v4 = forecast x100, v5 = push on the gold demand in ppm. Written oldest first.
 	SRK_BANK_LOSS = 30, ///< Debts that the central bank wrote off (bankruptcy): v1 = total written off, v2 = the part that the budget could not pay, money units.
 	SRK_BANK_BUDGET = 26, ///< Budget of the central bank from trading: v1 = commission and spread of the gold trades in 1/100 money units.
@@ -55,6 +60,8 @@ enum StockRecordKind : uint8_t {
 	SRK_STATS = 16,   ///< Trading results of a company: a = company, v1 = closed trades, v2 = winning trades, v3 = total profit.
 	SRK_STATS_MONTH = 17, ///< Profit of one month: a = company, ym = month, v1 = profit, v2 = trades, v3 = winning trades.
 	SRK_HISTORY = 8,  ///< Closed trade: a = owner, b = target, ym = id, v1 = volume, v2 = open price, v3 = close price, v4 = profit, v5 = type | reason << 8 | closed month << 16.
+	SRK_CARGO_MARKET = 35, ///< Price of one cargo: a = cargo type, ym = game days counted (0 .. 31), v1 = price in ppm, v2 = normal deliveries per day x100, v3 = recent deliveries per day x100. Written only for a cargo with a state.
+	SRK_TOWN = 34,    ///< Account of a town: ym = index of the town, v1 = ounces of the citizens, v2 = what that gold cost, v3 = savings of the citizens, v4 = treasury, v5 = spent on development. Taxes collected are not saved (they restart at 0).
 };
 
 /** One saved record of the trading terminal. */
@@ -283,6 +290,64 @@ struct STCKChunkHandler : ChunkHandler {
 			r.v3 = it->actual_x100;
 			r.v4 = it->forecast_x100;
 			r.v5 = it->gold_ppm;
+			write(r);
+		}
+
+		{
+			StockRecord st;
+			st.kind = SRK_EVENT_STATE;
+			st.a = 255;
+			st.v1 = static_cast<int64_t>(_market_events.rng_state);
+			st.v2 = _market_events.market_sentiment_ppm;
+			st.v3 = _market_events.next_id;
+			st.v4 = _market_events.last_minute + 1;
+			write(st);
+			for (size_t i = 0; i < MARKET_SENTIMENT_SLOTS; i++) {
+				if (_market_events.sentiment_ppm[i] == 0) continue;
+				StockRecord ss;
+				ss.kind = SRK_EVENT_STATE;
+				ss.a = static_cast<uint8_t>(i);
+				ss.v1 = _market_events.sentiment_ppm[i];
+				write(ss);
+			}
+		}
+
+		for (auto it = _market_events.log.rbegin(); it != _market_events.log.rend(); ++it) {
+			StockRecord r;
+			r.kind = SRK_EVENT;
+			r.a = static_cast<uint8_t>(it->kind);
+			r.b = it->target;
+			r.ym = static_cast<int32_t>(it->id);
+			r.v1 = it->minute;
+			r.v2 = it->gold_ppm;
+			r.v3 = it->share_ppm;
+			r.v4 = static_cast<int64_t>(it->severity) | (static_cast<int64_t>(it->variant) << 8);
+			write(r);
+		}
+
+		for (size_t i = 0; i < _cargo_market.cargo.size(); i++) {
+			const cargomarket::CargoState &c = _cargo_market.cargo[i];
+			if (c.days == 0) continue;
+			StockRecord r;
+			r.kind = SRK_CARGO_MARKET;
+			r.a = static_cast<uint8_t>(i);
+			r.ym = c.days;
+			r.v1 = c.price_ppm;
+			r.v2 = c.ref_x100;
+			r.v3 = c.fast_x100;
+			write(r);
+		}
+
+		for (const auto &[key, a] : _town_treasury.accounts) {
+			if (a.gold_oz == 0 && a.savings == 0 && a.treasury == 0 && a.spent == 0) continue;
+			StockRecord r;
+			r.kind = SRK_TOWN;
+			r.ym = static_cast<int32_t>(key);
+			r.v1 = a.gold_oz;
+			r.v2 = a.gold_cost;
+			r.v3 = a.savings;
+			r.v4 = a.treasury;
+			r.v5 = a.spent;
 			write(r);
 		}
 
@@ -623,6 +688,54 @@ struct STCKChunkHandler : ChunkHandler {
 					_payroll_news.releases.push_front(rel); // Records come oldest first: the newest ends up in front.
 					if (_payroll_news.releases.size() > PAYROLL_KEEP) _payroll_news.releases.pop_back();
 					_payroll_news.last_day = _payroll_news.releases.front().day;
+					break;
+				}
+
+				case SRK_EVENT: {
+					if (r.a >= MARKET_EVENT_KIND_COUNT) break;
+					MarketEvent ev;
+					ev.kind = static_cast<MarketEventKind>(r.a);
+					ev.target = r.b;
+					ev.id = static_cast<uint32_t>(std::max<int32_t>(r.ym, 1));
+					ev.minute = std::max<int64_t>(r.v1, 0);
+					ev.gold_ppm = std::clamp<int64_t>(r.v2, -MARKET_EVENT_GOLD_MAX_PPM, MARKET_EVENT_GOLD_MAX_PPM);
+					ev.share_ppm = std::clamp<int64_t>(r.v3, -MARKET_EVENT_SHARE_MAX_PPM, MARKET_EVENT_SHARE_MAX_PPM);
+					ev.severity = static_cast<uint8_t>(std::clamp<int64_t>(r.v4 & 0xFF, 1, 3));
+					ev.variant = static_cast<uint8_t>(std::clamp<int64_t>((r.v4 >> 8) & 0xFF, 0, 11));
+					_market_events.log.push_front(ev); // Records come oldest first: the newest ends up in front.
+					if (_market_events.log.size() > MARKET_EVENT_KEEP) _market_events.log.pop_back();
+					break;
+				}
+
+				case SRK_EVENT_STATE:
+					if (r.a == 255) {
+						_market_events.rng_state = static_cast<uint64_t>(r.v1);
+						_market_events.market_sentiment_ppm = std::clamp<int64_t>(r.v2, -MARKET_SENTIMENT_MAX_PPM, MARKET_SENTIMENT_MAX_PPM);
+						_market_events.next_id = static_cast<uint32_t>(std::clamp<int64_t>(r.v3, 1, UINT32_MAX));
+						_market_events.last_minute = std::max<int64_t>(r.v4, 0) - 1;
+					} else if (r.a < MARKET_SENTIMENT_SLOTS) {
+						_market_events.sentiment_ppm[r.a] = std::clamp<int64_t>(r.v1, -MARKET_SENTIMENT_MAX_PPM, MARKET_SENTIMENT_MAX_PPM);
+					}
+					break;
+
+				case SRK_CARGO_MARKET:
+					if (r.a < _cargo_market.cargo.size()) {
+						cargomarket::CargoState &c = _cargo_market.cargo[r.a];
+						c.days = std::clamp<int32_t>(r.ym, 0, cargomarket::BASELINE_DAYS + 1);
+						c.price_ppm = std::clamp<int64_t>(r.v1, cargomarket::PRICE_MIN_PPM, cargomarket::PRICE_MAX_PPM);
+						c.ref_x100 = std::max<int64_t>(r.v2, 0);
+						c.fast_x100 = std::max<int64_t>(r.v3, 0);
+					}
+					break;
+
+				case SRK_TOWN: {
+					if (r.ym < 0 || r.ym > 0xFFFF) break;
+					TownAccount &a = _town_treasury.accounts[static_cast<uint32_t>(r.ym)];
+					a.gold_oz = std::max<int64_t>(r.v1, 0);
+					a.gold_cost = std::max<int64_t>(r.v2, 0);
+					a.savings = std::max<int64_t>(r.v3, 0);
+					a.treasury = std::max<int64_t>(r.v4, 0);
+					a.spent = std::max<int64_t>(r.v5, 0);
 					break;
 				}
 

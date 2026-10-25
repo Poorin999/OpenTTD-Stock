@@ -44,8 +44,9 @@ struct GoldReserveManager {
 	static constexpr int64_t SPREAD_MAX_PPM = 5000;         ///< Largest total spread: 0.5% (heavy buying or selling, high inflation).
 	static constexpr int64_t COMMISSION_PPM = 1000;         ///< Commission: 0.1% of the value of the order.
 	static constexpr int64_t COMMISSION_MIN = 100;          ///< Smallest commission of one order, in money units (applies to small orders).
-	static constexpr int64_t OUNCES_PER_DELIVERED_UNIT = 10; ///< Gold or valuables delivered to a station: one unit of cargo (one bag) adds this many ounces to the market stock.
-	static constexpr int64_t MARKET_STOCK_CAP = 2 * MARKET_STOCK_START; ///< Deliveries never fill the market stock above this.
+	static constexpr int64_t OUNCES_PER_DELIVERED_UNIT = 5;  ///< Gold or valuables delivered to a station: one unit of cargo (one bag) adds at most this many ounces to the market stock (was 10). The real yield falls as the stock fills, see MineYieldPpm.
+	static constexpr int64_t MARKET_STOCK_CAP = MARKET_STOCK_START * 3 / 2; ///< Deliveries never fill the market stock above this (1.5 x the start stock, was 2 x).
+	static constexpr int64_t MINE_DAILY_INTAKE_MAX_OZ = 400; ///< The market takes at most this many ounces from mines per game day (0.2% of the start stock); more is not added.
 	static constexpr int64_t SCARCITY_FLOOR_DIV = 4;        ///< The scarcity factor stops growing when the stock is 1/4 of the start stock (price x4).
 	static constexpr size_t HISTORY_MAX_DAYS = 730;         ///< Number of daily prices that are kept for the gold chart (the oldest are dropped).
 
@@ -55,6 +56,7 @@ struct GoldReserveManager {
 	int64_t baseline_supply = 0;  ///< Cash in circulation when the market started; the supply factor is measured against it.
 	int64_t bank_reserve_oz = 0;  ///< The ounces that the central bank holds from the start.
 	int64_t market_stock_oz = 0;  ///< Ounces that the market still has for sale. Less stock = a dearer price (scarcity).
+	int64_t mine_intake_today_oz = 0; ///< Ounces that mines added today (limit MINE_DAILY_INTAKE_MAX_OZ). Cleared by UpdateDaily. Not saved: a load gives a new allowance for the rest of the day.
 	int64_t pressure_ppm = 0;     ///< Demand effect of the buying and selling of the companies; fades by 3% a day.
 	std::array<int64_t, MAX_COMPANIES> holdings_oz{}; ///< Ounces of every company.
 	std::vector<int64_t> history_cents; ///< The price at the end of every game day (1/100 money units), oldest first, at most HISTORY_MAX_DAYS. Saved (SRK_GOLD_HISTORY). Drawn by the gold chart.
@@ -62,6 +64,17 @@ struct GoldReserveManager {
 
 	void Reset();
 	void UpdateDaily();
+
+	/**
+	 * How much of the normal yield a mine delivery adds, in ppm. Full while the stock is at or below the start stock; it falls in a
+	 * straight line to 0 at MARKET_STOCK_CAP: a market that is full does not want more gold, so the mines slow down by themselves.
+	 */
+	static constexpr int64_t MineYieldPpm(int64_t stock_oz)
+	{
+		if (stock_oz <= MARKET_STOCK_START) return PPM;
+		if (stock_oz >= MARKET_STOCK_CAP) return 0;
+		return PPM * (MARKET_STOCK_CAP - stock_oz) / (MARKET_STOCK_CAP - MARKET_STOCK_START);
+	}
 	void PushHistory();
 
 	int64_t GetPriceCents() const { return this->price_cents; }

@@ -40,10 +40,13 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "wallet_cmd.h": "src", "wallet_cmd.cpp": "src",
     "central_bank.h": "src", "central_bank.cpp": "src",
     "tax.h": "src", "tax.cpp": "src",
+    "cargo_market.h": "src", "cargo_market.cpp": "src", "CargoMarketMath.h": "src",
+    "town_treasury.h": "src", "town_treasury.cpp": "src",
     "gold_reserve.h": "src", "gold_reserve.cpp": "src",
     "valuables.h": "src", "valuables.cpp": "src",
     "gold_panel.h": "src", "gold_panel.cpp": "src", "gold_buy_gui.cpp": "src",
     "economy_news.h": "src", "economy_news.cpp": "src",
+    "market_events.h": "src", "market_events.cpp": "src", "market_news_ai.h": "src", "market_news_gui.h": "src", "market_news_gui.cpp": "src",
     "game_calendar.h": "src", "game_calendar.cpp": "src",
     "stock_dev.h": "src", "stock_console.cpp": "src",
     "central_bank_gui.h": "src", "central_bank_gui.cpp": "src",
@@ -67,7 +70,7 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_GOLD_BUY", "buy gold for the reserve"),
     ("CMD_GOLD_SELL", "sell gold of the reserve"),
 ]
-NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "gold_reserve.cpp", "gold_reserve.h", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "economy_news.cpp", "economy_news.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
+NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "gold_reserve.cpp", "gold_reserve.h", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
                "RetailMath.h", "RetailMarketManager.h", "RetailMarketManager.cpp",
                "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]
@@ -180,20 +183,21 @@ static const GameTimeSubscription _money_trace_minute(GameTimeEvent::Minute, [](
 GOLD_MARKER = "GOLD_PANEL_PATCH"
 
 GOLD_STRUCT_CODE = r"""
-	/* GOLD_PANEL_PATCH: the gold trading panel is shown in the place of the profit graph. */
+	/* GOLD_PANEL_PATCH: the gold trading panel is shown in the place of the profit graph, and the news panel (market_news_gui.cpp) in the place of the profit graph when the gold panel is switched off. */
 	GoldPanel gold;         ///< The gold trading panel (state and actions).
-	bool show_gold = true;  ///< Whether the gold panel (plane 1) or the profit graph (plane 0) is shown.
+	MarketNewsPanel news;   ///< The news panel (plane 2): the random events of the market, written by the news writer.
+	bool show_gold = true;  ///< Whether the gold panel (plane 1) or the news panel (plane 2) is shown. The profit graph (plane 0) is not reachable any more.
 
-	/** Redraw regularly while the gold panel is shown: the price and the cash change all the time. */
+	/** Redraw regularly: the gold price and the cash change all the time, and the news come by themselves. */
 	const IntervalTimer<TimerWindow> gold_interval = {std::chrono::milliseconds(500), [this](auto) {
-		if (this->show_gold) this->SetDirty();
+		this->SetDirty();
 	}};
 
-	/** Show the gold trading panel (true) or the profit graph (false) in the main area of the window. */
+	/** Show the gold trading panel (true) or the news panel (false) in the main area of the window. */
 	void ShowGold(bool show)
 	{
 		this->show_gold = show;
-		this->GetWidget<NWidgetStacked>(WID_PHG_GOLD_SEL)->SetDisplayedPlane(show ? 1 : 0);
+		this->GetWidget<NWidgetStacked>(WID_PHG_GOLD_SEL)->SetDisplayedPlane(show ? 1 : 2);
 		this->SetWidgetLoweredState(WID_PHG_GOLD_TOGGLE, show);
 		this->SetDirty();
 	}
@@ -213,6 +217,7 @@ GOLD_STRUCT_CODE = r"""
 			case WID_PHG_GOLD_BUY_QTY: this->gold.DrawQuantity(r, true); return;
 			case WID_PHG_GOLD_SELL_QTY: this->gold.DrawQuantity(r, false); return;
 			case WID_PHG_GOLD_DIV: this->gold.DrawDivider(r); return;
+			case WID_PHG_NEWS: this->news.Draw(r); return;
 			default: break;
 		}
 		this->@BASE@::DrawWidget(r, widget);
@@ -225,6 +230,9 @@ GOLD_STRUCT_CODE = r"""
 			case WID_PHG_GOLD_INFO:
 				/* The GOLD button of the header (panel / price chart) and the range buttons of the chart. */
 				if (this->gold.ClickInfo(this->GetWidget<NWidgetBase>(WID_PHG_GOLD_INFO)->GetCurrentRect(), pt)) this->SetDirty();
+				return;
+			case WID_PHG_NEWS:
+				if (this->news.Click(this->GetWidget<NWidgetBase>(WID_PHG_NEWS)->GetCurrentRect(), pt)) this->SetDirty();
 				return;
 			case WID_PHG_GOLD_BUY_QTY: this->gold.AskQuantity(this, true); return;
 			case WID_PHG_GOLD_SELL_QTY: this->gold.AskQuantity(this, false); return;
@@ -243,7 +251,7 @@ GOLD_STRUCT_CODE = r"""
 
 """
 
-GOLD_NESTED_CODE = r"""		/* GOLD_PANEL_PATCH: the main area is the profit graph (plane 0) or the gold trading panel (plane 1). Both fill and resize with the window. */
+GOLD_NESTED_CODE = r"""		/* GOLD_PANEL_PATCH: the main area is the profit graph (plane 0, not shown any more), the gold trading panel (plane 1) or the news panel (plane 2). All fill and resize with the window. */
 		NWidget(NWID_SELECTION, @INVALID@, WID_PHG_GOLD_SEL),
 @GRAPH_LINE@			NWidget(NWID_VERTICAL),
 				NWidget(WWT_PANEL, @PANEL@, WID_PHG_GOLD_INFO), SetMinimalSize(576, 330), SetFill(1, 1), SetResize(1, 1),
@@ -263,11 +271,14 @@ GOLD_NESTED_CODE = r"""		/* GOLD_PANEL_PATCH: the main area is the profit graph 
 					EndContainer(),
 				EndContainer(),
 			EndContainer(),
+			NWidget(WWT_PANEL, @PANEL@, WID_PHG_NEWS), SetMinimalSize(576, 330), SetFill(1, 1), SetResize(1, 1),
+			EndContainer(),
 		EndContainer(),
 """
 
-GOLD_WIDGET_IDS = """	WID_PHG_GOLD_SEL,       ///< Selection: the profit graph or the gold trading panel (GOLD_PANEL_PATCH).
-	WID_PHG_GOLD_TOGGLE,    ///< Button: switch between the gold panel and the profit graph.
+GOLD_WIDGET_IDS = """	WID_PHG_GOLD_SEL,       ///< Selection: the profit graph, the gold trading panel or the news panel (GOLD_PANEL_PATCH).
+	WID_PHG_GOLD_TOGGLE,    ///< Button: switch between the gold panel and the news panel.
+	WID_PHG_NEWS,           ///< News panel: the lead story and the list of the latest events.
 	WID_PHG_GOLD_INFO,      ///< Gold panel: price, backing, credit standing and holdings.
 	WID_PHG_GOLD_BUY_QTY,   ///< Gold panel: ounces to buy (click to type).
 	WID_PHG_GOLD_BUY,       ///< Gold panel: Buy Gold button.
@@ -334,7 +345,7 @@ def patch_graph_files(tree):
     includes = list(re.finditer(r'^#include "widgets/graph_widget\.h"[^\n]*\n', g, re.M))
     if not includes:
         sys.exit('ERROR: #include "widgets/graph_widget.h" not found in graph_gui.cpp (anchor of the gold panel patch)')
-    g = g[:includes[-1].end()] + '#include "gold_panel.h" /* GOLD_PANEL_PATCH */\n' + g[includes[-1].end():]
+    g = g[:includes[-1].end()] + '#include "gold_panel.h" /* GOLD_PANEL_PATCH */\n#include "market_news_gui.h" /* GOLD_PANEL_PATCH */\n' + g[includes[-1].end():]
 
     # 3. the window: new members and handlers; the base class is read from the file
     m = re.search(r"^struct OperatingProfitGraphWindow : ([A-Za-z_]\w*) \{\n", g, re.M)
@@ -420,6 +431,46 @@ def patch_cargo_delivery(tree):
     text = ensure_include(text, '#include "gold_reserve.h" /* GOLD_CARGO_PATCH */', ['#include "central_bank.h"', '#include "stdafx.h"'])
     _write_like(target, text, crlf)
     print("economy.cpp: gold delivery hook added")
+
+
+CARGO_MARKET_MARKER = "CARGO_MARKET_PATCH"
+
+
+def patch_cargo_market(tree):
+    """The price of cargo follows supply and demand (cargo_market.cpp). Two hooks in economy.cpp, in place, at anchors (nothing is written when one is missing):
+    (1) the first line of CargoPayment::PayFinalDelivery counts the delivered units (supply);
+    (2) the last return of GetTransportedGoodsIncome (the income that OpenTTD calculates for a delivery; the transfers, the final payment and the
+        income estimates of the windows all use it) is multiplied by the price of the cargo."""
+    p = tree / "src" / "economy.cpp"
+    t, crlf = _read_lf(p)
+    if CARGO_MARKET_MARKER in t:
+        print("economy.cpp: cargo market hooks already there")
+        return
+    m = re.search(r"^void CargoPayment::PayFinalDelivery\(CargoType cargo, const CargoPacket \*cp, uint count, TileIndex current_tile\)\n\{\n", t, re.M)
+    if not m:
+        sys.exit("ERROR: CargoPayment::PayFinalDelivery not found in economy.cpp (anchor of the cargo market patch)")
+    t = t[:m.end()] + f"\tCargoMarketOnDelivery(cargo, count); /* {CARGO_MARKET_MARKER} */\n" + t[m.end():]
+
+    m = re.search(r"^Money GetTransportedGoodsIncome\(([^)]*)\)\n\{\n", t, re.M)
+    if not m:
+        sys.exit("ERROR: Money GetTransportedGoodsIncome(...) not found in economy.cpp (anchor of the cargo market patch)")
+    arg = re.search(r"CargoType\s+(\w+)", m.group(1))
+    if not arg:
+        sys.exit("ERROR: GetTransportedGoodsIncome has no CargoType parameter (cargo market patch)")
+    end = t.find("\n}\n", m.end())
+    if end < 0:
+        sys.exit("ERROR: end of GetTransportedGoodsIncome not found (cargo market patch)")
+    body = t[m.end():end]
+    rets = [r for r in re.finditer(r"^\treturn (.+);$", body, re.M) if r.group(1).strip() != "0"]
+    if not rets:
+        sys.exit("ERROR: no final return in GetTransportedGoodsIncome (cargo market patch)")
+    r = rets[-1]
+    new_ret = f"\treturn CargoMarketAdjustIncome({arg.group(1)}, {r.group(1)}); /* {CARGO_MARKET_MARKER} */"
+    body = body[:r.start()] + new_ret + body[r.end():]
+    t = t[:m.end()] + body + t[end:]
+    t = ensure_include(t, '#include "cargo_market.h" /* CARGO_MARKET_PATCH */', ['#include "central_bank.h"', '#include "stdafx.h"'])
+    _write_like(p, t, crlf)
+    print("economy.cpp: cargo market hooks added")
 
 
 VEHICLE_TIME_MARKER = "GAME_VEHICLE_TIME_PATCH"
@@ -604,6 +655,7 @@ def main(tree):
     patch_graph_files(tree)
     patch_graph_window_name(tree)
     patch_cargo_delivery(tree)
+    patch_cargo_market(tree)
     patch_vat(tree)
     patch_vehicle_time(tree)
     patch_world_time(tree)

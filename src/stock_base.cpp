@@ -11,6 +11,8 @@
 #include "3rdparty/fmt/format.h"
 #include "stock_base.h"
 #include "tax.h"
+#include "town_treasury.h"
+#include "cargo_market.h"
 #include "stock_gui.h"
 #include "central_bank.h"
 #include "gold_reserve.h"
@@ -18,6 +20,7 @@
 #include "economy_news.h"
 #include "RetailMarketManager.h"
 #include "game_time/game_time_manager.h"
+#include "market_events.h"
 #include "command_type.h"
 #include "company_base.h"
 #include "company_func.h"
@@ -54,6 +57,9 @@ void StockMarket::Reset()
 	_gold_reserve.Reset();
 	_valuables.Reset();
 	_payroll_news.Reset();
+	_town_treasury.Reset();
+	_cargo_market.Reset();
+	_market_events.Reset();
 	RetailMarketManager::Get().Reset(); // The retail investors start again with every new game and every load.
 	GameTimeManager::Get().Reset();
 	for (auto &list : this->daily) list.clear();
@@ -96,12 +102,12 @@ int64_t StockFixedToPrice(int64_t fixed)
 	return FixedToPrice(fixed);
 }
 
-/** The price a company is heading to: the valuation price, moved by the accumulated market impact. 0 when there is no valuation yet. */
+/** The price a company is heading to: the valuation price, moved by the accumulated market impact and by the sentiment of the news (market_events.h). 0 when there is no valuation yet. */
 static int64_t GetGoalFixed(size_t company)
 {
 	const int64_t base = _stock_market.base_fp[company];
 	if (base <= 0) return 0;
-	return std::max<int64_t>(STOCK_MIN_PRICE * STOCK_PRICE_SCALE, base * (STOCK_PPM + _stock_market.impact[company]) / STOCK_PPM);
+	return std::max<int64_t>(STOCK_MIN_PRICE * STOCK_PRICE_SCALE, base * (STOCK_PPM + _stock_market.impact[company] + MarketEventSentimentPpm(company)) / STOCK_PPM);
 }
 
 /**
@@ -1166,9 +1172,16 @@ void StockMarket::UpdateTick()
 	InvalidateWindowData(WC_STOCK_ORDER, 0);
 }
 
-/** Update the market once per economy day. */
-static const IntervalTimer<TimerGameEconomy> _stock_daily({TimerGameEconomy::DAY, TimerGameEconomy::Priority::COMPANY}, [](auto)
+/**
+ * The market update (valuation, fading of the impact, candles, dividends) now runs on the game clock, not on the economy day of OpenTTD.
+ * It runs every STOCK_UPDATE_EVERY_MINUTES game minutes (2 game minutes = 2 real seconds at normal speed; the old economy day was about 2.2 real
+ * seconds), so the pace is nearly the same as before. The clock is driven by the game ticks, so it stops when the game is paused, runs faster
+ * when the game is fast-forwarded, and moves with the console command stock_skip.
+ */
+static constexpr uint64_t STOCK_UPDATE_EVERY_MINUTES = 2;
+static const GameTimeSubscription _stock_daily(GameTimeEvent::Minute, [](const GameTimeSnapshot &now)
 {
+	if (now.total_minutes % STOCK_UPDATE_EVERY_MINUTES != 0) return;
 	_stock_market.UpdateDaily();
 });
 

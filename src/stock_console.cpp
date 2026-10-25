@@ -6,7 +6,7 @@
  */
 
 /**
- * @file stock_console.cpp Console commands of the mod for testing: 'stock_dev on|off' and 'stock_skip <time>'.
+ * @file stock_console.cpp Console commands of the mod for testing: 'stock_dev on|off', 'stock_skip <time>', 'stock_event [kind]' and 'cargo_prices'.
  * They are registered by apply_overlay.py, which adds one call to IConsoleStdLibRegister() of console_cmds.cpp.
  */
 
@@ -21,6 +21,10 @@
 #include "network/network.h"
 #include "window_func.h"
 #include "game_time/game_time_manager.h"
+#include "market_events.h"
+#include "cargo_market.h"
+#include "cargotype.h"
+#include "strings_func.h"
 
 #include "safeguards.h"
 
@@ -105,9 +109,62 @@ static bool ConStockSkip(std::span<std::string_view> argv)
 	return true;
 }
 
+/** Print the price of every cargo: what a unit pays now against the normal pay, and the deliveries behind it. Read only, works always. */
+static bool ConCargoPrices(std::span<std::string_view> argv)
+{
+	if (argv.empty()) {
+		IConsolePrint(CC_HELP, "Show the cargo prices of the mod. Usage: 'cargo_prices'. Per cargo: price now (100% = the normal pay of OpenTTD), normal and recent deliveries per day, game days counted.");
+		return true;
+	}
+	for (const CargoSpec *cs : CargoSpec::Iterate()) {
+		const size_t i = static_cast<size_t>(cs->Index());
+		if (i >= _cargo_market.cargo.size()) continue;
+		const cargomarket::CargoState &c = _cargo_market.cargo[i];
+		IConsolePrint(CC_DEFAULT, "{}: price {}.{:02}%  normal {}.{:02}/day  recent {}.{:02}/day  days {}", GetString(cs->name),
+				c.price_ppm / 10000, c.price_ppm % 10000 / 100, c.ref_x100 / 100, c.ref_x100 % 100, c.fast_x100 / 100, c.fast_x100 % 100, c.days);
+	}
+	return true;
+}
+
 /** Register the commands. Called from IConsoleStdLibRegister(). */
+/** 'stock_event [kind]': make a random market event now (test tool). Without a number the kind is drawn by weight. */
+static bool ConStockEvent(std::span<std::string_view> argv)
+{
+	if (argv.empty()) {
+		IConsolePrint(CC_HELP, "Make a market news event now (test tool, single player, after 'stock_dev on'). Usage: 'stock_event' (a random kind) or 'stock_event <0-19>' (a kind: 0 boom, 1 recession, 2 inflation, 3 rate cut hope, 4 war, 5 peace, 6 bank scare, 7 gold mine found, 8 mine strike, 9 central banks buy gold, 10 jewellery demand, 11 fuel up, 12 fuel down, 13 technology, 14 tourism, 15 storm, 16 company contract, 17 company accident, 18 company scandal, 19 company profit rumour).");
+		return true;
+	}
+	if (argv.size() > 2) return false;
+	if (_networking) {
+		IConsolePrint(CC_ERROR, "The event test tool works in single player only.");
+		return true;
+	}
+	if (!_stock_dev_tools) {
+		IConsolePrint(CC_ERROR, "Switch the test tools on first: 'stock_dev on'.");
+		return true;
+	}
+
+	int kind = -1;
+	if (argv.size() == 2) {
+		uint32_t value = 0;
+		const std::string_view text = argv[1];
+		const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+		if (error != std::errc() || end != text.data() + text.size() || value >= MARKET_EVENT_KIND_COUNT) {
+			IConsolePrint(CC_ERROR, "The kind must be a whole number from 0 to 19.");
+			return true;
+		}
+		kind = static_cast<int>(value);
+	}
+
+	const MarketEvent e = FireMarketEventNow(kind);
+	IConsolePrint(CC_DEFAULT, "Event {} made: kind {}, severity {}, gold {} ppm, shares {} ppm.", e.id, static_cast<int>(e.kind), static_cast<int>(e.severity), e.gold_ppm, e.share_ppm);
+	return true;
+}
+
 void RegisterStockConsoleCommands()
 {
 	IConsole::CmdRegister("stock_dev", ConStockDev);
 	IConsole::CmdRegister("stock_skip", ConStockSkip);
+	IConsole::CmdRegister("stock_event", ConStockEvent);
+	IConsole::CmdRegister("cargo_prices", ConCargoPrices);
 }

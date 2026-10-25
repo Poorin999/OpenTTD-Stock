@@ -194,8 +194,16 @@ void GoldFromDelivery(CargoType cargo, uint count)
 	const CargoLabel label = CargoSpec::Get(cargo)->label;
 	if (label != CT_GOLD && label != CargoLabel{'VALU'}) return;
 	if (_gold_reserve.price_cents <= 0) return; // The market has not started.
-	_gold_reserve.market_stock_oz = std::min<int64_t>(GoldReserveManager::MARKET_STOCK_CAP,
-			_gold_reserve.market_stock_oz + static_cast<int64_t>(count) * GoldReserveManager::OUNCES_PER_DELIVERED_UNIT);
+
+	/* Mines react to the market: no room, no gold. A stock above the cap (older savegame) is left as it is, never cut. */
+	const int64_t room = GoldReserveManager::MARKET_STOCK_CAP - _gold_reserve.market_stock_oz;
+	if (room <= 0) return;
+	int64_t ounces = static_cast<int64_t>(count) * GoldReserveManager::OUNCES_PER_DELIVERED_UNIT
+			* GoldReserveManager::MineYieldPpm(_gold_reserve.market_stock_oz) / GoldReserveManager::PPM;
+	ounces = std::min({ounces, room, GoldReserveManager::MINE_DAILY_INTAKE_MAX_OZ - _gold_reserve.mine_intake_today_oz});
+	if (ounces <= 0) return;
+	_gold_reserve.market_stock_oz += ounces;
+	_gold_reserve.mine_intake_today_oz += ounces;
 }
 
 /** One day of the gold market: the price moves 5% of the way to the target that the economy of the game gives. */
@@ -207,6 +215,7 @@ void GoldReserveManager::UpdateDaily()
 	}
 	if (!this->EnsureStarted()) return;
 	this->spread_ppm = this->ComputeSpreadPpm(); // Once per game day: the spread is stable inside a day.
+	this->mine_intake_today_oz = 0;               // A new day: the mines may add gold again.
 
 	/* 1. Inflation of the game (1.0 = 1 << 16). */
 	const int64_t inflation = std::clamp<int64_t>((static_cast<int64_t>(_economy.inflation_prices) * PPM) >> 16, PPM / 2, 20 * PPM);
