@@ -196,6 +196,60 @@ int main()
 		  CHECK(a.freight_ppm == b.freight_ppm && a.backlog_x100 == b.backlog_x100); }
 	}
 
+	/* 14b. People (passengers, mail): elasticity 0 = carrying more never lowers the price; the backlog (people waiting) raises it. */
+	{
+		auto settled = []() { CargoState s; Run(s, 200, 200); return s; };
+		/* Twice the normal deliveries with elasticity 0: the supply price does not fall (goods with 0.8 would fall). */
+		{ CargoState p = settled(), g = settled();
+		  for (int i = 0; i < 60; i++) { p.delivered_today = 400; UpdateDay(p, 0, PPM); g.delivered_today = 400; UpdateDay(g, 800'000, PPM); }
+		  CHECK(p.price_ppm >= 990'000); CHECK(g.price_ppm < 900'000); }
+		/* A big backlog raises the rate more with the people weight than with the normal weight, still inside the limits. */
+		{ CargoState a = settled(), b = settled();
+		  for (int i = 0; i < 120; i++) {
+			  a.delivered_today = 200; UpdateDay(a, 0, PPM); a.waiting_today = 1600; UpdateFreight(a, 0, BACKLOG_WEIGHT_PEOPLE_PPM);
+			  b.delivered_today = 200; UpdateDay(b, 0, PPM); b.waiting_today = 1600; UpdateFreight(b, 0);
+		  }
+		  CHECK(a.freight_ppm > b.freight_ppm); CHECK(a.freight_ppm <= FREIGHT_MAX_PPM); CHECK(a.freight_ppm > 1'300'000); }
+		/* Nobody waits: the fare falls, not below the limit. */
+		{ CargoState s = settled();
+		  for (int i = 0; i < 120; i++) { s.delivered_today = 200; UpdateDay(s, 0, PPM); s.waiting_today = 0; UpdateFreight(s, 0, BACKLOG_WEIGHT_PEOPLE_PPM); }
+		  CHECK(s.freight_ppm < 750'000); CHECK(s.freight_ppm >= FREIGHT_MIN_PPM); }
+		/* Weight is limited: a silly weight cannot pass the limits. */
+		CHECK(FreightGoal(PPM, 0, 5 * PPM) <= FREIGHT_MAX_PPM);
+		CHECK(FreightGoal(PPM, 0, -PPM) == PPM);
+		CHECK(FreightGoal(PPM, 0, BACKLOG_WEIGHT_PEOPLE_PPM) == 1'500'000);
+	}
+
+	/* 15. Fuel index maths (step 4). */
+	{
+		CHECK(FuelExcessPpm(PPM) == 0 && FuelExcessPpm(700'000) == 0 && FuelExcessPpm(INT64_MIN) == 0);   // at or below the plain price: no excess
+		CHECK(FuelExcessPpm(1'150'000) == 150'000);
+		CHECK(FuelExcessPpm(INT64_MAX) == FUEL_EXCESS_MAX_PPM);
+		CHECK(FuelIncomeFactorPpm(PPM) == PPM && FuelIncomeFactorPpm(600'000) == PPM);                    // a drop gives no discount
+		CHECK(FuelIncomeFactorPpm(1'100'000) == 1'060'000);                                               // 60% of +10%
+		CHECK(FuelIncomeFactorPpm(INT64_MAX) == 1'240'000);                                               // at most +24%
+		/* The cost is always bigger than the surcharge it is passed on with: passing on 60% means 40% stays with the company. */
+		{
+			bool ok = true;
+			for (int64_t idx = PPM; idx <= 1'400'000; idx += 10'000) {
+				const int64_t excess = FuelExcessPpm(idx), pass = FuelIncomeFactorPpm(idx) - PPM;
+				if (pass * 100 != excess * FUEL_PASS_ON_PERCENT) ok = false;
+				if (pass > excess) ok = false;
+			}
+			CHECK(ok);
+		}
+		CHECK(FuelDailyCost(1000, PPM) == 0);
+		CHECK(FuelDailyCost(1000, 1'100'000) == 100);
+		CHECK(FuelDailyCost(1000, 1'400'000) == 400);
+		CHECK(FuelDailyCost(1000, 9'000'000) == 400);                                                     // limited
+		CHECK(FuelDailyCost(-5, 1'200'000) == 0);
+		CHECK(FuelDailyCost(INT64_MAX, INT64_MAX) > 0);                                                   // no overflow
+		/* Monotonic in the index. */
+		{ bool mono = true; int64_t last = 0; for (int64_t idx = 500'000; idx <= 1'600'000; idx += 10'000) { const int64_t c = FuelDailyCost(5000, idx); if (c < last) mono = false; last = c; } CHECK(mono); }
+		/* Total band with the surcharge: 0.5 x 0.7 .. 2.0 x 1.5 x 1.24 of the plain pay. */
+		CHECK(ApplyPrice(ApplyPrice(ApplyPrice(ApplyPrice(1000, PRICE_MAX_PPM), FREIGHT_MAX_PPM), FuelIncomeFactorPpm(INT64_MAX)), LOCAL_MAX_PPM) == 4464);
+	}
+
 	std::printf("%d checks, %d failed\n", _checks, _fail);
 	return _fail == 0 ? 0 : 1;
 }

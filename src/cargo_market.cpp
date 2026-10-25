@@ -25,14 +25,28 @@ CargoMarket _cargo_market;
 
 namespace {
 
-/** How strongly the price of a cargo answers to supply, in ppm. Passengers and food react a lot, coal and ore little; unknown cargo 0.5. */
+/** Passengers and mail: people are not goods. */
+bool IsPeopleCargo(const CargoSpec *cs)
+{
+	return cs->label == CargoLabel{'PASS'} || cs->label == CargoLabel{'MAIL'};
+}
+
+/** How strongly the price of a cargo answers to supply, in ppm. Food reacts a lot, coal and ore little; unknown cargo 0.5.
+ *  People (passengers, mail) 0: carrying more people does not lower the fare; the backlog of people waiting moves it (freight rate). */
 int64_t ElasticityPpm(const CargoSpec *cs)
 {
 	const CargoLabel l = cs->label;
-	if (l == CargoLabel{'PASS'} || l == CargoLabel{'FOOD'} || l == CargoLabel{'FRUT'} || l == CargoLabel{'MILK'}) return 800'000;
-	if (l == CargoLabel{'MAIL'} || l == CargoLabel{'GOOD'}) return 550'000;
+	if (IsPeopleCargo(cs)) return 0;
+	if (l == CargoLabel{'FOOD'} || l == CargoLabel{'FRUT'} || l == CargoLabel{'MILK'}) return 800'000;
+	if (l == CargoLabel{'GOOD'}) return 550'000;
 	if (l == CargoLabel{'COAL'} || l == CargoLabel{'IORE'} || l == CargoLabel{'CORE'} || l == CargoLabel{'OIL_'} || l == CargoLabel{'WOOD'}) return 350'000;
 	return 500'000;
+}
+
+/** Units of cargo waiting in one GoodsEntry (OpenTTD 15: the cargo list is in GetData(), which exists only when something is stored). */
+uint WaitingUnits(const GoodsEntry &ge)
+{
+	return ge.HasData() ? ge.GetData().cargo.TotalCount() : 0;
 }
 
 /** Gold and valuables are priced by the gold market, not here. */
@@ -98,7 +112,7 @@ void CargoMarket::UpdateDaily()
 		for (const CargoSpec *cs : CargoSpec::Iterate()) {
 			const size_t i = static_cast<size_t>(cs->Index());
 			if (i >= waiting.size()) continue;
-			waiting[i] += st->goods[i].CargoTotalCount();
+			waiting[i] += WaitingUnits(st->goods[i]);
 		}
 	}
 	cargomarket::UpdateFleet(this->fleet, CountAllVehicles());
@@ -114,7 +128,7 @@ void CargoMarket::UpdateDaily()
 		cargomarket::UpdateDay(this->cargo[i], ElasticityPpm(cs), outside_cargo);
 		/* Freight rate, part 2: after the day of the price, because it uses the updated normal level and the day count. */
 		this->cargo[i].waiting_today = waiting[i];
-		cargomarket::UpdateFreight(this->cargo[i], fleet_growth);
+		cargomarket::UpdateFreight(this->cargo[i], fleet_growth, IsPeopleCargo(cs) ? cargomarket::BACKLOG_WEIGHT_PEOPLE_PPM : cargomarket::BACKLOG_WEIGHT_PPM);
 	}
 }
 
@@ -127,8 +141,12 @@ void CargoMarketOnDelivery(CargoType cargo_type, uint count)
 
 Money CargoMarketAdjustIncome(CargoType cargo_type, Money income)
 {
-	/* The price (supply and demand) and the freight rate (the service) are one factor: 35% .. 300% of the plain pay together. */
-	const int64_t factor = _cargo_market.GetPricePpm(cargo_type) * _cargo_market.GetFreightPpm(cargo_type) / cargomarket::PPM;
+	/* The price (supply and demand) and the freight rate (the service) are one factor: 35% .. 300% of the plain pay together.
+	 * The fuel surcharge (60% of the part of the fuel index above 1.0, at most +24%) comes on top, for every cargo except gold and valuables. */
+	int64_t factor = _cargo_market.GetPricePpm(cargo_type) * _cargo_market.GetFreightPpm(cargo_type) / cargomarket::PPM;
+	if (!CargoMarketIsGoldCargo(cargo_type)) {
+		factor = factor * cargomarket::FuelIncomeFactorPpm(_market_events.FuelIndexPpm(static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes()))) / cargomarket::PPM;
+	}
 	return static_cast<Money>(cargomarket::ApplyPrice(static_cast<int64_t>(income), factor));
 }
 
@@ -147,6 +165,11 @@ Money CargoMarketAdjustLocalIncome(CargoType cargo_type, StationID dest, Money i
 {
 	if (!Station::IsValidID(dest)) return income;
 	return static_cast<Money>(cargomarket::ApplyPrice(static_cast<int64_t>(income), CargoMarketLocalFactorPpm(cargo_type, Station::Get(dest)->town->index)));
+}
+
+bool CargoMarketIsPeopleCargo(CargoType cargo_type)
+{
+	return IsValidCargoType(cargo_type) && IsPeopleCargo(CargoSpec::Get(cargo_type));
 }
 
 bool CargoMarketIsGoldCargo(CargoType cargo_type)

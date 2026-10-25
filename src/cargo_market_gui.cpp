@@ -136,13 +136,21 @@ struct CargoPricesWindow : Window {
 				continue;
 			}
 			const cargomarket::CargoState &c = _cargo_market.cargo[static_cast<size_t>(ct)];
-			DrawString(col_price, col_news - 4, y, PercentText(c.price_ppm), PriceColour(c.price_ppm), SA_RIGHT);
+			/* The price shown is the price of supply and demand times the freight rate (the backlog), the same factor the delivery pays. */
+			const int64_t shown_ppm = c.price_ppm * c.freight_ppm / cargomarket::PPM;
+			DrawString(col_price, col_news - 4, y, PercentText(shown_ppm), PriceColour(shown_ppm), SA_RIGHT);
 
 			const int64_t push = CargoMarketNewsPushPpm(ct);
 			if (push != 0) DrawString(col_news, col_state - 4, y, fmt::format("{}{}", push < 0 ? "-" : "+", PercentText(push < 0 ? -push : push)), push > 0 ? TC_GREEN : TC_RED, SA_RIGHT);
 
 			if (c.days <= cargomarket::BASELINE_DAYS) {
 				DrawString(col_state + 8, col_pays - 4, y, fmt::format("กำลังวัด {}/{} วัน", c.days, cargomarket::BASELINE_DAYS), TC_GREY, SA_LEFT);
+			} else if (CargoMarketIsPeopleCargo(ct)) {
+				/* People: the market state is the crowd at the stations, not the units delivered. */
+				const int64_t pressure = cargomarket::BacklogPressurePpm(c.backlog_x100, c.ref_x100);
+				if (pressure > cargomarket::STATE_BAND_PPM) DrawString(col_state + 8, col_pays - 4, y, "คนรอแน่น (ราคาขึ้น)", TC_GREEN, SA_LEFT);
+				else if (pressure < -cargomarket::STATE_BAND_PPM) DrawString(col_state + 8, col_pays - 4, y, "คนรอน้อย (ราคาลด)", TC_RED, SA_LEFT);
+				else DrawString(col_state + 8, col_pays - 4, y, "ปกติ", TC_GREY, SA_LEFT);
 			} else {
 				switch (cargomarket::SupplyState(c.fast_x100, c.ref_x100, c.days)) {
 					case 1: DrawString(col_state + 8, col_pays - 4, y, "ล้นตลาด (ราคาลด)", TC_RED, SA_LEFT); break;
@@ -152,7 +160,7 @@ struct CargoPricesWindow : Window {
 			}
 			/* What the delivery pays now: the base pay of OpenTTD for 10 units over 20 tiles without delay, times the price of the cargo
 			 * (GetTransportedGoodsIncome has the price in it). It is what the old payment rates graph was for. */
-			DrawString(col_pays, col_ref - 4, y, GetString(STR_JUST_CURRENCY_LONG, GetTransportedGoodsIncome(CARGO_REF_UNITS, CARGO_REF_TILES, 0, ct)), PriceColour(c.price_ppm), SA_RIGHT);
+			DrawString(col_pays, col_ref - 4, y, GetString(STR_JUST_CURRENCY_LONG, GetTransportedGoodsIncome(CARGO_REF_UNITS, CARGO_REF_TILES, 0, ct)), PriceColour(shown_ppm), SA_RIGHT);
 			DrawString(col_ref, right, y, fmt::format("{} / {}", UnitsText(c.ref_x100), UnitsText(c.fast_x100)), TC_GREY, SA_RIGHT);
 			y += row_h;
 		}

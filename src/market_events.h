@@ -203,6 +203,11 @@ static constexpr int64_t MARKET_PPM = 1'000'000;
 static constexpr int64_t MARKET_MINUTES_PER_DAY = 24 * 60;
 static constexpr int64_t MARKET_CARGO_NEWS_DAYS = 12;          ///< A cargo news item moves the price goal of the cargo for this many game days (fading in a straight line).
 static constexpr int64_t MARKET_CARGO_PUSH_MAX_PPM = 300'000;  ///< All the cargo news together never moves a price goal by more than 30%.
+static constexpr int64_t MARKET_FUEL_NEWS_DAYS = 30;           ///< A fuel news item moves the fuel index for this many game days (fading in a straight line): longer than a cargo news, a fuel price changes slowly.
+static constexpr int64_t MARKET_FUEL_SPIKE_PPM = 150'000;      ///< A fuel spike at severity 1 raises the fuel index by 15% (25.5% and 37.5% at severity 2 and 3).
+static constexpr int64_t MARKET_FUEL_DROP_PPM = 100'000;       ///< A fuel drop at severity 1 lowers the fuel index by 10% (17% and 25% at severity 2 and 3).
+static constexpr int64_t MARKET_FUEL_MAX_PPM = 400'000;        ///< The fuel index is never more than 40% above ...
+static constexpr int64_t MARKET_FUEL_MIN_PPM = -300'000;       ///< ... or 30% below the plain price.
 static constexpr int64_t MARKET_TOWN_NEWS_DAYS = 10;           ///< A town boom lasts this many game days (fading in a straight line).
 static constexpr int64_t MARKET_TOWN_BOOST_PPM = 100'000;      ///< Growth boost of a town boom at severity 1 (10% faster growth); 17% and 25% at severity 2 and 3.
 static constexpr int64_t MARKET_TOWN_BOOST_MAX_PPM = 300'000;  ///< All the town news together never boost a town by more than this (the same limit as the wealth effect, retail::MAX_BOOST_PPM).
@@ -251,6 +256,15 @@ inline MarketCargoEffect MarketCargoEffectOf(MarketEventKind kind, int severity)
 	e.group = g;
 	e.push_ppm = base * MarketSeverityPercent(severity) / 100;
 	return e;
+}
+
+/** The change of the fuel index that one fuel event brings, in ppm at the moment it happens (positive: fuel costs more). 0 for the other kinds. */
+inline int64_t MarketFuelEffectPpm(MarketEventKind kind, int severity)
+{
+	const int64_t pct = MarketSeverityPercent(severity);
+	if (kind == MarketEventKind::FuelSpike) return MARKET_FUEL_SPIKE_PPM * pct / 100;
+	if (kind == MarketEventKind::FuelDrop) return -MARKET_FUEL_DROP_PPM * pct / 100;
+	return 0;
 }
 
 /** The name of a group of cargo, for the story. */
@@ -773,6 +787,24 @@ struct MarketEvents {
 			sum += fx.push_ppm * MarketFadePpm(age, window) / MARKET_PPM;
 		}
 		return std::clamp<int64_t>(sum, -MARKET_CARGO_PUSH_MAX_PPM, MARKET_CARGO_PUSH_MAX_PPM);
+	}
+
+	/**
+	 * The fuel index at game minute `minute`, in ppm, 1.0 = MARKET_PPM = the plain price of fuel: the fuel news of the last MARKET_FUEL_NEWS_DAYS days,
+	 * each fading in a straight line, added up and limited to MARKET_FUEL_MIN_PPM .. MARKET_FUEL_MAX_PPM around 1.0. Read from the log, nothing is saved for it.
+	 */
+	int64_t FuelIndexPpm(int64_t minute) const
+	{
+		const int64_t window = MARKET_FUEL_NEWS_DAYS * MARKET_MINUTES_PER_DAY;
+		int64_t sum = 0;
+		for (const MarketEvent &e : this->log) {
+			const int64_t age = minute - e.minute;
+			if (age >= window) break; // newest first
+			const int64_t fx = MarketFuelEffectPpm(e.kind, e.severity);
+			if (fx == 0) continue;
+			sum += fx * MarketFadePpm(age, window) / MARKET_PPM;
+		}
+		return MARKET_PPM + std::clamp<int64_t>(sum, MARKET_FUEL_MIN_PPM, MARKET_FUEL_MAX_PPM);
 	}
 
 	/** The growth boost of a town (index of the town) from town booms, in ppm, at game minute `minute`. */

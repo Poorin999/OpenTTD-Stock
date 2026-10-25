@@ -202,6 +202,9 @@ static void DrawAccountStatement(const Rect &r, int offset)
 	booked("Dividend Tax 10%", LedgerItem::TaxDividend);
 	booked("Income Tax 15% (profit of the quarter)", LedgerItem::TaxIncome);
 
+	category("Fuel (paid to the market, not a tax)");
+	booked("Fuel Cost (extra, when fuel is dear)", LedgerItem::FuelCost);
+
 	category("Assets & Operations");
 	yearly("Vehicle & Infrastructure Running Costs", {EXPENSES_TRAIN_RUN, EXPENSES_ROADVEH_RUN, EXPENSES_AIRCRAFT_RUN, EXPENSES_SHIP_RUN, EXPENSES_PROPERTY});
 	yearly("Construction & Land Purchase", {EXPENSES_CONSTRUCTION});
@@ -357,6 +360,9 @@ static void DrawArchiveStatement(const Rect &r, int age)
 	booked("Capital Gains Tax 15% (trades & gold)", LedgerItem::TaxCapitalGains);
 	booked("Dividend Tax 10%", LedgerItem::TaxDividend);
 	booked("Income Tax 15% (profit of the quarter)", LedgerItem::TaxIncome);
+
+	category("Fuel (paid to the market, not a tax)");
+	booked("Fuel Cost (extra, when fuel is dear)", LedgerItem::FuelCost);
 
 	category("Assets & Operations");
 	yearly("Vehicle & Infrastructure Running Costs", LedgerItem::YearRunning, {EXPENSES_TRAIN_RUN, EXPENSES_ROADVEH_RUN, EXPENSES_AIRCRAFT_RUN, EXPENSES_SHIP_RUN, EXPENSES_PROPERTY});
@@ -575,6 +581,7 @@ struct CentralBankWindow : Window {
 			case LedgerItem::GoldSell:        return CbText("ขายทอง", "Gold sale");
 			case LedgerItem::TaxLand:         return CbText("ภาษีที่ดิน", "Land tax");
 			case LedgerItem::TaxTransport:    return CbText("ภาษีขนส่ง", "Transport tax");
+			case LedgerItem::FuelCost:        return CbText("ค่าน้ำมันส่วนเพิ่ม", "Fuel cost");
 			case LedgerItem::TaxVat:          return CbText("ภาษีมูลค่าเพิ่ม (VAT)", "VAT");
 			case LedgerItem::TaxCapitalGains: return CbText("ภาษีกำไรจากการเทรด", "Capital gains tax");
 			case LedgerItem::TaxDividend:     return CbText("ภาษีเงินปันผล", "Dividend tax");

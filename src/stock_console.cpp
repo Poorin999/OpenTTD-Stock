@@ -120,7 +120,7 @@ static bool ConStockSkip(std::span<std::string_view> argv)
 static bool ConCargoPrices(std::span<std::string_view> argv)
 {
 	if (argv.empty()) {
-		IConsolePrint(CC_HELP, "Show the cargo prices of the mod. Usage: 'cargo_prices [town id]'. Per cargo: price now (100% = the normal pay of OpenTTD), the freight rate (the price of the service: waiting cargo and fleet size), normal and recent deliveries per day, game days counted. Then the push of the news on each group of cargo. With a town id: also the local factor of that town for each cargo (the demand of the town of the destination station) and the price a delivery there pays.");
+		IConsolePrint(CC_HELP, "Show the cargo prices of the mod. Usage: 'cargo_prices [town id]'. Per cargo: price now (100% = the normal pay of OpenTTD), the freight rate (the price of the service: waiting cargo and fleet size), normal and recent deliveries per day, game days counted. Then the fuel index and the push of the news on each group of cargo. With a town id: also the local factor of that town for each cargo (the demand of the town of the destination station) and the price a delivery there pays.");
 		return true;
 	}
 	/* Optional town id: show the local factor of that town too. */
@@ -153,6 +153,13 @@ static bool ConCargoPrices(std::span<std::string_view> argv)
 	}
 	/* The push of the news on the price goal of each group of cargo (coal shortage, bad harvest ...), now. */
 	const int64_t minute = static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes());
+	{
+		/* The fuel index (news FuelSpike / FuelDrop): above 1.0 every running vehicle pays an extra daily cost and the income of a delivery rises by 60% of the excess. */
+		const int64_t fuel = _market_events.FuelIndexPpm(minute);
+		const int64_t surcharge = cargomarket::FuelIncomeFactorPpm(fuel) - cargomarket::PPM;
+		IConsolePrint(CC_DEFAULT, "fuel index {}.{:02}%  extra daily cost {}.{:02}% of the base cost per vehicle  income surcharge +{}.{:02}%", fuel / 10000, fuel % 10000 / 100,
+				cargomarket::FuelExcessPpm(fuel) / 10000, cargomarket::FuelExcessPpm(fuel) % 10000 / 100, surcharge / 10000, surcharge % 10000 / 100);
+	}
 	for (size_t g = static_cast<size_t>(MarketCargoGroup::Oil); g < static_cast<size_t>(MarketCargoGroup::Count); g++) {
 		const int64_t push = _market_events.CargoPushPpm(static_cast<MarketCargoGroup>(g), minute);
 		IConsolePrint(CC_DEFAULT, "news push on {}: {}{}.{:02}%", MarketCargoGroupName(static_cast<MarketCargoGroup>(g)), push < 0 ? "-" : "+", (push < 0 ? -push : push) / 10000, (push < 0 ? -push : push) % 10000 / 100);

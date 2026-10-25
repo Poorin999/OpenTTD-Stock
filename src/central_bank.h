@@ -573,6 +573,7 @@ enum class LedgerItem : uint8_t {
 	TaxCapitalGains, ///< Tax on the profit of closed trades and gold sales.
 	TaxDividend,     ///< Tax on dividends received.
 	TaxIncome,       ///< Income tax on the profit of the quarter.
+	FuelCost,        ///< Extra fuel cost per running vehicle per game day while the fuel index is above its plain price (tax.cpp, the cost step of the cargo prices). Expense, NOT paid to the central bank. Appended last: the index is saved.
 	End,
 };
 static constexpr size_t LEDGER_ITEMS = static_cast<size_t>(LedgerItem::End);

@@ -12,6 +12,8 @@
  *  - Land tax:       every game day, per tile that the company owns (stations, rail, road, bridges, water, objects, bought land).
  *                    A station tile counts 4, an object 3, other tiles 1; a tile near a town is worth more (up to +500% for a big town).
  *  - Transport tax:  every game day, per vehicle that is not stopped in a depot (train, road vehicle, ship, aircraft each have a rate).
+ *  - Fuel cost:      not a tax: every game day, per vehicle that runs, base cost x the part of the fuel index above 1.0 (news FuelSpike / FuelDrop, see
+ *                    CargoMarketMath.h). Booked as LedgerItem::FuelCost, NOT paid to the central bank. 0 while fuel is at or below its plain price.
  *  - VAT:            7% of every income from cargo delivery, taken when the income is paid.
  *  - Capital gains:  15% of every profit of a closed trade and of a gold sale, taken when the profit is paid.
  *  - Dividend tax:   10% of dividends that a company receives.

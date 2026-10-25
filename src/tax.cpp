@@ -12,6 +12,8 @@
 #include "openttd.h"
 #include "game_time/game_time_manager.h"
 #include "central_bank.h"
+#include "CargoMarketMath.h"
+#include "market_events.h"
 #include "command_func.h"
 #include "company_base.h"
 #include "company_func.h"
@@ -43,6 +45,17 @@ static void BookTax(CompanyID company, LedgerItem item, int64_t amount)
 	}
 	RecordLedger(company, item, -amount);
 	_central_bank.trading_revenue_cents += amount * 100;
+}
+
+/** An expense that is NOT a tax: the money goes out of the company cash (the "Other" line) and into the ledger, not to the central bank. */
+static void BookFuel(CompanyID company, int64_t amount)
+{
+	if (amount <= 0 || !Company::IsValidID(company)) return;
+	{
+		AutoRestoreBackup cur_company(_current_company, company);
+		SubtractMoneyFromCompany(CommandCost(EXPENSES_OTHER, Money(amount)));
+	}
+	RecordLedger(company, LedgerItem::FuelCost, -amount);
 }
 
 void ChargeVat(CompanyID company, int64_t income)
@@ -103,21 +116,27 @@ static const GameTimeSubscription _tax_daily(GameTimeEvent::Day, [](const GameTi
 
 	/* Vehicles: every primary vehicle that is not stopped in a depot. */
 	std::array<int64_t, MAX_COMPANIES> transport{};
+	std::array<int64_t, MAX_COMPANIES> fuel_base{}; // base fuel cost of the same vehicles (for an excess of 100%)
 	for (const Vehicle *v : Vehicle::Iterate()) {
 		if (!v->IsPrimaryVehicle() || v->IsStoppedInDepot() || !Company::IsValidID(v->owner)) continue;
-		int64_t rate = 0;
+		int64_t rate = 0, fuel = 0;
 		switch (v->type) {
-			case VEH_TRAIN:    rate = TAX_TRAIN_DAY; break;
-			case VEH_ROAD:     rate = TAX_ROADVEH_DAY; break;
-			case VEH_SHIP:     rate = TAX_SHIP_DAY; break;
-			case VEH_AIRCRAFT: rate = TAX_AIRCRAFT_DAY; break;
+			case VEH_TRAIN:    rate = TAX_TRAIN_DAY;    fuel = cargomarket::FUEL_TRAIN_DAY; break;
+			case VEH_ROAD:     rate = TAX_ROADVEH_DAY;  fuel = cargomarket::FUEL_ROADVEH_DAY; break;
+			case VEH_SHIP:     rate = TAX_SHIP_DAY;     fuel = cargomarket::FUEL_SHIP_DAY; break;
+			case VEH_AIRCRAFT: rate = TAX_AIRCRAFT_DAY; fuel = cargomarket::FUEL_AIRCRAFT_DAY; break;
 			default: break;
 		}
 		transport[v->owner.base()] += rate;
+		fuel_base[v->owner.base()] += fuel;
 	}
+
+	/* Fuel: only while the fuel index is above its plain price. The index is read from the news log at this game minute. */
+	const int64_t fuel_index = _market_events.FuelIndexPpm(static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes()));
 
 	for (const Company *c : Company::Iterate()) {
 		const size_t i = c->index.base();
+		BookFuel(c->index, ScaleByPriceIndex(cargomarket::FuelDailyCost(fuel_base[i], fuel_index)));
 		BookTax(c->index, LedgerItem::TaxLand, ScaleByPriceIndex(land[i] * TAX_LAND_PER_UNIT_DAY / 100));
 		BookTax(c->index, LedgerItem::TaxTransport, ScaleByPriceIndex(transport[i]));
 	}

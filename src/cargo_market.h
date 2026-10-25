@@ -55,6 +55,9 @@ Money CargoMarketAdjustLocalIncome(CargoType cargo_type, StationID dest, Money i
 /** For the windows: true for the cargo that the gold market prices (it has no cargo price of its own). */
 bool CargoMarketIsGoldCargo(CargoType cargo_type);
 
+/** For the windows: true for passengers and mail (their price follows the people waiting, not the units delivered). */
+bool CargoMarketIsPeopleCargo(CargoType cargo_type);
+
 /** For the windows: the push of the news on the price goal of this cargo now, in ppm (0 when no news moves this cargo). */
 int64_t CargoMarketNewsPushPpm(CargoType cargo_type);
 

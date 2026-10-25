@@ -491,6 +491,34 @@ int main()
 		CHECK(!MarketKindHasTownField(MarketEventKind::TownBoom)); // a boom keeps its town in fact_ppm (old savegames)
 	}
 
+	/* Fuel index from the log (step 4 of the cargo prices). */
+	{
+		auto ev = [](MarketEventKind k, int sev, int64_t day) { MarketEvent e; e.kind = k; e.severity = static_cast<uint8_t>(sev); e.minute = day * MARKET_MINUTES_PER_DAY; return e; };
+		MarketEvents m;
+		CHECK(m.FuelIndexPpm(0) == MARKET_PPM);                                                  // an empty log: plain price
+		m.log.push_front(ev(MarketEventKind::FuelSpike, 1, 10));                                 // the log keeps the newest in front
+		CHECK(m.FuelIndexPpm(10 * MARKET_MINUTES_PER_DAY) == MARKET_PPM + MARKET_FUEL_SPIKE_PPM); // the day it happens: the full effect
+		const int64_t half = m.FuelIndexPpm((10 + MARKET_FUEL_NEWS_DAYS / 2) * MARKET_MINUTES_PER_DAY);
+		CHECK(half > MARKET_PPM + MARKET_FUEL_SPIKE_PPM / 2 - 2 && half < MARKET_PPM + MARKET_FUEL_SPIKE_PPM / 2 + 2);   // half way: half the effect
+		CHECK(m.FuelIndexPpm((10 + MARKET_FUEL_NEWS_DAYS) * MARKET_MINUTES_PER_DAY) == MARKET_PPM);                      // after the window: gone
+		CHECK(m.FuelIndexPpm(5 * MARKET_MINUTES_PER_DAY) == MARKET_PPM);                          // before it happened (age < 0): nothing
+		/* A drop takes back a spike. */
+		m.log.push_front(ev(MarketEventKind::FuelDrop, 1, 10));
+		CHECK(m.FuelIndexPpm(10 * MARKET_MINUTES_PER_DAY) == MARKET_PPM + MARKET_FUEL_SPIKE_PPM - MARKET_FUEL_DROP_PPM);
+		/* Big spikes together are limited; big drops too. */
+		MarketEvents big;
+		for (int i = 0; i < 6; i++) big.log.push_front(ev(MarketEventKind::FuelSpike, 3, 10 + i));
+		CHECK(big.FuelIndexPpm(16 * MARKET_MINUTES_PER_DAY) == MARKET_PPM + MARKET_FUEL_MAX_PPM);
+		MarketEvents low;
+		for (int i = 0; i < 6; i++) low.log.push_front(ev(MarketEventKind::FuelDrop, 3, 10 + i));
+		CHECK(low.FuelIndexPpm(16 * MARKET_MINUTES_PER_DAY) == MARKET_PPM + MARKET_FUEL_MIN_PPM);
+		/* Other kinds do not move it; the effect grows with the severity. */
+		MarketEvents other; other.log.push_front(ev(MarketEventKind::CoalShortage, 3, 10));
+		CHECK(other.FuelIndexPpm(10 * MARKET_MINUTES_PER_DAY) == MARKET_PPM);
+		CHECK(MarketFuelEffectPpm(MarketEventKind::FuelSpike, 1) < MarketFuelEffectPpm(MarketEventKind::FuelSpike, 2) && MarketFuelEffectPpm(MarketEventKind::FuelSpike, 2) < MarketFuelEffectPpm(MarketEventKind::FuelSpike, 3));
+		CHECK(MarketFuelEffectPpm(MarketEventKind::FuelDrop, 2) < 0 && MarketFuelEffectPpm(MarketEventKind::Recession, 3) == 0);
+	}
+
 	std::printf("%d checks, %d failed\n", g_checks, g_fail);
 	return g_fail == 0 ? 0 : 1;
 }
