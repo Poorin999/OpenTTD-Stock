@@ -48,7 +48,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "gold_panel.h": "src", "gold_panel.cpp": "src", "gold_buy_gui.cpp": "src",
     "town_finance_gui.h": "src", "town_finance_gui.cpp": "src",
     "economy_news.h": "src", "economy_news.cpp": "src",
-    "market_events.h": "src", "market_events.cpp": "src", "town_news.h": "src", "town_news.cpp": "src", "market_news_ai.h": "src", "market_news_gui.h": "src", "market_news_gui.cpp": "src",
+    "market_events.h": "src", "market_events.cpp": "src", "town_news.h": "src", "town_news.cpp": "src", "market_news_ai.h": "src", "market_news_gui.h": "src", "market_news_gui.cpp": "src", "cargo_market_gui.h": "src", "cargo_market_gui.cpp": "src",
     "game_calendar.h": "src", "game_calendar.cpp": "src",
     "stock_dev.h": "src", "stock_console.cpp": "src",
     "central_bank_gui.h": "src", "central_bank_gui.cpp": "src",
@@ -72,7 +72,7 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_GOLD_BUY", "buy gold for the reserve"),
     ("CMD_GOLD_SELL", "sell gold of the reserve"),
 ]
-NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
+NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
                "RetailMath.h", "RetailMarketManager.h", "RetailMarketManager.cpp",
                "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]
@@ -439,6 +439,56 @@ def patch_income_graph_to_news(tree):
         print(f"lang: the income graph menu entry is now called '{NEWS_MENU_NAME}' ({changed} language files)")
 
 
+CARGO_RATES_MARKER = "CARGO_RATES_PATCH"
+CARGO_RATES_MENU_KEY = "STR_GRAPH_MENU_CARGO_PAYMENT_RATES"
+CARGO_RATES_MENU_NAME = "Cargo Prices"
+
+
+def patch_cargo_rates_to_prices(tree):
+    """The menu entry Graphs > Cargo payment rates becomes Cargo Prices: ShowCargoPaymentRates() opens the cargo prices window (cargo_market_gui.cpp)
+    and the entry is renamed in every language file. The old graph shows the BASE pay of OpenTTD and knows nothing about the market price,
+    so it would mislead; the new window shows the price, the news, the supply and what 10 units over 20 tiles pay now. The old window class stays
+    in the code but can no longer be opened (like the income graph). In place, at an anchor. This is an extra: when the anchor is missing a
+    WARNING is printed, nothing is written and the build goes on."""
+    target = tree / "src" / "graph_gui.cpp"
+    if not target.is_file():
+        print(f"WARNING: {target} not found, the cargo payment rates graph is not replaced")
+        return
+    text, crlf = _read_lf(target)
+    if CARGO_RATES_MARKER in text:
+        print("graph_gui.cpp: cargo payment rates already replaced by the cargo prices")
+    else:
+        m = re.search(r"^void ShowCargoPaymentRates\(\)\s*\{[^{}]*\}[ \t]*\n", text, re.M)
+        if not m:
+            print("WARNING: void ShowCargoPaymentRates() { ... } not found in graph_gui.cpp, the cargo payment rates graph is not replaced")
+            return
+        body = f"void ShowCargoPaymentRates() /* {CARGO_RATES_MARKER}: the old payment rates graph can not be opened any more */\n{{\n\tShowCargoPricesWindow();\n}}\n"
+        text = text[:m.start()] + body + text[m.end():]
+        if '#include "cargo_market_gui.h"' not in text:
+            includes = list(re.finditer(r'^#include "[^"\n]+"[^\n]*\n', text, re.M))
+            if not includes:
+                print("WARNING: no #include found in graph_gui.cpp, the cargo payment rates graph is not replaced")
+                return
+            text = text[:includes[-1].end()] + f'#include "cargo_market_gui.h" /* {CARGO_RATES_MARKER} */\n' + text[includes[-1].end():]
+        _write_like(target, text, crlf)
+        print("graph_gui.cpp: ShowCargoPaymentRates() now opens the cargo prices window")
+
+    lang = tree / "src" / "lang"
+    changed = 0
+    found = 0
+    for f in sorted(lang.glob("*.txt")):
+        t, c = _read_lf(f)
+        if re.search(r"^" + CARGO_RATES_MENU_KEY + r"\s*:", t, re.M): found += 1
+        new = re.sub(r"^(" + CARGO_RATES_MENU_KEY + r"\s*:).*$", lambda mm: mm.group(1) + CARGO_RATES_MENU_NAME, t, flags=re.M)
+        if new != t:
+            _write_like(f, new, c)
+            changed += 1
+    if found == 0:
+        print(f"WARNING: {CARGO_RATES_MENU_KEY} not found in any src/lang/*.txt: the menu entry keeps the old name")
+    else:
+        print(f"lang: the cargo payment rates menu entry is now called '{CARGO_RATES_MENU_NAME}' ({changed} language files)")
+
+
 def patch_graph_window_name(tree):
     """Renames the operating profit graph (menu entry and window caption) in english.txt and in every other language file."""
     lang = tree / "src" / "lang"
@@ -525,6 +575,62 @@ def patch_cargo_market(tree):
     t = ensure_include(t, '#include "cargo_market.h" /* CARGO_MARKET_PATCH */', ['#include "central_bank.h"', '#include "stdafx.h"'])
     _write_like(p, t, crlf)
     print("economy.cpp: cargo market hooks added")
+
+
+CARGO_LOCAL_MARKER = "CARGO_LOCAL_PATCH"
+
+
+def patch_cargo_local(tree):
+    """Local demand of the town (cargo_market.cpp, CargoMarketAdjustLocalIncome): the income of a FINAL delivery is multiplied by a factor of the
+    town of the destination station. In place, at one anchor: the single call of GetTransportedGoodsIncome inside DeliverGoods (economy.cpp) is wrapped.
+    Transfers (feeder shares) and the income estimates of the windows do not go through DeliverGoods, so they do not get the local factor.
+    This is an extra: when an anchor is missing the build goes on without it (a WARNING, nothing is written)."""
+    p = tree / "src" / "economy.cpp"
+    t, crlf = _read_lf(p)
+    if CARGO_LOCAL_MARKER in t:
+        print("economy.cpp: cargo local demand hook already there")
+        return
+    m = re.search(r"^(?:static\s+)?Money DeliverGoods\(([^)]*)\)\s*\n\{\n", t, re.M)
+    if not m:
+        print("WARNING: DeliverGoods not found in economy.cpp, the local demand of towns (cargo price) is not hooked")
+        return
+    params = [x.strip() for x in m.group(1).replace("\n", " ").split(",") if x.strip()]
+
+    def pname(prm):
+        nm = re.search(r"(\w+)\s*(?:=.*)?$", prm)
+        return nm.group(1) if nm else None
+    dest = next((pname(x) for x in params if re.search(r"\bStationID\b", x)), None)
+    cargo = next((pname(x) for x in params if re.search(r"\bCargoType\b", x)), None)
+    end = t.find("\n}\n", m.end())
+    if not dest or not cargo or end < 0:
+        print("WARNING: DeliverGoods has no StationID / CargoType parameter or no end, the local demand of towns is not hooked")
+        return
+    body = t[m.end():end]
+    calls = [c.start() for c in re.finditer(r"\bGetTransportedGoodsIncome\(", body)]
+    if len(calls) != 1:
+        print(f"WARNING: expected one call of GetTransportedGoodsIncome in DeliverGoods, found {len(calls)}: the local demand of towns is not hooked")
+        return
+    a = calls[0]
+    i = body.index("(", a)
+    depth = 0
+    close = -1
+    for j in range(i, len(body)):
+        if body[j] == "(":
+            depth += 1
+        elif body[j] == ")":
+            depth -= 1
+            if depth == 0:
+                close = j
+                break
+    if close < 0:
+        print("WARNING: the call of GetTransportedGoodsIncome in DeliverGoods is not closed, the local demand of towns is not hooked")
+        return
+    call = body[a:close + 1]
+    body = body[:a] + f"CargoMarketAdjustLocalIncome({cargo}, {dest}, {call}) /* {CARGO_LOCAL_MARKER} */" + body[close + 1:]
+    t = t[:m.end()] + body + t[end:]
+    t = ensure_include(t, '#include "cargo_market.h" /* CARGO_MARKET_PATCH */', ['#include "central_bank.h"', '#include "stdafx.h"'])
+    _write_like(p, t, crlf)
+    print("economy.cpp: cargo local demand hook added")
 
 
 VEHICLE_TIME_MARKER = "GAME_VEHICLE_TIME_PATCH"
@@ -816,8 +922,10 @@ def main(tree):
     patch_town_gui(tree)
     patch_graph_window_name(tree)
     patch_income_graph_to_news(tree)
+    patch_cargo_rates_to_prices(tree)
     patch_cargo_delivery(tree)
     patch_cargo_market(tree)
+    patch_cargo_local(tree)
     patch_vat(tree)
     patch_vehicle_time(tree)
     patch_world_time(tree)
