@@ -13,6 +13,7 @@
 #include "central_bank.h"
 #include "gold_reserve.h"
 #include "central_bank_gui.h"
+#include "tax.h"
 #include "wallet_base.h"
 #include "wallet_cmd.h"
 #include "stock_gui.h"
@@ -193,6 +194,14 @@ static void DrawAccountStatement(const Rect &r, int offset)
 	booked("Gold Sales (sold from the vault)", LedgerItem::GoldSell);
 	booked("Bank Gold Operations (cash paid in / taken out)", LedgerItem::BankGoldOp);
 
+	category("Taxes (paid to the Central Bank)");
+	booked("Land Tax (per tile owned, daily)", LedgerItem::TaxLand);
+	booked("Transport Tax (per vehicle, daily)", LedgerItem::TaxTransport);
+	booked("VAT 7% on Transport Income", LedgerItem::TaxVat);
+	booked("Capital Gains Tax 15% (trades & gold)", LedgerItem::TaxCapitalGains);
+	booked("Dividend Tax 10%", LedgerItem::TaxDividend);
+	booked("Income Tax 15% (profit of the quarter)", LedgerItem::TaxIncome);
+
 	category("Assets & Operations");
 	yearly("Vehicle & Infrastructure Running Costs", {EXPENSES_TRAIN_RUN, EXPENSES_ROADVEH_RUN, EXPENSES_AIRCRAFT_RUN, EXPENSES_SHIP_RUN, EXPENSES_PROPERTY});
 	yearly("Construction & Land Purchase", {EXPENSES_CONSTRUCTION});
@@ -340,6 +349,14 @@ static void DrawArchiveStatement(const Rect &r, int age)
 	line("Gold Purchases (bought for the vault)", GetLedgerEntry(_local_company, LedgerItem::GoldBuy, year), true, false);
 	line("Gold Sales (sold from the vault)", GetLedgerEntry(_local_company, LedgerItem::GoldSell, year), true, false);
 	line("Bank Gold Operations (cash paid in / taken out)", GetLedgerEntry(_local_company, LedgerItem::BankGoldOp, year), true, false);
+
+	category("Taxes (paid to the Central Bank)");
+	booked("Land Tax (per tile owned, daily)", LedgerItem::TaxLand);
+	booked("Transport Tax (per vehicle, daily)", LedgerItem::TaxTransport);
+	booked("VAT 7% on Transport Income", LedgerItem::TaxVat);
+	booked("Capital Gains Tax 15% (trades & gold)", LedgerItem::TaxCapitalGains);
+	booked("Dividend Tax 10%", LedgerItem::TaxDividend);
+	booked("Income Tax 15% (profit of the quarter)", LedgerItem::TaxIncome);
 
 	category("Assets & Operations");
 	yearly("Vehicle & Infrastructure Running Costs", LedgerItem::YearRunning, {EXPENSES_TRAIN_RUN, EXPENSES_ROADVEH_RUN, EXPENSES_AIRCRAFT_RUN, EXPENSES_SHIP_RUN, EXPENSES_PROPERTY});
@@ -556,6 +573,12 @@ struct CentralBankWindow : Window {
 			case LedgerItem::BankLoan:        return e.amount >= 0 ? CbText("กู้เงิน", "Borrow") : CbText("ชำระคืน", "Repay");
 			case LedgerItem::GoldBuy:         return CbText("ซื้อทอง", "Gold buy");
 			case LedgerItem::GoldSell:        return CbText("ขายทอง", "Gold sale");
+			case LedgerItem::TaxLand:         return CbText("ภาษีที่ดิน", "Land tax");
+			case LedgerItem::TaxTransport:    return CbText("ภาษีขนส่ง", "Transport tax");
+			case LedgerItem::TaxVat:          return CbText("ภาษีมูลค่าเพิ่ม (VAT)", "VAT");
+			case LedgerItem::TaxCapitalGains: return CbText("ภาษีกำไรจากการเทรด", "Capital gains tax");
+			case LedgerItem::TaxDividend:     return CbText("ภาษีเงินปันผล", "Dividend tax");
+			case LedgerItem::TaxIncome:       return CbText("ภาษีเงินได้ไตรมาส", "Income tax");
 			case LedgerItem::BankGoldOp:      return e.amount >= 0 ? CbText("ธนาคารซื้อทอง: เงินเข้า", "Bank gold buy: cash in") : CbText("ธนาคารขายทอง: เงินออก", "Bank gold sale: cash out");
 			default:                          return "";
 		}
@@ -679,7 +702,7 @@ struct CentralBankWindow : Window {
 
 /** The account statement window: this year and last year, in four groups. It is its own window, so it can stay open next to the bank window. */
 struct CentralBankStatementWindow : Window {
-	static constexpr int STATEMENT_ROWS = 32; ///< Number of rows in the account statement, with room for the notes.
+	static constexpr int STATEMENT_ROWS = 40; ///< Number of rows in the account statement, with room for the notes.
 
 	int offset = 0; ///< How many years back the statement is: 0 = this year and last year.
 
@@ -930,7 +953,7 @@ struct CentralBankArchiveWindow : Window {
 				break;
 			case WID_CBA_PANEL:
 				size.width = std::max<uint>(size.width, ScaleGUITrad(640));
-				size.height = std::max<uint>(size.height, CbRowHeight() * 30 + ScaleGUITrad(12));
+				size.height = std::max<uint>(size.height, CbRowHeight() * 38 + ScaleGUITrad(12));
 				break;
 			default: break;
 		}

@@ -14,6 +14,8 @@ It looks for the mod files by name anywhere next to this script, so it does not 
   - ShowCompanyFinances() (company_gui.cpp), statusbar_gui.cpp: the finances menu and the statusbar button open ShowCentralBankWindow()
   - script_company.hpp/.cpp: ScriptCompany::GetCentralBankDebt and GetCentralBankAvailable, so that AIs can see the central bank debt;
     ScriptCompany::GetGoldHoldings and GetGoldPrice, so that AIs and game scripts can see the gold market
+  - vehicle.cpp, vehicle_base.h, *_cmd.cpp: vehicles (train, road vehicle, ship, aircraft) do their daily work once per game day (patch_vehicle_time)
+  - industries, towns, stations, subsidies, disasters: their day / month / year timers run on game time (patch_world_time)
   - timer_game_calendar.cpp, economy_settings.ini: the date of the original game follows the HH:MM clock (a new day starts at 00:00)
 """
 import re
@@ -37,6 +39,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "wallet_base.h": "src", "wallet_base.cpp": "src",
     "wallet_cmd.h": "src", "wallet_cmd.cpp": "src",
     "central_bank.h": "src", "central_bank.cpp": "src",
+    "tax.h": "src", "tax.cpp": "src",
     "gold_reserve.h": "src", "gold_reserve.cpp": "src",
     "valuables.h": "src", "valuables.cpp": "src",
     "gold_panel.h": "src", "gold_panel.cpp": "src", "gold_buy_gui.cpp": "src",
@@ -64,7 +67,7 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_GOLD_BUY", "buy gold for the reserve"),
     ("CMD_GOLD_SELL", "sell gold of the reserve"),
 ]
-NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "gold_reserve.cpp", "gold_reserve.h", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "economy_news.cpp", "economy_news.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
+NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "gold_reserve.cpp", "gold_reserve.h", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "economy_news.cpp", "economy_news.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
                "RetailMath.h", "RetailMarketManager.h", "RetailMarketManager.cpp",
                "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]
@@ -419,10 +422,192 @@ def patch_cargo_delivery(tree):
     print("economy.cpp: gold delivery hook added")
 
 
+VEHICLE_TIME_MARKER = "GAME_VEHICLE_TIME_PATCH"
+
+
+def patch_vehicle_time(tree):
+    """Vehicles (trains, road vehicles, ships, aircraft) follow the clock of the mod. In place, at anchors; nothing is written when an anchor is missing.
+      - vehicle_base.h: GameServiceDate(), the game day as a date (used for the service date).
+      - vehicle.cpp: the daily work of every vehicle (age, running costs, reliability, breakdown check, service check, orders check) runs once per
+        GAME day (24 real minutes) instead of once per economy day (74 ticks). It is spread over the whole day, 1/48000 of the vehicles per step.
+        The yearly profit window of the vehicles closes with the game year (Year event of the clock).
+      - the service date (date_of_last_service) is stamped and compared in game days: vehicle.cpp, train_cmd.cpp, roadveh_cmd.cpp, ship_cmd.cpp,
+        aircraft_cmd.cpp, vehicle_gui.cpp, station_cmd.cpp.
+    Running costs are paid per tick of movement (running_ticks), so the total is the same; only the day on which they are booked changes."""
+    src = tree / "src"
+    # vehicle_base.h
+    p = src / "vehicle_base.h"
+    t, crlf = _read_lf(p)
+    if VEHICLE_TIME_MARKER not in t:
+        if '#include "timer/timer_game_calendar.h"\n' not in t:
+            sys.exit("ERROR: vehicle_base.h has a different layout (vehicle time patch)")
+        t = ensure_include(t, '#include "timer/timer_game_economy.h"', ['#include "timer/timer_game_calendar.h"'])
+        helper = ('\n/* ' + VEHICLE_TIME_MARKER + ' */\n/** The game day (the calendar day of the mod clock) as a date. It is the date of the service of vehicles: one day is 24 real minutes. */\n'
+                  'inline TimerGameEconomy::Date GameServiceDate()\n{\n\treturn TimerGameEconomy::Date(TimerGameCalendar::date.base());\n}\n')
+        m = re.search(r'#include "timer/timer_game_economy.h"\n', t)
+        t = t[:m.end()] + helper + t[m.end():]
+        _write_like(p, t, crlf)
+        print("vehicle_base.h: GameServiceDate added")
+    else:
+        print("vehicle_base.h: vehicle time already patched")
+
+    # vehicle.cpp
+    p = src / "vehicle.cpp"
+    t, crlf = _read_lf(p)
+    if VEHICLE_TIME_MARKER not in t:
+        loop = "\tfor (size_t i = TimerGameEconomy::date_fract; i < Vehicle::GetPoolSize(); i += Ticks::DAY_TICKS) {\n"
+        func_head = "static void RunEconomyVehicleDayProc()\n{\n"
+        if t.count(loop) != 1 or t.count(func_head) != 1:
+            sys.exit("ERROR: vehicle.cpp has a different layout, RunEconomyVehicleDayProc was not connected to the game clock")
+        helper = (
+            "/* " + VEHICLE_TIME_MARKER + " */\n"
+            "/** A game day is split in this many steps; each step handles the vehicles with (pool index % steps) == step. */\n"
+            "static constexpr uint32_t GAME_VEHICLE_DAY_STEPS = 48000;\n\n"
+            "/**\n * The pool indices of the vehicles whose daily work is due now. The clock of the mod decides: normally one step per tick (a step is 1/48000 of a\n"
+            " * game day), so each vehicle is handled once per game day. After a jump of the clock (load, skip of the test tools) only the current step is handled.\n */\n"
+            "static std::vector<size_t> GameVehicleDayIndices()\n{\n"
+            "\tstatic uint32_t last_step = GAME_VEHICLE_DAY_STEPS; // GAME_VEHICLE_DAY_STEPS: no step handled yet\n"
+            "\tconst uint32_t now = GameTimeManager::Get().GetDayFraction(GAME_VEHICLE_DAY_STEPS);\n"
+            "\tstd::vector<uint32_t> steps;\n"
+            "\tconst uint32_t behind = last_step >= GAME_VEHICLE_DAY_STEPS ? GAME_VEHICLE_DAY_STEPS : (now + GAME_VEHICLE_DAY_STEPS - last_step) % GAME_VEHICLE_DAY_STEPS;\n"
+            "\tif (behind >= 1000) {\n\t\tsteps.push_back(now); // first call, load or jump\n\t} else {\n"
+            "\t\tfor (uint32_t k = 1; k <= behind; k++) steps.push_back((last_step + k) % GAME_VEHICLE_DAY_STEPS);\n\t}\n"
+            "\tlast_step = now;\n\n"
+            "\tstd::vector<size_t> result;\n"
+            "\tfor (uint32_t step : steps) {\n"
+            "\t\tfor (size_t i = step; i < Vehicle::GetPoolSize(); i += GAME_VEHICLE_DAY_STEPS) result.push_back(i);\n\t}\n"
+            "\treturn result;\n}\n\n")
+        t = t.replace(func_head, helper + func_head, 1)
+        t = t.replace(loop, "\tfor (size_t i : GameVehicleDayIndices()) { /* " + VEHICLE_TIME_MARKER + " */\n", 1)
+        old_timer = "static const IntervalTimer<TimerGameEconomy> _economy_vehicles_yearly({TimerGameEconomy::YEAR, TimerGameEconomy::Priority::VEHICLE}, [](auto)\n{\n"
+        if t.count(old_timer) != 1:
+            sys.exit("ERROR: vehicle.cpp has a different layout, the yearly profit of vehicles was not connected to the game clock")
+        t = t.replace(old_timer, "static const GameTimeSubscription _economy_vehicles_yearly(GameTimeEvent::Year, [](const GameTimeSnapshot &)\n{\n", 1)
+        n = 0
+        for old, new in (
+            ("(this->GetServiceInterval() * EconomyTime::DAYS_IN_ECONOMY_MONTH) >= TimerGameEconomy::date)", "(this->GetServiceInterval() * EconomyTime::DAYS_IN_ECONOMY_MONTH) >= GameServiceDate())"),
+            ("this->date_of_last_service + this->GetServiceInterval() >= TimerGameEconomy::date)", "this->date_of_last_service + this->GetServiceInterval() >= GameServiceDate())"),
+        ):
+            if t.count(old) != 1:
+                sys.exit("ERROR: vehicle.cpp NeedsServicing has a different layout (vehicle time patch): " + old[:40])
+            t = t.replace(old, new, 1)
+        t, n = re.subn(r"(\w+)->date_of_last_service = TimerGameEconomy::date;", r"\1->date_of_last_service = GameServiceDate();", t)
+        t = ensure_include(t, '#include "game_time/game_time_manager.h"', ['#include "vehicle_func.h"', '#include "stdafx.h"'])
+        if "#include <vector>" not in t:
+            t = ensure_include(t, "#include <vector>", ['#include "stdafx.h"'])
+        _write_like(p, t, crlf)
+        print(f"vehicle.cpp: the daily work of vehicles follows the game clock ({n} service stamp)")
+    else:
+        print("vehicle.cpp: vehicle time already patched")
+
+    # the other places that stamp or read the service date
+    for name in ("train_cmd.cpp", "roadveh_cmd.cpp", "ship_cmd.cpp", "aircraft_cmd.cpp"):
+        p = src / name
+        t, crlf = _read_lf(p)
+        t2, n = re.subn(r"(\w+)->date_of_last_service = TimerGameEconomy::date;", r"\1->date_of_last_service = GameServiceDate();", t)
+        if n:
+            _write_like(p, t2, crlf)
+        print(f"{name}: {n} service stamp(s) use the game day")
+    for name, old, new in (
+        ("vehicle_gui.cpp", "(TimerGameEconomy::date - v->date_of_last_service)", "(GameServiceDate() - v->date_of_last_service)"),
+        ("station_cmd.cpp", "TimerGameEconomy::date - v->date_of_last_service <=", "GameServiceDate() - v->date_of_last_service <="),
+    ):
+        p = src / name
+        t, crlf = _read_lf(p)
+        if old in t:
+            _write_like(p, t.replace(old, new, 1), crlf)
+            print(f"{name}: service date read in game days")
+        elif new in t:
+            print(f"{name}: already patched")
+        else:
+            sys.exit(f"ERROR: {name} has a different layout (vehicle time patch)")
+
+
+WORLD_TIME_MARKER = "GAME_WORLD_TIME_PATCH"
+
+# (file, name of the timer variable, economy period, clock event)
+WORLD_TIMERS = [
+    ("industry_cmd.cpp", "_economy_industries_daily", "DAY", "Day"),
+    ("industry_cmd.cpp", "_economy_industries_monthly", "MONTH", "Month"),
+    ("town_cmd.cpp", "_economy_towns_monthly", "MONTH", "Month"),
+    ("town_cmd.cpp", "_economy_towns_yearly", "YEAR", "Year"),
+    ("station_cmd.cpp", "_economy_stations_monthly", "MONTH", "Month"),
+    ("subsidy.cpp", "_economy_subsidies_monthly", "MONTH", "Month"),
+    ("disaster_vehicle.cpp", "_economy_disaster_daily", "DAY", "Day"),
+]
+
+
+def patch_world_time(tree):
+    """Industries, towns, stations, subsidies and disasters keep their own time by the clock of the mod: the timers that OpenTTD runs on
+    economy days / months / years (74 ticks, 30 days, 12 months) run on game days (24 real minutes), game months (30 game days) and game years
+    (365 game days). In place: the declaration of each timer is replaced by a GameTimeSubscription with the same body.
+    NOT moved (they handle money, which still flows per tick): the company timers of economy.cpp and company_cmd.cpp (infrastructure costs, interest,
+    statistics), and the network server timers."""
+    src = tree / "src"
+    for name, var, period, event in WORLD_TIMERS:
+        p = src / name
+        t, crlf = _read_lf(p)
+        old = re.search(r"static const IntervalTimer<TimerGameEconomy> " + var + r"\(\{TimerGameEconomy::" + period + r", TimerGameEconomy::Priority::\w+\}, \[\]\(auto\)\n", t)
+        new = f"static const GameTimeSubscription {var}(GameTimeEvent::{event}, [](const GameTimeSnapshot &) /* {WORLD_TIME_MARKER} */\n"
+        if not old:
+            if var in t and "GameTimeSubscription " + var in t:
+                print(f"{name}: {var} already on game time")
+                continue
+            sys.exit(f"ERROR: {name}: timer {var} not found (world time patch)")
+        t = t[:old.start()] + new + t[old.end():]
+        t = ensure_include(t, '#include "game_time/game_time_manager.h"', ['#include "stdafx.h"'])
+        _write_like(p, t, crlf)
+        print(f"{name}: {var} runs on the game {event.lower()}")
+
+
+COMPANY_TIME_MARKER = "GAME_COMPANY_TIME_PATCH"
+
+
+def patch_company_hourly(tree):
+    """The monthly work of the companies in economy.cpp (CompaniesGenStatistics: infrastructure costs, bankruptcy check; CompaniesPayInterest;
+    HandleEconomyFluctuations) ran on the economy month (30 economy days = about 60 real seconds). It now runs on the Hour event of the clock
+    (every game hour = 60 real seconds at normal speed), so the money that it books follows the game clock and the amount per real time is the same."""
+    p = tree / "src" / "economy.cpp"
+    t, crlf = _read_lf(p)
+    if COMPANY_TIME_MARKER in t:
+        print("economy.cpp: company monthly work already on the game hour")
+        return
+    old = re.search(r"static const IntervalTimer<TimerGameEconomy> _economy_companies_monthly\(\{ ?TimerGameEconomy::MONTH, TimerGameEconomy::Priority::COMPANY ?\}, \[\]\(auto\)\n", t)
+    if not old:
+        sys.exit("ERROR: economy.cpp: _economy_companies_monthly not found (company time patch)")
+    t = t[:old.start()] + f"static const GameTimeSubscription _economy_companies_monthly(GameTimeEvent::Hour, [](const GameTimeSnapshot &) /* {COMPANY_TIME_MARKER} */\n" + t[old.end():]
+    t = ensure_include(t, '#include "game_time/game_time_manager.h"', ['#include "company_func.h"', '#include "stdafx.h"'])
+    _write_like(p, t, crlf)
+    print("economy.cpp: company monthly work runs on the game hour")
+
+
+VAT_MARKER = "GAME_VAT_PATCH"
+
+
+def patch_vat(tree):
+    """VAT on the income of cargo delivery: one call in CargoPayment::~CargoPayment (economy.cpp), right after the income is paid to the company (in place, at an anchor)."""
+    p = tree / "src" / "economy.cpp"
+    t, crlf = _read_lf(p)
+    if VAT_MARKER in t:
+        print("economy.cpp: VAT hook already there")
+        return
+    anchor = "\tSubtractMoneyFromCompany(CommandCost(this->front->GetExpenseType(true), -this->route_profit));\n"
+    if t.count(anchor) != 1:
+        sys.exit("ERROR: economy.cpp: CargoPayment::~CargoPayment has a different layout (VAT patch)")
+    t = t.replace(anchor, anchor + f"\tChargeVat(this->front->owner, static_cast<int64_t>(this->route_profit)); /* {VAT_MARKER} */\n", 1)
+    t = ensure_include(t, '#include "tax.h"', ['#include "central_bank.h"', '#include "stdafx.h"'])
+    _write_like(p, t, crlf)
+    print("economy.cpp: VAT hook added")
+
+
 def main(tree):
     patch_graph_files(tree)
     patch_graph_window_name(tree)
     patch_cargo_delivery(tree)
+    patch_vat(tree)
+    patch_vehicle_time(tree)
+    patch_world_time(tree)
+    patch_company_hourly(tree)
     patch_console_file(tree)
     for name, folder in FILES.items():
         src = find(name, folder)

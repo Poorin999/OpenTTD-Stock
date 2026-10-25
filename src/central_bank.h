@@ -173,7 +173,7 @@ static constexpr int64_t POLICY_CREDIT_MIN_EMERGENCY_PERCENT = 10; ///< The cred
  * The limit is a share of the net equity of the company. The share is CENTRAL_BANK_CREDIT_PERCENT (50%) when the policy shift
  * is 0. A tight policy (a positive shift) lowers it by 1 percentage point for every POLICY_CREDIT_BP_PER_PERCENT bp of shift,
  * an easy policy (a negative shift) raises it. The credit standing of the gold reserve (C .. AAA) then scales the limit again.
- * A company that starts with GAME_TIME_STARTING_CAPITAL (1,500,000) and no debt can borrow about 750,000 at a shift of 0 and standing A.
+ * A company that starts with GAME_TIME_STARTING_CAPITAL (1,000,000) and no debt can borrow about 500,000 at a shift of 0 and standing A.
  */
 static constexpr int64_t POLICY_CREDIT_BP_PER_PERCENT = 20; ///< 20 bp of shift move the credit share by 1 percentage point.
 static constexpr int64_t POLICY_CREDIT_MIN_PERCENT = 25;    ///< The share of the equity is never below 25% ...
@@ -391,14 +391,14 @@ static constexpr int64_t BANK_GOLD_SELL_ABOVE_BP = 3000;  ///< Sell while the ba
 static constexpr int64_t BANK_GOLD_MAX_DAILY_OZ = 500;    ///< At most this many ounces per game day.
 static constexpr int64_t BANK_GOLD_CREATE_MAX_PERCENT = 1; ///< The bank never creates more than 1% of the cash in circulation in one day.
 static constexpr int64_t BANK_GOLD_CASH_MAX_PERCENT = 5;  ///< The bank never takes more than 5% of the unborrowed liquid cash of all companies in one day.
-static constexpr int64_t BANK_START_CAPITAL = 75'000;     ///< Own money of the bank at the start of a game, in money units (5% of the 1,500,000 that a company starts with).
+static constexpr int64_t BANK_START_CAPITAL = 50'000;     ///< Own money of the bank at the start of a game, in money units (5% of the 1,000,000 that a company starts with).
 static constexpr size_t BANK_GOLD_LOG_MAX = 6;            ///< How many trades the log keeps (not saved).
 
 /*
  * Option: BANK_GOLD_MOVES_CASH false makes the bank trade only with its OWN money, without moving the cash of the companies
  * (buys only what its own money pays, the proceeds of a sale go into its own money). The default is true.
  */
-static constexpr bool BANK_GOLD_MOVES_CASH = true;
+static constexpr bool BANK_GOLD_MOVES_CASH = false;
 
 /** One gold trade of the bank, for the policy window. */
 struct BankGoldTrade {
@@ -456,6 +456,13 @@ enum class LedgerItem : uint8_t {
 	GoldBuy,         ///< Gold bought for the vault (expense): an exchange of cash for an asset, shown but not counted as a cost. Appended last: the index is saved.
 	GoldSell,        ///< Gold sold from the vault (income): shown, not counted as earnings (the profit is on RealizedProfit).
 	BankGoldOp,      ///< Cash that the gold trade of the central bank put into (income) or took out of (expense) the company: shown, not counted as earnings. Appended last: the index is saved.
+	/* Taxes (tax.h). All expenses, paid to the central bank. Appended last: the index is saved. */
+	TaxLand,         ///< Land tax: tiles that the company owns.
+	TaxTransport,    ///< Transport tax: per vehicle per game day.
+	TaxVat,          ///< VAT on the income of cargo delivery.
+	TaxCapitalGains, ///< Tax on the profit of closed trades and gold sales.
+	TaxDividend,     ///< Tax on dividends received.
+	TaxIncome,       ///< Income tax on the profit of the quarter.
 	End,
 };
 static constexpr size_t LEDGER_ITEMS = static_cast<size_t>(LedgerItem::End);

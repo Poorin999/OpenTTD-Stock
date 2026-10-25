@@ -10,6 +10,7 @@
 #include "stdafx.h"
 #include "3rdparty/fmt/format.h"
 #include "stock_base.h"
+#include "tax.h"
 #include "stock_gui.h"
 #include "central_bank.h"
 #include "gold_reserve.h"
@@ -428,6 +429,7 @@ void PayStockProfit(CompanyID owner, uint8_t wallet, int64_t profit, LedgerItem 
 {
 	if (!Company::IsValidID(owner)) return;
 	if (item != LedgerItem::End) RecordLedger(owner, item, profit);
+	profit -= TakeInvestorTax(owner, item, profit); // Capital gains tax and dividend tax: booked on the statement, paid to the bank.
 	AddToWallet(owner, wallet, profit);
 }
 

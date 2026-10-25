@@ -9,6 +9,7 @@
 
 #include "stdafx.h"
 #include "gold_reserve.h"
+#include "tax.h"
 #include "central_bank.h"
 #include "game_time/game_time_manager.h"
 #include "command_func.h"
@@ -327,6 +328,7 @@ CommandCost ExecuteGoldTrade(CompanyID company, bool is_buy, uint32_t amount, bo
 		RecordLedger(company, LedgerItem::GoldSell, gross);
 		RecordLedger(company, LedgerItem::TradeCommission, -commission);
 		RecordLedger(company, LedgerItem::RealizedProfit, gross - basis);
+		c->money -= Money(TakeInvestorTax(company, LedgerItem::RealizedProfit, gross - basis)); // Capital gains tax on the profit of the sale.
 		_gold_reserve.holdings_oz[i] -= ounces;
 		_gold_reserve.market_stock_oz += ounces;
 		_gold_reserve.pressure_ppm = std::max<int64_t>(-GoldReserveManager::PRESSURE_MAX_PPM,
