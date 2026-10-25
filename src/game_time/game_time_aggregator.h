@@ -75,6 +75,8 @@ public:
 
 	/** Number of closed buckets that are kept per timeframe by default. */
 	static constexpr size_t DEFAULT_MAX_CLOSED = 500;
+	/** For SetMaxClosed(): keep every closed bucket, nothing is ever dropped (and Export() / Import() carry all of them). */
+	static constexpr size_t NO_LIMIT = SIZE_MAX;
 	/** The 5m timeframe closes a bucket every 5 real seconds, so it keeps this many times more buckets (the same stretch of real time would be too short otherwise). */
 	static constexpr size_t SHORT_FRAME_FACTOR = 3;
 
@@ -82,7 +84,7 @@ public:
 	TimeframeAggregator() : TimeframeAggregator(DEFAULT_MAX_CLOSED) {}
 
 	/** @param max_closed Number of closed buckets that are kept per timeframe; the oldest are dropped. */
-	explicit TimeframeAggregator(size_t max_closed) : max_closed_(max_closed == 0 ? 1 : max_closed)
+	explicit TimeframeAggregator(size_t max_closed) : max_closed_(max_closed == 0 ? 1 : max_closed), max_closed_m5_(max_closed_ == NO_LIMIT ? NO_LIMIT : max_closed_ * SHORT_FRAME_FACTOR)
 	{
 		for (size_t i = 0; i < GAME_TIMEFRAME_COUNT; i++) {
 			const GameTimeframe tf = static_cast<GameTimeframe>(i);
@@ -98,6 +100,17 @@ public:
 	static constexpr int PRIORITY = -100;
 
 	void SetCloseCallback(CloseCallback callback) { this->on_close_ = std::move(callback); }
+
+	/**
+	 * Change how many closed buckets are kept. NO_LIMIT keeps every bucket. A smaller limit is applied from the next bucket on.
+	 * @param normal Closed buckets kept for every timeframe except 5m (0 counts as 1).
+	 * @param m5 Closed buckets kept for the 5m timeframe (0 counts as 1); it grows fastest.
+	 */
+	void SetMaxClosed(size_t normal, size_t m5)
+	{
+		this->max_closed_ = normal == 0 ? 1 : normal;
+		this->max_closed_m5_ = m5 == 0 ? 1 : m5;
+	}
 
 	/** Forget all samples, e.g. for a new game. The subscriptions stay. */
 	void Reset()
@@ -216,7 +229,7 @@ private:
 	/** Number of closed buckets that are kept for a timeframe. */
 	size_t MaxClosed(GameTimeframe tf) const
 	{
-		return tf == GameTimeframe::M5 ? this->max_closed_ * SHORT_FRAME_FACTOR : this->max_closed_;
+		return tf == GameTimeframe::M5 ? this->max_closed_m5_ : this->max_closed_;
 	}
 
 	bool Fail()
@@ -255,6 +268,7 @@ private:
 	std::array<std::unique_ptr<GameTimeSubscription>, GAME_TIMEFRAME_COUNT> subscriptions_{};
 	CloseCallback on_close_{};
 	size_t max_closed_;
+	size_t max_closed_m5_;
 };
 
 #endif /* GAME_TIME_AGGREGATOR_H */

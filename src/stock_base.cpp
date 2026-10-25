@@ -68,7 +68,10 @@ void StockMarket::Reset()
 	this->daily_current.fill({});
 	this->has_daily_current.fill(false);
 	this->record_daily = false;
-	for (TimeframeAggregator &f : this->frames) f.Reset();
+	for (TimeframeAggregator &f : this->frames) {
+		f.Reset();
+		f.SetMaxClosed(STOCK_FRAME_MAX_CLOSED, STOCK_FRAME_MAX_CLOSED_M5); // Every candle is kept.
+	}
 	this->history.clear();
 	for (auto &row : this->session_realized) row.fill(0);
 	this->stats.fill({});

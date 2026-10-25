@@ -107,6 +107,14 @@ static constexpr size_t STOCK_MAX_ORDERS_PER_COMPANY = 40;
 /** Maximum number of closed monthly candles that are remembered per company. */
 static constexpr size_t STOCK_MAX_CANDLES = 240;
 
+/**
+ * Closed candles of the chart timeframes (1h, 4h, 12h, day, week, month, year) kept and saved per company: all of them.
+ * Put a number here to keep only the newest ones (the oldest are dropped, also when a savegame is loaded).
+ */
+static constexpr size_t STOCK_FRAME_MAX_CLOSED = TimeframeAggregator::NO_LIMIT;
+/** The same for the 5m timeframe, which closes a candle every 5 real seconds and so makes the savegame grow fastest. */
+static constexpr size_t STOCK_FRAME_MAX_CLOSED_M5 = TimeframeAggregator::NO_LIMIT;
+
 /** Maximum number of daily candles that are remembered per company: 365 per year for 150 years, so in practice all of them. Daily candles are only recorded after the Daily view was turned on. */
 static constexpr size_t STOCK_MAX_DAILY_CANDLES = 365 * 150;
 
@@ -231,6 +239,11 @@ struct StockSummary {
 
 /** All state of the trading terminal. Saved in the 'STCK' chunk. */
 struct StockMarket {
+	StockMarket()
+	{
+		for (TimeframeAggregator &f : this->frames) f.SetMaxClosed(STOCK_FRAME_MAX_CLOSED, STOCK_FRAME_MAX_CLOSED_M5);
+	}
+
 	std::array<std::vector<StockCandle>, STOCK_SYMBOLS> candles{}; ///< Closed candles per company.
 	std::array<StockCandle, STOCK_SYMBOLS> current{};              ///< The running candle per company.
 	std::array<bool, STOCK_SYMBOLS> has_current{};                 ///< Whether #current is valid.

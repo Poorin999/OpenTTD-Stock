@@ -154,7 +154,7 @@ struct STCKChunkHandler : ChunkHandler {
 			write(t);
 		}
 
-		/* The candles of game time (1h, 4h, 12h). Every candle is one row, with a second row for its volume when there is one. */
+		/* The candles of game time (5m, 1h, 4h, 12h, day, week, month, year). EVERY closed candle is saved (see STOCK_FRAME_MAX_CLOSED), one row each, with a second row for its volume when there is one. */
 		for (uint8_t i = 0; i < STOCK_SYMBOLS; i++) {
 			for (const TimeframeRecord &tr : _stock_market.frames[i].Export()) {
 				StockRecord r;
