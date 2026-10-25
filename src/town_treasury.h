@@ -10,9 +10,11 @@
  *
  *  - Citizens:  every game day they earn money (per head, follows the price index of the game). Part of it is the town income tax and goes
  *               to the treasury, the rest is their savings.
- *  - Gold:      the citizens buy gold when the price is below its 30 day average and sell it when the price is above it (so they calm the
- *               market a little). They pay the same ask / bid price and commission as a company. The profit of a sale pays the town capital
- *               gains tax into the treasury. Their gold is not part of the gold reserve of the companies (it does not change the backing).
+ *  - Gold:      the citizens are four groups with four habits (citizen_gold.h): hoarders (keep buying, stock up when scared), speculators (follow
+ *               the trend, take profit / stop loss, often lose), overtraders (trade all the time, pay the spread again and again, mostly lose) and
+ *               balanced savers (keep a target share of their wealth in gold). Nobody is sure to win. Every group has its own cash, gold and results.
+ *               They trade every game hour at the ask / bid price with a commission; the profit of a sale pays the town gains tax into the treasury.
+ *               Their orders move the market stock and (a little) the price pressure. Their gold is not part of the gold reserve of the companies.
  *  - Treasury:  when it holds enough money, the town spends it on development: "fund new buildings" for 3 months (the same effect as the
  *               town action of the game).
  * All maths is integer and runs from the clock of the mod, so it is the same on every client.
@@ -23,6 +25,8 @@
 #define TOWN_TREASURY_H
 
 #include "stdafx.h"
+#include "citizen_gold.h"
+#include <array>
 #include <cstdint>
 #include <map>
 
@@ -31,38 +35,36 @@ static constexpr int64_t TOWN_MIN_POPULATION = 200;          ///< Towns below th
 static constexpr int64_t TOWN_INCOME_CENTS_PER_CAPITA_DAY = 50; ///< Income of one citizen per game day, in 1/100 of a money unit.
 static constexpr int64_t TOWN_INCOME_TAX_PERCENT = 25;       ///< Town income tax: share of the income that goes to the treasury.
 static constexpr int64_t TOWN_GAINS_TAX_PERCENT = 10;        ///< Town tax on the profit of a gold sale of the citizens.
-static constexpr size_t  TOWN_GOLD_REF_DAYS = 30;            ///< The price is compared with the average of this many days.
-static constexpr size_t  TOWN_GOLD_MIN_HISTORY_DAYS = 10;    ///< No trade before the chart has this many days.
-static constexpr int64_t TOWN_GOLD_BUY_BELOW_PPM = 20'000;   ///< Buy when the price is this far (2%) below the average.
-static constexpr int64_t TOWN_GOLD_SELL_ABOVE_PPM = 30'000;  ///< Sell when the price is this far (3%) above the average.
-static constexpr int64_t TOWN_GOLD_BUY_SHARE_PERCENT = 50;   ///< A purchase uses at most this share of the savings.
-static constexpr int64_t TOWN_GOLD_SELL_SHARE_PERCENT = 25;  ///< A sale gives at most this share of the gold (at least 1 ounce).
-static constexpr int64_t TOWN_GOLD_DAILY_STOCK_DIV = 1'600'000; ///< One town trades at most 1/1600000 of the market stock per day (at least 1 ounce; about 20 oz with the 1000 ton start stock, the same as 1/10000 of the old 200,000 oz).
-static constexpr int64_t TOWN_GOLD_TRADE_BAND_PPM = 2'000;  ///< Inside +-0.2% of the 30 day average the citizens do not trade; outside it they trade every game hour, the more the further away the price is.
-static constexpr int64_t TOWN_GOLD_TRADES_PER_DAY = 24;      ///< The citizens look at the gold price every game hour and trade 1/24 of the daily share, so their orders are spread over the day.
+static constexpr size_t  TOWN_GOLD_MIN_HISTORY_DAYS = 10;    ///< The 30 day average is only used when the chart has this many days.
+static constexpr int64_t TOWN_CITIZEN_DEPTH_OUNCES = 500'000; ///< Market depth against the orders of the citizens: 25 times deeper than for a company (DEPTH_OUNCES 20,000), so many small orders do not push the price by themselves. Net buying of this many ounces = +100% pressure.
+static constexpr int64_t TOWN_STOCK_FLOOR_PERCENT = 50;     ///< The citizens never take the market stock below this share of the start stock.
 static constexpr int64_t TOWN_DEVELOP_BASE_COST = 4'000;     ///< Cost of the development in the treasury, at price index 1.0 ...
 static constexpr int64_t TOWN_DEVELOP_COST_PER_CAPITA = 1;   ///< ... plus this much per citizen.
 static constexpr int64_t TOWN_DEVELOP_NEWS_MIN_POPULATION = 500; ///< Only towns of this size make a news item when they fund buildings.
 static constexpr int64_t TOWN_REPORT_DAYS = 30;              ///< A news report of all towns every this many game days.
 
-/** Money and gold of the citizens of one town, and its treasury. Money units unless the name says otherwise. */
+/** Money and gold of the citizens of one town (four groups), and its treasury. Money units unless the name says otherwise. */
 struct TownAccount {
-	int64_t gold_oz = 0;     ///< Ounces held by the citizens.
-	int64_t gold_cost = 0;   ///< What that gold cost (without commission), the base of the profit. 0 = nothing held.
-	int64_t savings = 0;     ///< Cash of the citizens.
+	bool started = false;    ///< The groups have been given their start wealth.
+	std::array<citizengold::Book, citizengold::STYLE_COUNT> books{}; ///< Cash, gold and results of each group (citizengold::Style order).
 	int64_t treasury = 0;    ///< Cash of the town.
 	int64_t spent = 0;       ///< Everything the town has spent on development so far.
-	int64_t taxed = 0;       ///< Everything the town has collected so far (income tax and gains tax).
+	int64_t taxed = 0;       ///< Everything the town has collected so far (income tax and gains tax). Not saved.
+
+	int64_t GoldCz() const { int64_t t = 0; for (const auto &b : this->books) t += b.gold_cz; return t; }
 };
 
 /** All town accounts. Key = index of the town. An ordered map, so every client walks the towns in the same order. */
 struct TownTreasuryManager {
 	std::map<uint32_t, TownAccount> accounts;
+	int64_t stock_carry_cz = 0;      ///< Rest (hundredths of an ounce) of the market stock that the citizens took or gave back, less than one ounce. Not saved.
+	int64_t pressure_carry_cz = 0;   ///< Rest of the price pressure of the citizens' orders. Not saved.
 
-	void Reset() { this->accounts.clear(); }
+	void Reset() { this->accounts.clear(); this->stock_carry_cz = 0; this->pressure_carry_cz = 0; }
 	void UpdateDaily();
 	int64_t GetTotalTreasury() const;   ///< Money in all treasuries (what could be lent out later).
 	int64_t GetTotalCitizenGold() const; ///< Ounces held by all citizens.
+	citizengold::Book GetStyleTotals(citizengold::Style style) const; ///< The books of one group over all towns, added up (for reports).
 };
 
 extern TownTreasuryManager _town_treasury;

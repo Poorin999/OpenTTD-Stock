@@ -41,6 +41,8 @@ struct GoldFactors {
 	int64_t demand_ppm = 0;      ///< Buying and selling of companies, citizens and news.
 	int64_t scarcity_ppm = 0;    ///< Stock of the market.
 	int64_t haven_ppm = 0;       ///< Safe haven: company values of the map fell.
+	int64_t cycle_ppm = 0;       ///< Slow bull / bear waves (gold_market_math.h); a pure function of the game seed and the game day.
+	int64_t noise_ppm = 0;       ///< Chance move of today (not part of the target: it is added to the day-end price, see GlideCents). Shown by the console only.
 	int64_t raw_cents = 0;       ///< anchor x cash x demand x scarcity x haven, before the limit.
 	int64_t target_cents = 0;    ///< The target after the soft and the hard limit around the anchor.
 };
@@ -79,12 +81,14 @@ struct GoldReserveManager {
 	std::array<int64_t, MAX_COMPANIES> holdings_cost{}; ///< What the gold of every company cost (money units, without commission): the base of the realised profit. 0 = unknown (old savegame).
 
 	void Reset();
-	void UpdateDaily();
+	void UpdateDaily(int64_t finished_day = -1);
 	void UpdateGlide(uint64_t total_minutes);
 	int64_t ComputeTargetCents() const;
 	GoldFactors GetFactors() const;
 	int64_t GetDayStartCents() const;
-	static int64_t GlideCents(int64_t day_start, int64_t target, int64_t minute_of_day);
+	static int64_t GlideCents(int64_t day_start, int64_t target, int64_t minute_of_day, int64_t noise_ppm = 0);
+	static int64_t NoisePpmForDay(int64_t day);
+	static int64_t CyclePpmForDay(int64_t day);
 
 	/**
 	 * How much of the normal yield a mine delivery adds, in ppm. Full while the stock is at or below the start stock; it falls in a

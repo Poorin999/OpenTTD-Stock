@@ -12,6 +12,7 @@
 #include "market_news_ai.h"
 #include "stock_base.h"
 #include "gold_reserve.h"
+#include "central_bank.h"
 #include "company_base.h"
 #include "news_func.h"
 #include "settings_type.h"
@@ -51,18 +52,40 @@ static void PublishMarketEvent(const MarketEvent &e)
 	AddNewsItem(GetEncodedString(STR_JUST_RAW_STRING, "[" + story.impact + "] " + story.headline), NewsType::General, NewsStyle::Small, {});
 }
 
-static std::vector<uint8_t> ExistingCompanies()
+/** The REAL figures of every company (old_economy[0] = last completed quarter, [1] = the one before; an empty quarter has not happened yet). */
+static std::vector<CompanyFacts> CollectCompanyFacts()
 {
-	std::vector<uint8_t> companies;
-	for (const Company *c : Company::Iterate()) companies.push_back(static_cast<uint8_t>(c->index.base()));
-	return companies;
+	std::vector<CompanyFacts> facts;
+	for (const Company *c : Company::Iterate()) {
+		const CompanyEconomyEntry &q0 = c->old_economy[0];
+		const CompanyEconomyEntry &q1 = c->old_economy[1];
+		const auto happened = [](const CompanyEconomyEntry &e) { return e.income != 0 || e.expenses != 0; };
+		CompanyFacts f;
+		f.company = static_cast<uint8_t>(c->index.base());
+		f.quarters = !happened(q0) ? 0 : (happened(q1) ? 2 : 1);
+		if (f.quarters >= 1) {
+			f.income_last = static_cast<int64_t>(q0.income);
+			f.net_last = static_cast<int64_t>(q0.income) + static_cast<int64_t>(q0.expenses);
+			f.value_last = static_cast<int64_t>(q0.company_value);
+		}
+		if (f.quarters >= 2) {
+			f.income_prev = static_cast<int64_t>(q1.income);
+			f.net_prev = static_cast<int64_t>(q1.income) + static_cast<int64_t>(q1.expenses);
+			f.value_prev = static_cast<int64_t>(q1.company_value);
+		}
+		f.debt = GetCentralBankDebt(c->index);
+		f.in_default = _central_bank.accounts[c->index.base()].in_default;
+		f.months_bankrupt = static_cast<int>(c->months_of_bankruptcy);
+		facts.push_back(f);
+	}
+	return facts;
 }
 
 MarketEvent FireMarketEventNow(int kind)
 {
 	MarketEvents &ev = _market_events;
 	ev.Seed(static_cast<uint64_t>(_settings_game.game_creation.generation_seed));
-	const MarketEvent e = ev.Generate(static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes()), ExistingCompanies(), kind);
+	const MarketEvent e = ev.Generate(static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes()), CollectCompanyFacts(), kind);
 	PublishMarketEvent(e);
 	return e;
 }
@@ -76,5 +99,5 @@ static const GameTimeSubscription _market_events_hour(GameTimeEvent::Hour, [](co
 
 	const int64_t minute = static_cast<int64_t>(now.total_minutes);
 	if (!ev.ShouldFire(minute)) return;
-	PublishMarketEvent(ev.Generate(minute, ExistingCompanies()));
+	PublishMarketEvent(ev.Generate(minute, CollectCompanyFacts()));
 });

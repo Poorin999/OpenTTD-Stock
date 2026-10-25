@@ -20,6 +20,7 @@
 #include "../gold_reserve.h"
 #include "../valuables.h"
 #include "../town_treasury.h"
+#include "../citizen_gold.h"
 #include "../cargo_market.h"
 #include "../game_time/game_time_manager.h"
 
@@ -47,7 +48,7 @@ enum StockRecordKind : uint8_t {
 	SRK_GOLD = 24,    ///< Gold market: v1 = price in 1/100 money units, v2 = baseline cash supply, v3 = ounces of the central bank, v4 = demand pressure in ppm, v5 = ounces for sale in the market plus 1 (0 = savegame from before the stock).
 	SRK_VALUABLES = 29, ///< State of the price model of a valuable: a = index of the valuable, v1 = slow drift in ppm, v2 = fast noise in ppm, v3 = state of the random number generator (the same in every row), v4 of the diamond row = diamond stock in carats + 1 (0 = old savegame).
 	SRK_POLICY = 28,  ///< Monetary policy: ym = bit 0 set when a decision was measured, bit 1 set in emergency mode, v1 = shift in bp, v2 = price index at the last decision in ppm, v3 = game day of the last decision plus 1 (0 = none), v4 = measured inflation in bp, v5 = measured growth in bp.
-	SRK_EVENT = 32,   ///< Random market event (news): a = kind, b = target company (255 = none), ym = id, v1 = game minute, v2 = push on gold in ppm, v3 = push on the sentiment of the shares in ppm, v4 = severity | variant << 8. Written oldest first.
+	SRK_EVENT = 32,   ///< Random market event (news): a = kind, b = target company (255 = none), ym = id, v1 = game minute, v2 = push on gold in ppm, v3 = push on the sentiment of the shares in ppm, v4 = severity | variant << 8, v5 = real number of a company story in ppm (0 in older savegames). Written oldest first.
 	SRK_EVENT_STATE = 33, ///< State of the events: a = 255: v1 = random number generator, v2 = sentiment of the whole market in ppm, v3 = id of the next event, v4 = game minute of the last event plus 1 (0 = none). a = 0 .. 31: v1 = sentiment of that symbol in ppm.
 	SRK_PAYROLL = 31, ///< Transport Payrolls report: ym = bit 0 set for the baseline, v1 = game day, v2 = average vehicles x100, v3 = actual x100, v4 = forecast x100, v5 = push on the gold demand in ppm. Written oldest first.
 	SRK_BANK_LOSS = 30, ///< Debts that the central bank wrote off (bankruptcy): v1 = total written off, v2 = the part that the budget could not pay, money units.
@@ -61,7 +62,8 @@ enum StockRecordKind : uint8_t {
 	SRK_STATS_MONTH = 17, ///< Profit of one month: a = company, ym = month, v1 = profit, v2 = trades, v3 = winning trades.
 	SRK_HISTORY = 8,  ///< Closed trade: a = owner, b = target, ym = id, v1 = volume, v2 = open price, v3 = close price, v4 = profit, v5 = type | reason << 8 | closed month << 16.
 	SRK_CARGO_MARKET = 35, ///< Price of one cargo: a = cargo type, ym = game days counted (0 .. 31), v1 = price in ppm, v2 = normal deliveries per day x100, v3 = recent deliveries per day x100. Written only for a cargo with a state.
-	SRK_TOWN = 34,    ///< Account of a town: ym = index of the town, v1 = ounces of the citizens, v2 = what that gold cost, v3 = savings of the citizens, v4 = treasury, v5 = spent on development. Taxes collected are not saved (they restart at 0).
+	SRK_TOWN = 34,    ///< Account of a town: ym = index of the town, b = 1 when the groups have their start wealth, v4 = treasury, v5 = spent on development. v1..v3 (ounces, cost, savings) are only read from older savegames and go to the balanced group. Taxes collected are not saved.
+	SRK_TOWN_BOOK = 36, ///< One group of citizens of a town: a = group (citizengold::Style), ym = index of the town, v1 = gold in hundredths of an ounce, v2 = what it cost, v3 = cash, v4 = profit of closed sales, v5 = wins | losses << 24 | cooldown << 48.
 };
 
 /** One saved record of the trading terminal. */
@@ -323,6 +325,7 @@ struct STCKChunkHandler : ChunkHandler {
 			r.v2 = it->gold_ppm;
 			r.v3 = it->share_ppm;
 			r.v4 = static_cast<int64_t>(it->severity) | (static_cast<int64_t>(it->variant) << 8);
+			r.v5 = it->fact_ppm;
 			write(r);
 		}
 
@@ -340,16 +343,28 @@ struct STCKChunkHandler : ChunkHandler {
 		}
 
 		for (const auto &[key, a] : _town_treasury.accounts) {
-			if (a.gold_oz == 0 && a.savings == 0 && a.treasury == 0 && a.spent == 0) continue;
+			if (!a.started && a.treasury == 0 && a.spent == 0) continue;
 			StockRecord r;
 			r.kind = SRK_TOWN;
+			r.b = a.started ? 1 : 0;
 			r.ym = static_cast<int32_t>(key);
-			r.v1 = a.gold_oz;
-			r.v2 = a.gold_cost;
-			r.v3 = a.savings;
 			r.v4 = a.treasury;
 			r.v5 = a.spent;
 			write(r);
+			for (size_t i = 0; i < citizengold::STYLE_COUNT; i++) {
+				const citizengold::Book &bk = a.books[i];
+				StockRecord br;
+				br.kind = SRK_TOWN_BOOK;
+				br.a = static_cast<uint8_t>(i);
+				br.ym = static_cast<int32_t>(key);
+				br.v1 = bk.gold_cz;
+				br.v2 = bk.cost;
+				br.v3 = bk.cash;
+				br.v4 = bk.profit;
+				br.v5 = (static_cast<int64_t>(std::clamp<int32_t>(bk.wins, 0, 0xFFFFFF))) | (static_cast<int64_t>(std::clamp<int32_t>(bk.losses, 0, 0xFFFFFF)) << 24) |
+						(static_cast<int64_t>(std::clamp<int32_t>(bk.cooldown, 0, 255)) << 48);
+				write(br);
+			}
 		}
 
 		if (_central_bank.written_off != 0 || _central_bank.uncovered_loss != 0) {
@@ -704,6 +719,7 @@ struct STCKChunkHandler : ChunkHandler {
 					ev.share_ppm = std::clamp<int64_t>(r.v3, -MARKET_EVENT_SHARE_MAX_PPM, MARKET_EVENT_SHARE_MAX_PPM);
 					ev.severity = static_cast<uint8_t>(std::clamp<int64_t>(r.v4 & 0xFF, 1, 3));
 					ev.variant = static_cast<uint8_t>(std::clamp<int64_t>((r.v4 >> 8) & 0xFF, 0, 11));
+					ev.fact_ppm = std::clamp<int64_t>(r.v5, -MARKET_FACT_CAP_PPM, MARKET_FACT_CAP_PPM);
 					_market_events.log.push_front(ev); // Records come oldest first: the newest ends up in front.
 					if (_market_events.log.size() > MARKET_EVENT_KEEP) _market_events.log.pop_back();
 					break;
@@ -733,11 +749,29 @@ struct STCKChunkHandler : ChunkHandler {
 				case SRK_TOWN: {
 					if (r.ym < 0 || r.ym > 0xFFFF) break;
 					TownAccount &a = _town_treasury.accounts[static_cast<uint32_t>(r.ym)];
-					a.gold_oz = std::max<int64_t>(r.v1, 0);
-					a.gold_cost = std::max<int64_t>(r.v2, 0);
-					a.savings = std::max<int64_t>(r.v3, 0);
+					a.started = r.b != 0 || r.v1 != 0 || r.v3 != 0;
 					a.treasury = std::max<int64_t>(r.v4, 0);
 					a.spent = std::max<int64_t>(r.v5, 0);
+					/* An older savegame kept one pot: its gold (whole ounces) and savings go to the balanced group. */
+					if (r.v1 != 0 || r.v3 != 0) {
+						citizengold::Book &bal = a.books[static_cast<size_t>(citizengold::Style::Balanced)];
+						bal.gold_cz += std::max<int64_t>(r.v1, 0) * citizengold::CZ_PER_OZ;
+						bal.cost += std::max<int64_t>(r.v2, 0);
+						bal.cash += std::max<int64_t>(r.v3, 0);
+					}
+					break;
+				}
+
+				case SRK_TOWN_BOOK: {
+					if (r.ym < 0 || r.ym > 0xFFFF || r.a >= citizengold::STYLE_COUNT) break;
+					citizengold::Book &bk = _town_treasury.accounts[static_cast<uint32_t>(r.ym)].books[r.a];
+					bk.gold_cz = std::max<int64_t>(r.v1, 0);
+					bk.cost = std::max<int64_t>(r.v2, 0);
+					bk.cash = std::max<int64_t>(r.v3, 0);
+					bk.profit = r.v4;
+					bk.wins = static_cast<int32_t>(r.v5 & 0xFFFFFF);
+					bk.losses = static_cast<int32_t>((r.v5 >> 24) & 0xFFFFFF);
+					bk.cooldown = static_cast<int32_t>((r.v5 >> 48) & 0xFF);
 					break;
 				}
 

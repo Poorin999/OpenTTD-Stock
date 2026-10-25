@@ -8,6 +8,13 @@
 static int g_fail = 0, g_checks = 0;
 #define CHECK(c) do { g_checks++; if (!(c)) { g_fail++; std::printf("FAIL line %d: %s\n", __LINE__, #c); } } while (0)
 
+static CompanyFacts MakeFacts(uint8_t id, int quarters, int64_t inc_last, int64_t inc_prev, int64_t net_last, int64_t net_prev, int64_t val_last, int64_t val_prev, int64_t debt = 0, bool def = false, int bankrupt = 0)
+{
+	CompanyFacts f; f.company = id; f.quarters = quarters; f.income_last = inc_last; f.income_prev = inc_prev; f.net_last = net_last; f.net_prev = net_prev;
+	f.value_last = val_last; f.value_prev = val_prev; f.debt = debt; f.in_default = def; f.months_bankrupt = bankrupt;
+	return f;
+}
+
 int main()
 {
 	/* Table sanity. */
@@ -19,12 +26,18 @@ int main()
 		const MarketStoryTexts &t = MarketStoryTextsOf(static_cast<MarketEventKind>(k));
 		CHECK(t.headline[0] && t.headline[1] && t.body[0] && t.body[1]);
 		CHECK((std::string(t.headline[0]).find("{C}") != std::string::npos) == d.company);
+		CHECK(d.company == MarketKindIsCompany(static_cast<MarketEventKind>(k)));
 	}
 
 	/* Same seed, same row of events. */
 	MarketEvents a, b;
 	a.Seed(12345); b.Seed(12345);
-	std::vector<uint8_t> comps = {0, 2, 5};
+	std::vector<CompanyFacts> comps = {
+		MakeFacts(0, 2, 150'000, 100'000, 40'000, 20'000, 1'200'000, 1'000'000),
+		MakeFacts(2, 2, 60'000, 100'000, -30'000, 40'000, 700'000, 1'000'000, 600'000, true),
+		MakeFacts(5, 2, 100'000, 100'000, 30'000, -10'000, 1'000'000, 1'000'000, 0, false, 3),
+		MakeFacts(7, 2, 100'000, 100'000, 10'000, 30'000, 1'000'000, 1'000'000),
+	};
 	for (int i = 0; i < 200; i++) {
 		MarketEvent x = a.Generate(i * 60, comps), y = b.Generate(i * 60, comps);
 		CHECK(x.kind == y.kind && x.gold_ppm == y.gold_ppm && x.share_ppm == y.share_ppm && x.target == y.target && x.variant == y.variant);
@@ -42,7 +55,7 @@ int main()
 		CHECK((e.gold_ppm > 0) == (d.gold_dir > 0) && (e.gold_ppm < 0) == (d.gold_dir < 0));
 		CHECK((e.share_ppm > 0) == (d.share_dir > 0) && (e.share_ppm < 0) == (d.share_dir < 0));
 		CHECK(d.company == (e.target != MARKET_NO_TARGET));
-		if (d.company) CHECK(e.target == 0 || e.target == 2 || e.target == 5);
+		if (d.company) CHECK(e.target == 0 || e.target == 2 || e.target == 5 || e.target == 7);
 		(void)world_only_company;
 	}
 	CHECK(seen.size() == MARKET_EVENT_KIND_COUNT);
@@ -69,7 +82,7 @@ int main()
 	MarketEvent w; w.id = 1; w.kind = MarketEventKind::EconomicBoom; w.share_ppm = 30'000; w.minute = 600;
 	s.Apply(w);
 	CHECK(s.SentimentPpm(0) == 30'000 && s.SentimentPpm(7) == 30'000);
-	MarketEvent c; c.id = 2; c.kind = MarketEventKind::CompanyScandal; c.target = 2; c.share_ppm = -90'000; c.minute = 700;
+	MarketEvent c; c.id = 2; c.kind = MarketEventKind::CompanyDistress; c.target = 2; c.share_ppm = -90'000; c.minute = 700;
 	s.Apply(c);
 	CHECK(s.SentimentPpm(2) == -60'000 && s.SentimentPpm(3) == 30'000);
 	for (int i = 0; i < 5; i++) { MarketEvent big = c; big.share_ppm = 100'000; s.Apply(big); }
@@ -80,7 +93,7 @@ int main()
 	CHECK(std::abs(s.SentimentPpm(2)) < before);
 	for (int h = 0; h < 400; h++) s.DecayHour();
 	CHECK(s.SentimentPpm(2) == 0 && s.SentimentPpm(0) == 0);
-	for (int i = 0; i < 100; i++) s.Apply(w);
+	for (int i = 0; i < 300; i++) s.Apply(w);
 	CHECK(s.log.size() == MARKET_EVENT_KEEP);
 
 	/* Forced kind (the console command stock_event). */
@@ -95,11 +108,12 @@ int main()
 	CHECK(fk.Generate(0, comps, 99).id > 0); // A number out of range is the same as -1.
 
 	/* The story writer. */
-	MarketEvent e; e.kind = MarketEventKind::CompanyScandal; e.target = 2; e.variant = 5; e.severity = 3; e.gold_ppm = 0; e.share_ppm = -90'000;
+	MarketEvent e; e.kind = MarketEventKind::CompanyDistress; e.target = 2; e.variant = 5; e.severity = 3; e.gold_ppm = 0; e.share_ppm = -90'000;
 	MarketStory st = ComposeMarketStory(e, "ABC Transport");
 	CHECK(st.headline.find("ABC Transport") != std::string::npos && st.headline.find("{C}") == std::string::npos);
 	CHECK(st.body.find("{C}") == std::string::npos);
 	CHECK(st.analysis.find("-9.00%") != std::string::npos);
+	CHECK(st.headline.find("{P}") == std::string::npos && st.body.find("{P}") == std::string::npos);
 	CHECK(st.reporter == MarketReporterName(5));
 	CHECK(MarketPpmText(-5'000) == "-0.50%" && MarketPpmText(12'345) == "+1.23%" && MarketPpmText(0) == "+0.00%" && MarketPpmText(-100) == "-0.01%");
 	MarketEvent wr; wr.kind = MarketEventKind::WarTension; wr.gold_ppm = 25'000; wr.share_ppm = -15'000;
@@ -109,6 +123,88 @@ int main()
 		MarketEvent x; x.kind = static_cast<MarketEventKind>(k); x.variant = static_cast<uint8_t>(v); x.target = MarketEventInfo(x.kind).company ? 1 : MARKET_NO_TARGET;
 		MarketStory y = ComposeMarketStory(x, "Co");
 		CHECK(!y.headline.empty() && !y.body.empty() && y.headline.find("{C}") == std::string::npos);
+	}
+
+	/* ===== The company news is TRUE ===== */
+	auto kinds_for = [&](const std::vector<CompanyFacts> &facts, int draws, uint64_t seed) {
+		MarketEvents g2; g2.Seed(seed);
+		std::set<int> kinds;
+		for (int i = 0; i < draws; i++) {
+			MarketEvent e = g2.Generate(i * 60, facts);
+			if (!MarketKindIsCompany(e.kind)) continue;
+			kinds.insert(static_cast<int>(e.kind));
+			int64_t fact = 0; int sv = 0; const CompanyFacts *cf = nullptr;
+			for (const CompanyFacts &f : facts) if (f.company == e.target) cf = &f;
+			CHECK(cf != nullptr);
+			if (cf != nullptr) { CHECK(CompanyEventFact(e.kind, *cf, fact, sv)); CHECK(fact == e.fact_ppm && sv == e.severity); }
+		}
+		return kinds;
+	};
+	const int RU = (int)MarketEventKind::CompanyRevenueUp, RD = (int)MarketEventKind::CompanyRevenueDown, PU = (int)MarketEventKind::CompanyProfitUp, PD = (int)MarketEventKind::CompanyProfitDown;
+	const int LS = (int)MarketEventKind::CompanyLoss, VU = (int)MarketEventKind::CompanyValueUp, VD = (int)MarketEventKind::CompanyValueDown, DS = (int)MarketEventKind::CompanyDistress, BK = (int)MarketEventKind::CompanyBankruptcy;
+	CHECK(kinds_for({ MakeFacts(1, 0, 0, 0, 0, 0, 0, 0) }, 5000, 11).empty());
+	{
+		std::set<int> k = kinds_for({ MakeFacts(1, 2, 150'000, 100'000, 45'000, 30'000, 1'300'000, 1'000'000) }, 20000, 12);
+		CHECK(k.count(RU) && k.count(PU) && k.count(VU));
+		CHECK(!k.count(RD) && !k.count(PD) && !k.count(LS) && !k.count(VD) && !k.count(DS) && !k.count(BK));
+		std::set<int> j = kinds_for({ MakeFacts(1, 2, 50'000, 100'000, -40'000, -10'000, 600'000, 900'000, 500'000, true) }, 20000, 13);
+		CHECK(j.count(RD) && j.count(LS) && j.count(VD) && j.count(DS));
+		CHECK(!j.count(RU) && !j.count(PU) && !j.count(PD) && !j.count(VU) && !j.count(BK));
+	}
+	{
+		int64_t fact; int sv;
+		CHECK(!CompanyEventFact(MarketEventKind::CompanyDistress, MakeFacts(1, 2, 1, 1, 1, 1, 1'000'000, 1'000'000, 100'000), fact, sv));
+		CHECK(CompanyEventFact(MarketEventKind::CompanyDistress, MakeFacts(1, 2, 1, 1, 1, 1, 1'000'000, 1'000'000, 100'000, true), fact, sv) && sv >= 2);
+		CHECK(CompanyEventFact(MarketEventKind::CompanyDistress, MakeFacts(1, 2, 1, 1, 1, 1, 1'000'000, 1'000'000, 600'000), fact, sv) && fact == 600'000 && sv == 1);
+		CHECK(!CompanyEventFact(MarketEventKind::CompanyBankruptcy, MakeFacts(1, 2, 1, 1, 1, 1, 1, 1), fact, sv));
+		CHECK(CompanyEventFact(MarketEventKind::CompanyBankruptcy, MakeFacts(1, 2, 1, 1, 1, 1, 1, 1, 0, false, 4), fact, sv) && fact == 4 && sv == 3);
+		CHECK(!CompanyEventFact(MarketEventKind::CompanyRevenueUp, MakeFacts(1, 1, 500'000, 100'000, 1, 1, 1, 1), fact, sv));
+		CHECK(CompanyEventFact(MarketEventKind::CompanyLoss, MakeFacts(1, 1, 100'000, 0, -25'000, 0, 1, 1), fact, sv) && fact == 250'000);
+		CHECK(!CompanyEventFact(MarketEventKind::CompanyRevenueUp, MakeFacts(1, 2, 1'000, 100, 1, 1, 1, 1), fact, sv));
+		CHECK(CompanyEventFact(MarketEventKind::CompanyRevenueUp, MakeFacts(1, 2, 150'000, 100'000, 1, 1, 1, 1), fact, sv) && fact == 500'000 && sv == 2);
+		CHECK(CompanyEventFact(MarketEventKind::CompanyRevenueUp, MakeFacts(1, 2, 110'000, 100'000, 1, 1, 1, 1), fact, sv) && fact == 100'000 && sv == 1);
+		CHECK(CompanyEventFact(MarketEventKind::CompanyRevenueUp, MakeFacts(1, 2, 300'000, 100'000, 1, 1, 1, 1), fact, sv) && fact == 2'000'000 && sv == 3);
+		CHECK(CompanyEventFact(MarketEventKind::CompanyProfitDown, MakeFacts(1, 2, 1, 1, 20'000, 30'000, 1, 1), fact, sv) && fact == -333'333 && sv == 1);
+		CHECK(CompanyEventFact(MarketEventKind::CompanyProfitUp, MakeFacts(1, 2, 1, 1, 20'000, -5'000, 1, 1), fact, sv) && fact == 0);
+		CHECK(!CompanyEventFact(MarketEventKind::CompanyProfitUp, MakeFacts(1, 2, 1, 1, 20'000, 19'000, 1, 1), fact, sv));
+		CHECK(!CompanyEventFact(MarketEventKind::CompanyProfitDown, MakeFacts(1, 2, 1, 1, -5'000, 30'000, 1, 1), fact, sv));
+		CHECK(!CompanyEventFact(MarketEventKind::WarTension, MakeFacts(1, 2, 1, 1, 1, 1, 1, 1), fact, sv));
+	}
+	{ /* The same news about the same company is not repeated within 30 game days. */
+		std::vector<CompanyFacts> one = { MakeFacts(1, 2, 150'000, 100'000, 1, 1, 1'000'000, 1'000'000) };
+		MarketEvents rg; rg.Seed(22);
+		int made = 0; int64_t last = -1;
+		for (int h = 0; h < 24 * 200; h++) {
+			const int64_t now = int64_t(h) * 60;
+			if (!rg.ShouldFire(now)) continue;
+			MarketEvent e = rg.Generate(now, one);
+			if (e.kind == MarketEventKind::CompanyRevenueUp) { if (last >= 0) CHECK(now - last >= MARKET_COMPANY_REPEAT_DAYS * 24 * 60); last = now; made++; }
+			rg.Apply(e);
+		}
+		std::printf("revenue-up news in 200 game days: %d\n", made);
+		CHECK(made >= 2 && made <= 7);
+	}
+	{ /* The story prints the real number. */
+		MarketEvent e; e.kind = MarketEventKind::CompanyRevenueUp; e.target = 1; e.fact_ppm = 123'456; e.variant = 0; e.severity = 1; e.share_ppm = 20'000;
+		MarketStory st = ComposeMarketStory(e, "ABC");
+		CHECK(st.headline.find("12.3%") != std::string::npos && st.analysis.find("+12.3%") != std::string::npos);
+		e.kind = MarketEventKind::CompanyProfitDown; e.fact_ppm = -333'333; e.variant = 1;
+		st = ComposeMarketStory(e, "ABC");
+		CHECK(st.headline.find("33.3%") != std::string::npos && st.analysis.find("-33.3%") != std::string::npos);
+		e.kind = MarketEventKind::CompanyProfitUp; e.fact_ppm = 0;
+		st = ComposeMarketStory(e, "ABC");
+		CHECK(st.headline.find("%") == std::string::npos && st.analysis.find("กลับมามีกำไร") != std::string::npos);
+		e.kind = MarketEventKind::CompanyRevenueUp; e.fact_ppm = 0; e.variant = 0;
+		st = ComposeMarketStory(e, "ABC");
+		CHECK(st.headline == "ABC รายได้ไตรมาสล่าสุดเพิ่มขึ้น" && st.body.find("  ") == std::string::npos);
+	}
+	{ /* Gold events do not lean one way any more. */
+		MarketEvents gb; gb.Seed(4242);
+		int64_t sum = 0, sum_abs = 0; int ups = 0, downs = 0;
+		for (int i = 0; i < 200000; i++) { MarketEvent e = gb.Generate(i, {}); sum += e.gold_ppm; sum_abs += std::abs(e.gold_ppm); if (e.gold_ppm > 0) ups++; else if (e.gold_ppm < 0) downs++; }
+		std::printf("gold events: up %d down %d\n", ups, downs);
+		CHECK(std::abs(sum) * 100 < sum_abs * 8);
+		CHECK(ups * 10 < downs * 14 && downs * 10 < ups * 14);
 	}
 
 	std::printf("%d checks, %d failed\n", g_checks, g_fail);

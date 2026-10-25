@@ -13,6 +13,7 @@
  * and one of three presenters, and the analyst line is built from the real numbers of the event (the push on gold and on the shares). The result
  * depends only on the event, so every client of a network game shows the same story, and a savegame needs to keep only the numbers.
  * Thai text. (English texts are not written yet.)
+ * COMPANY stories are written from REAL figures (MarketEvent::fact_ppm printed as {P}); see CompanyEventFact in market_events.h.
  * This file needs only the standard library.
  */
 
@@ -106,22 +107,58 @@ inline const MarketStoryTexts &MarketStoryTextsOf(MarketEventKind kind)
 		{ { "พายุใหญ่ถล่ม เส้นทางขนส่งหยุดชะงัก", "อากาศแปรปรวนรุนแรง เที่ยวบินและขบวนรถล่าช้า" },
 		  { "พายุที่รุนแรงทำให้เส้นทางขนส่งหลายสายต้องปิดชั่วคราว ธุรกิจเสียโอกาสทำรายได้ นักลงทุนจึงลดน้ำหนักหุ้นขนส่ง",
 		    "ความเสียหายต่อโครงสร้างพื้นฐานทำให้ต้นทุนซ่อมแซมเพิ่มขึ้น ตลาดหุ้นอ่อนตัวลงชั่วคราว" } },
-		/* CompanyContract */
-		{ { "{C} คว้าสัญญาขนส่งรายใหญ่", "{C} ได้ลูกค้ารายใหม่ รายได้มีแนวโน้มเพิ่ม" },
-		  { "{C} ประกาศชนะการประมูลสัญญาขนส่งระยะยาว นักวิเคราะห์มองว่าจะช่วยเพิ่มรายได้อย่างมั่นคง นักลงทุนจึงเข้าซื้อหุ้น",
-		    "ลูกค้ารายใหญ่เลือกใช้บริการของ {C} ความเชื่อมั่นของผู้ถือหุ้นดีขึ้นทันที" } },
-		/* CompanyAccident */
-		{ { "อุบัติเหตุกับขบวนของ {C} หุ้นร่วง", "{C} หยุดให้บริการบางเส้นทางหลังเกิดอุบัติเหตุ" },
-		  { "เกิดอุบัติเหตุกับยานพาหนะของ {C} ทำให้ต้องหยุดให้บริการบางเส้นทางเพื่อตรวจสอบ นักลงทุนกังวลเรื่องค่าใช้จ่ายและชื่อเสียงของบริษัท",
-		    "ค่าชดเชยและการซ่อมแซมอาจกระทบกำไรของ {C} ผู้ถือหุ้นบางส่วนเร่งขายออก" } },
-		/* CompanyScandal */
-		{ { "ข่าวฉาว {C} ถูกตรวจสอบบัญชี", "นักลงทุนเทขายหุ้น {C} หลังมีข่าวทุจริต" },
-		  { "มีรายงานว่าหน่วยงานกำกับกำลังตรวจสอบบัญชีของ {C} ความเชื่อมั่นของนักลงทุนลดลงอย่างรวดเร็ว",
-		    "ข้อกล่าวหาเรื่องการจัดการงบการเงินของ {C} ทำให้หุ้นถูกเทขายหนัก ทางบริษัทยังไม่ออกมาชี้แจง" } },
-		/* CompanyProfitRumor */
-		{ { "ลือ {C} กำไรทำสถิติใหม่", "แหล่งข่าวเผย {C} ผลประกอบการเกินคาด" },
-		  { "แหล่งข่าวในวงการระบุว่า {C} มีแนวโน้มประกาศกำไรสูงกว่าที่ตลาดคาดไว้ ทำให้มีแรงซื้อเข้ามาล่วงหน้า",
-		    "นักวิเคราะห์หลายรายปรับเพิ่มคำแนะนำซื้อหุ้น {C} หลังเห็นปริมาณการขนส่งที่เพิ่มขึ้น" } },
+		/* CompanyRevenueUp ({P} = real change of the revenue) */
+		{ { "{C} รายได้ไตรมาสล่าสุดเพิ่มขึ้น {P}", "งบ {C} รายได้โต {P} จากไตรมาสก่อน" },
+		  { "ตามงบการเงินไตรมาสล่าสุด รายได้ของ {C} เพิ่มขึ้น {P} เมื่อเทียบกับไตรมาสก่อนหน้า นักลงทุนมองว่าธุรกิจขนส่งของบริษัทเติบโตจริงและเริ่มเข้าซื้อหุ้น",
+		    "รายได้จากการขนส่งของ {C} สูงกว่าไตรมาสก่อน {P} ตัวเลขนี้มาจากงบจริงของบริษัท จึงได้รับแรงซื้อจากนักลงทุน" } },
+		/* CompanyProfitDown */
+		{ { "กำไรไตรมาสล่าสุดของ {C} ลดลง {P}", "{C} กำไรหดตัว {P} นักลงทุนเริ่มระวัง" },
+		  { "งบการเงินล่าสุดชี้ว่ากำไรสุทธิของ {C} ลดลง {P} จากไตรมาสก่อน แม้ยังเป็นกำไรอยู่ แต่นักลงทุนกังวลว่าต้นทุนจะกดดันผลประกอบการต่อไป",
+		    "ผลประกอบการของ {C} อ่อนลง กำไรสุทธิลดลง {P} เทียบกับไตรมาสก่อน ผู้ถือหุ้นบางส่วนจึงขายออก" } },
+		/* CompanyDistress ({P} = debt as a share of the company value) */
+		{ { "{C} มีหนี้ธนาคารกลางสูง {P} ของมูลค่าบริษัท", "ภาระหนี้ของ {C} น่ากังวล นักลงทุนลดความเสี่ยง" },
+		  { "{C} มีหนี้กับธนาคารกลางคิดเป็น {P} ของมูลค่าบริษัท ยิ่งหนี้สูงความเสี่ยงที่จะผิดนัดชำระยิ่งมาก นักลงทุนจึงเทขายหุ้น",
+		    "ธนาคารกลางรายงานว่าหนี้ของ {C} สูงถึง {P} ของมูลค่าบริษัท หากชำระดอกเบี้ยไม่ไหวอาจถูกปรับและถูกยึดทรัพย์" } },
+		/* CompanyProfitUp (without a number the story is 'back to a profit') */
+		{ { "กำไรไตรมาสล่าสุดของ {C} เพิ่มขึ้น {P}", "{C} ผลงานเยี่ยม กำไรโต {P}" },
+		  { "งบการเงินล่าสุดแสดงว่ากำไรสุทธิของ {C} เพิ่มขึ้น {P} จากไตรมาสก่อน นักวิเคราะห์ปรับมุมมองเป็นบวก และมีแรงซื้อหุ้นเข้ามา",
+		    "ผลประกอบการไตรมาสล่าสุดของ {C} ดีขึ้นอย่างชัดเจน กำไรสุทธิเพิ่ม {P} เทียบกับไตรมาสก่อน" } },
+		/* CompanyRevenueDown */
+		{ { "รายได้ไตรมาสล่าสุดของ {C} ลดลง {P}", "{C} รายได้หด {P} จากไตรมาสก่อน" },
+		  { "งบการเงินล่าสุดระบุว่ารายได้ของ {C} ลดลง {P} เมื่อเทียบกับไตรมาสก่อนหน้า นักลงทุนกังวลว่าปริมาณงานขนส่งลดลง",
+		    "ตัวเลขรายได้ของ {C} อ่อนตัวลง {P} ผู้ถือหุ้นบางส่วนจึงขายหุ้นออก" } },
+		/* CompanyLoss ({P} = loss as a share of the revenue) */
+		{ { "{C} ขาดทุนไตรมาสล่าสุด คิดเป็น {P} ของรายได้", "งบ {C} ออกมาขาดทุน นักลงทุนผิดหวัง" },
+		  { "ไตรมาสล่าสุด {C} มีรายจ่ายมากกว่ารายได้ ขาดทุนสุทธิเท่ากับ {P} ของรายได้ ผู้ถือหุ้นกังวลเรื่องกระแสเงินสดและเทขายหุ้น",
+		    "ผลประกอบการไตรมาสล่าสุดของ {C} อยู่ในแดนลบ ขาดทุนสุทธิคิดเป็น {P} ของรายได้ ทำให้ราคาหุ้นถูกกดดัน" } },
+		/* CompanyValueUp */
+		{ { "มูลค่าบริษัท {C} เพิ่มขึ้น {P}", "สินทรัพย์ของ {C} เติบโต {P} จากไตรมาสก่อน" },
+		  { "มูลค่ากิจการของ {C} ณ สิ้นไตรมาสล่าสุดสูงกว่าไตรมาสก่อนหน้า {P} นักลงทุนจึงให้ราคาหุ้นสูงขึ้น",
+		    "{C} มีมูลค่าบริษัทเพิ่มขึ้น {P} ตามงบล่าสุด ซึ่งช่วยหนุนความเชื่อมั่นของผู้ถือหุ้น" } },
+		/* CompanyValueDown */
+		{ { "มูลค่าบริษัท {C} ลดลง {P}", "สินทรัพย์ของ {C} หดตัว {P} จากไตรมาสก่อน" },
+		  { "มูลค่ากิจการของ {C} ณ สิ้นไตรมาสล่าสุดต่ำกว่าไตรมาสก่อนหน้า {P} นักลงทุนจึงลดน้ำหนักหุ้นตัวนี้",
+		    "{C} มีมูลค่าบริษัทลดลง {P} ตามงบล่าสุด ผู้ถือหุ้นบางส่วนเร่งขายออก" } },
+		/* CompanyBankruptcy ({P} = months of bankruptcy) */
+		{ { "{C} เข้าสู่ภาวะล้มละลาย", "{C} ล้มละลาย เดือนที่ {P} ของกระบวนการ" },
+		  { "{C} อยู่ในภาวะล้มละลายแล้ว {P} เดือน หากยังฟื้นไม่ได้ ธนาคารกลางอาจยึดทรัพย์และเปิดประมูล หุ้นถูกเทขายอย่างหนัก",
+		    "ผู้ถือหุ้นของ {C} กังวลอย่างหนักเมื่อบริษัทเข้าสู่ภาวะล้มละลาย ({P} เดือน) ราคาหุ้นดิ่งลง" } },
+		/* RateHike */
+		{ { "ธนาคารกลางขึ้นดอกเบี้ย ตลาดหุ้นและทองถูกเทขาย", "ดอกเบี้ยขาขึ้น กดดันสินทรัพย์เสี่ยง" },
+		  { "การขึ้นดอกเบี้ยทำให้ต้นทุนเงินกู้สูงขึ้น นักลงทุนลดการถือหุ้น และการถือทองคำซึ่งไม่มีดอกเบี้ยน่าสนใจน้อยลง",
+		    "ผลตอบแทนเงินฝากที่ดีขึ้นดึงเงินออกจากหุ้นและทองคำ ราคาปรับลงทั้งสองตลาด" } },
+		/* CentralBanksSellGold */
+		{ { "ธนาคารกลางบางแห่งทยอยขายทองคำสำรอง", "ทองคำถูกเทขายจากทุนสำรอง ราคาอ่อนตัว" },
+		  { "รายงานระบุว่าธนาคารกลางบางประเทศลดสัดส่วนทองคำในทุนสำรอง ทำให้อุปทานในตลาดเพิ่มขึ้นและราคาปรับลง",
+		    "ปริมาณทองคำที่ออกสู่ตลาดเพิ่มขึ้นจากการขายของภาครัฐ นักลงทุนจึงชะลอการซื้อ" } },
+		/* JewelleryDemandDrop */
+		{ { "ความต้องการทองรูปพรรณซบเซาหลังเทศกาล", "ร้านทองเงียบ ยอดซื้อต่ำกว่าปกติ" },
+		  { "หลังช่วงเทศกาลผ่านไป ยอดขายเครื่องประดับทองคำลดลง ผู้ค้าลดการสั่งซื้อ ราคาทองจึงอ่อนตัว",
+		    "ผู้บริโภคชะลอการซื้อทองหลังใช้จ่ายไปมากในช่วงเทศกาล ความต้องการทองในตลาดลดลง" } },
+		/* ProfitTaking */
+		{ { "นักลงทุนเทขายทำกำไรทองคำ", "แรงขายทำกำไรกดราคาทอง" },
+		  { "หลังราคาทองคำปรับขึ้นมาระยะหนึ่ง นักลงทุนบางส่วนขายทำกำไร ทำให้ราคาย่อตัวลง",
+		    "ผู้ที่ซื้อทองไว้ก่อนหน้าทยอยขายล็อกกำไร ราคาทองจึงอ่อนตัวลงในระยะสั้น" } },
 	};
 	const size_t i = static_cast<size_t>(kind);
 	return table[i < MARKET_EVENT_KIND_COUNT ? i : 0];
@@ -150,6 +187,56 @@ inline std::string MarketPpmText(int64_t ppm)
 	return text;
 }
 
+/** A number in ppm as an unsigned percentage with one decimal, for example 12.3%. */
+inline std::string MarketPercentText(int64_t ppm)
+{
+	const int64_t a = ppm < 0 ? -ppm : ppm;
+	const int64_t tenths = a / 1'000; // 1 tenth of a percent = 1,000 ppm
+	return std::to_string(tenths / 10) + "." + std::to_string(tenths % 10) + "%";
+}
+
+/** The real number of a company story as printed: months for a bankruptcy, otherwise a percentage; "" when not known. */
+inline std::string MarketFactText(MarketEventKind kind, int64_t fact_ppm)
+{
+	if (fact_ppm == 0 || !MarketKindIsCompany(kind)) return std::string();
+	if (kind == MarketEventKind::CompanyBankruptcy) return std::to_string(fact_ppm);
+	return MarketPercentText(fact_ppm);
+}
+
+/** Replace every {P}. An unknown number takes its space with it. */
+inline std::string MarketReplaceFact(std::string text, const std::string &fact)
+{
+	for (size_t pos = text.find("{P}"); pos != std::string::npos; pos = text.find("{P}", pos)) {
+		size_t from = pos, len = 3;
+		if (fact.empty() && from > 0 && text[from - 1] == ' ') { from--; len++; }
+		text.replace(from, len, fact);
+		pos = from + fact.size();
+	}
+	return text;
+}
+
+/** The real figure as one line of the analyst text of a company story. */
+inline std::string MarketFactLine(const MarketEvent &e)
+{
+	if (!MarketKindIsCompany(e.kind)) return std::string();
+	const std::string p = MarketFactText(e.kind, e.fact_ppm);
+	const std::string signed_p = p.empty() ? std::string("-") : std::string(e.fact_ppm > 0 ? "+" : "-") + p;
+	switch (e.kind) {
+		case MarketEventKind::CompanyRevenueUp:
+		case MarketEventKind::CompanyRevenueDown: return "ข้อมูลจริงจากงบ: รายได้ไตรมาสล่าสุดเทียบไตรมาสก่อน " + signed_p;
+		case MarketEventKind::CompanyProfitUp:
+			if (e.fact_ppm == 0) return "ข้อมูลจริงจากงบ: กลับมามีกำไรสุทธิ";
+			return "ข้อมูลจริงจากงบ: กำไรสุทธิเทียบไตรมาสก่อน " + signed_p;
+		case MarketEventKind::CompanyProfitDown: return "ข้อมูลจริงจากงบ: กำไรสุทธิเทียบไตรมาสก่อน " + signed_p;
+		case MarketEventKind::CompanyLoss: return "ข้อมูลจริงจากงบ: ขาดทุนสุทธิ " + (p.empty() ? std::string("-") : p) + " ของรายได้";
+		case MarketEventKind::CompanyValueUp:
+		case MarketEventKind::CompanyValueDown: return "ข้อมูลจริงจากงบ: มูลค่าบริษัทเทียบไตรมาสก่อน " + signed_p;
+		case MarketEventKind::CompanyDistress: return "ข้อมูลจริง: หนี้ธนาคารกลาง " + (p.empty() ? std::string("-") : p) + " ของมูลค่าบริษัท";
+		case MarketEventKind::CompanyBankruptcy: return "ข้อมูลจริง: อยู่ในภาวะล้มละลาย " + (p.empty() ? std::string("-") : p) + " เดือน";
+		default: return std::string();
+	}
+}
+
 /** The three presenters. The story of an event always has the same one. */
 inline const char *MarketReporterName(uint8_t variant)
 {
@@ -172,23 +259,30 @@ inline MarketStory ComposeMarketStory(const MarketEvent &e, const std::string &c
 {
 	const MarketStoryTexts &t = MarketStoryTextsOf(e.kind);
 	MarketStory s;
-	s.headline = MarketReplaceCompany(t.headline[e.variant & 1], company);
-	s.body = MarketReplaceCompany(t.body[(e.variant >> 1) & 1], company);
+	const std::string fact = MarketFactText(e.kind, e.fact_ppm);
+	if (e.kind == MarketEventKind::CompanyProfitUp && e.fact_ppm == 0) {
+		static const char *const heads[2] = { "{C} พลิกกลับมามีกำไรแล้ว", "{C} พ้นจากภาวะขาดทุน" };
+		static const char *const bodies[2] = {
+			"งบไตรมาสล่าสุดของ {C} เป็นกำไรสุทธิ หลังจากไตรมาสก่อนหน้าที่ขาดทุนหรือยังไม่มีกำไร นักลงทุนมองเป็นสัญญาณบวก",
+			"{C} รายงานกำไรสุทธิในไตรมาสล่าสุด ต่างจากไตรมาสก่อนที่ยังไม่มีกำไร ความเชื่อมั่นของผู้ถือหุ้นดีขึ้น" };
+		s.headline = MarketReplaceCompany(heads[e.variant & 1], company);
+		s.body = MarketReplaceCompany(bodies[(e.variant >> 1) & 1], company);
+	} else {
+		s.headline = MarketReplaceFact(MarketReplaceCompany(t.headline[e.variant & 1], company), fact);
+		s.body = MarketReplaceFact(MarketReplaceCompany(t.body[(e.variant >> 1) & 1], company), fact);
+	}
 	s.reporter = MarketReporterName(e.variant);
 	s.impact = MarketImpactText(e.severity);
 
-	/* The analyst line is built from the numbers, so it is always true to what the event did. */
-	std::string a;
+	std::string a = MarketFactLine(e);
 	if (e.gold_ppm != 0) {
+		if (!a.empty()) a += "  ";
 		a += std::string("ทองคำ: แรงกดดันราคา ") + MarketPpmText(e.gold_ppm) + (e.gold_ppm > 0 ? " (มีแนวโน้มปรับขึ้น)" : " (มีแนวโน้มปรับลง)");
 	}
 	if (e.share_ppm != 0) {
 		if (!a.empty()) a += "  ";
-		if (e.target != MARKET_NO_TARGET) {
-			a += std::string("หุ้น ") + company + ": " + MarketPpmText(e.share_ppm) + (e.share_ppm > 0 ? " (มีแนวโน้มปรับขึ้น)" : " (มีแนวโน้มปรับลง)");
-		} else {
-			a += std::string("หุ้นทุกบริษัท: ") + MarketPpmText(e.share_ppm) + (e.share_ppm > 0 ? " (มีแนวโน้มปรับขึ้น)" : " (มีแนวโน้มปรับลง)");
-		}
+		if (e.target != MARKET_NO_TARGET) a += std::string("หุ้น ") + company + ": " + MarketPpmText(e.share_ppm) + (e.share_ppm > 0 ? " (มีแนวโน้มปรับขึ้น)" : " (มีแนวโน้มปรับลง)");
+		else a += std::string("หุ้นทุกบริษัท: ") + MarketPpmText(e.share_ppm) + (e.share_ppm > 0 ? " (มีแนวโน้มปรับขึ้น)" : " (มีแนวโน้มปรับลง)");
 	}
 	if (a.empty()) a = "ยังไม่มีผลต่อราคา";
 	s.analysis = a;

@@ -96,12 +96,12 @@ void MarketNewsPanel::Draw(const Rect &r) const
 	if (width <= 0) return;
 
 	DrawString(l.left, l.right, l.title_y, "ข่าว (NEWS)", TC_LIGHT_BLUE, SA_LEFT);
-	DrawString(l.left, l.right, l.title_y, fmt::format("ข่าวสุ่มจากตลาดโลก {} ข่าว", _market_events.log.size()), TC_GREY, SA_RIGHT);
+	DrawString(l.left, l.right, l.title_y, fmt::format("ข่าวตลาด {} ข่าว (ข่าวบริษัทอิงตัวเลขจริง)", _market_events.log.size()), TC_GREY, SA_RIGHT);
 
 	const MarketEvent *open = OpenEvent(this->selected_id);
 	if (open == nullptr) {
 		DrawStringMultiLine(l.left, l.right, l.title_y + l.row_h + ScaleGUITrad(4), r.bottom - ScaleGUITrad(8),
-				"ยังไม่มีข่าว ข่าวจะเกิดขึ้นเองแบบสุ่มทุกไม่กี่นาที (เศรษฐกิจโลก ทองคำ และข่าวของแต่ละบริษัท) และมีผลต่อราคาทองกับราคาหุ้น", TC_GREY, SA_TOP | SA_LEFT);
+				"ยังไม่มีข่าว ข่าวโลก ทองคำ และภาคธุรกิจเกิดขึ้นแบบสุ่มทุกไม่กี่นาที ส่วนข่าวของแต่ละบริษัทจะออกก็ต่อเมื่อตัวเลขจริงในงบการเงินเป็นเช่นนั้น (รายได้ กำไร ขาดทุน หนี้ มูลค่าบริษัท)", TC_GREY, SA_TOP | SA_LEFT);
 		return;
 	}
 

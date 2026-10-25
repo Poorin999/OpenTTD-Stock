@@ -10,6 +10,8 @@
 #include "stdafx.h"
 #include "gold_reserve.h"
 #include "valuables.h"
+#include "gold_market_math.h"
+#include "settings_type.h"
 #include "tax.h"
 #include "central_bank.h"
 #include "game_time/game_time_manager.h"
@@ -26,6 +28,18 @@
 #include "safeguards.h"
 
 GoldReserveManager _gold_reserve;
+
+/** The seed of the game for the chance parts of the gold price: the same on every client, different in every game. */
+static uint64_t GoldSeed()
+{
+	return static_cast<uint64_t>(_settings_game.game_creation.generation_seed) ^ 0x601DB00CULL;
+}
+
+/** The chance move of a game day, in ppm (see gold_market_math.h). */
+int64_t GoldReserveManager::NoisePpmForDay(int64_t day) { return goldmath::DailyNoisePpm(GoldSeed(), day); }
+
+/** The slow bull / bear waves on a game day, in ppm. */
+int64_t GoldReserveManager::CyclePpmForDay(int64_t day) { return goldmath::CyclePpm(GoldSeed(), day); }
 
 /** Forget everything: a new game, or a savegame that is loaded. */
 void GoldReserveManager::Reset()
@@ -249,7 +263,13 @@ GoldFactors GoldReserveManager::GetFactors() const
 	f.haven_ppm = PPM;
 	if (before_value > 0 && now_value < before_value) f.haven_ppm += std::min<int64_t>(PPM / 5, (before_value - now_value) * PPM / before_value / 2);
 
+	/* 5. Slow waves (bull and bear phases) of the game seed: they move the price up and down by turns (mean zero). */
+	const int64_t today = static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes() / GameTimeManager::MINUTES_PER_DAY);
+	f.cycle_ppm = PPM + CyclePpmForDay(today);
+	f.noise_ppm = NoisePpmForDay(today);
+
 	int64_t raw = f.anchor_cents;
+	raw = raw * f.cycle_ppm / PPM;
 	raw = raw * f.cash_ppm / PPM;
 	raw = raw * f.demand_ppm / PPM;
 	raw = raw * f.haven_ppm / PPM;
@@ -281,12 +301,14 @@ int64_t GoldReserveManager::ComputeTargetCents() const
  * @param target The price that the economy asks for.
  * @param minute_of_day 0 .. MINUTES_PER_DAY.
  */
-int64_t GoldReserveManager::GlideCents(int64_t day_start, int64_t target, int64_t minute_of_day)
+int64_t GoldReserveManager::GlideCents(int64_t day_start, int64_t target, int64_t minute_of_day, int64_t noise_ppm)
 {
 	int64_t step = (target - day_start) * GLIDE_PERCENT_PER_DAY / 100;
 	if (step == 0 && target != day_start) step = target > day_start ? 1 : -1;
+	/* The end of the day is the glide plus the chance move of the day; inside the day the price goes there in a straight line. */
+	const int64_t day_end = (day_start + step) * (PPM + noise_ppm) / PPM;
 	const int64_t m = std::clamp<int64_t>(minute_of_day, 0, GameTimeManager::MINUTES_PER_DAY);
-	return std::max<int64_t>(1, day_start + step * m / GameTimeManager::MINUTES_PER_DAY);
+	return std::max<int64_t>(1, day_start + (day_end - day_start) * m / GameTimeManager::MINUTES_PER_DAY);
 }
 
 /** Every few game minutes: the live price glides on towards the end of the day. Buying, selling and news move the target, so they are felt at once (a little), not only at midnight. */
@@ -296,11 +318,12 @@ void GoldReserveManager::UpdateGlide(uint64_t total_minutes)
 	if (total_minutes % GLIDE_EVERY_MINUTES != 0) return;
 	const int64_t minute_of_day = static_cast<int64_t>(total_minutes % GameTimeManager::MINUTES_PER_DAY);
 	if (minute_of_day == 0) return; // Midnight belongs to UpdateDaily, which writes the end of the day.
-	this->price_cents = GlideCents(this->GetDayStartCents(), this->ComputeTargetCents(), minute_of_day);
+	const int64_t day = static_cast<int64_t>(total_minutes / GameTimeManager::MINUTES_PER_DAY);
+	this->price_cents = GlideCents(this->GetDayStartCents(), this->ComputeTargetCents(), minute_of_day, NoisePpmForDay(day));
 }
 
 /** One game day of the gold market: the glide reaches its end value, the day goes into the chart, and the demand effect fades. */
-void GoldReserveManager::UpdateDaily()
+void GoldReserveManager::UpdateDaily(int64_t finished_day)
 {
 	/* The gold of a company that does not exist any more is gone. */
 	for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
@@ -311,7 +334,10 @@ void GoldReserveManager::UpdateDaily()
 	this->mine_intake_today_oz = 0;               // A new day: the mines may add gold again.
 
 	/* The end of the day: the same formula as the glide, with a whole day. The new price is the start of the next glide (last point of the chart). */
-	this->price_cents = GlideCents(this->GetDayStartCents(), this->ComputeTargetCents(), GameTimeManager::MINUTES_PER_DAY);
+	if (finished_day < 0) finished_day = std::max<int64_t>(0, static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes() / GameTimeManager::MINUTES_PER_DAY) - 1);
+	this->price_cents = GlideCents(this->GetDayStartCents(), this->ComputeTargetCents(), GameTimeManager::MINUTES_PER_DAY, NoisePpmForDay(finished_day));
+	/* The world takes gold out of the stock and puts new gold in (scrap, jewellery, new mines): the stock moves back to its start level, so mines can not sink the price for good. */
+	this->market_stock_oz = goldmath::RebalancedStock(this->market_stock_oz, MARKET_STOCK_START);
 	this->PushHistory();
 
 	/* The demand effect of the buying and selling fades by 3% a day. */
@@ -326,9 +352,10 @@ static const GameTimeSubscription _gold_start(GameTimeEvent::Minute, [](const Ga
 	if (_gold_reserve.GetPriceCents() <= 0) _gold_reserve.EnsureStarted();
 });
 
-static const GameTimeSubscription _gold_daily(GameTimeEvent::Day, [](const GameTimeSnapshot &)
+static const GameTimeSubscription _gold_daily(GameTimeEvent::Day, [](const GameTimeSnapshot &now)
 {
-	_gold_reserve.UpdateDaily();
+	const int64_t day = static_cast<int64_t>(now.total_minutes / GameTimeManager::MINUTES_PER_DAY);
+	_gold_reserve.UpdateDaily(std::max<int64_t>(0, day - 1)); // The day that has just ended.
 });
 
 /** The gold windows have to redraw. */

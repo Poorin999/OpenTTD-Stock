@@ -25,6 +25,7 @@
 #include "market_events.h"
 #include "cargo_market.h"
 #include "gold_reserve.h"
+#include "town_treasury.h"
 #include "valuables.h"
 #include "cargotype.h"
 #include "strings_func.h"
@@ -144,6 +145,7 @@ static bool ConGoldFactors(std::span<std::string_view> argv)
 	auto pct = [](int64_t ppm) { return fmt::format("{}.{:02}%", ppm / 10000, (ppm < 0 ? -ppm : ppm) % 10000 / 100); };
 	auto money = [](int64_t cents) { return fmt::format("{}.{:02}", cents / 100, (cents < 0 ? -cents : cents) % 100); };
 	IConsolePrint(CC_DEFAULT, "inflation {}  cash {}  demand {}  scarcity {}  safe haven {}", pct(f.inflation_ppm), pct(f.cash_ppm), pct(f.demand_ppm), pct(f.scarcity_ppm), pct(f.haven_ppm));
+	IConsolePrint(CC_DEFAULT, "slow waves (bull/bear) {}  chance move of today {} ppm", pct(f.cycle_ppm), f.noise_ppm);
 	IConsolePrint(CC_DEFAULT, "anchor (base x inflation) {}  target before limit {}  target {}", money(f.anchor_cents), money(f.raw_cents), money(f.target_cents));
 	IConsolePrint(CC_DEFAULT, "price now {}  price at midnight {}  pressure {} ppm  market stock {} oz  history days {}", money(_gold_reserve.GetPriceCents()), money(_gold_reserve.GetDayStartCents()), _gold_reserve.pressure_ppm, _gold_reserve.market_stock_oz, _gold_reserve.history_cents.size());
 	IConsolePrint(CC_DEFAULT, "diamond stock {} carats  diamond scarcity {}", _valuables.diamond_stock_carats, pct(_valuables.DiamondScarcityPpm()));
@@ -155,7 +157,7 @@ static bool ConGoldFactors(std::span<std::string_view> argv)
 static bool ConStockEvent(std::span<std::string_view> argv)
 {
 	if (argv.empty()) {
-		IConsolePrint(CC_HELP, "Make a market news event now (test tool, single player, after 'stock_dev on'). Usage: 'stock_event' (a random kind) or 'stock_event <0-19>' (a kind: 0 boom, 1 recession, 2 inflation, 3 rate cut hope, 4 war, 5 peace, 6 bank scare, 7 gold mine found, 8 mine strike, 9 central banks buy gold, 10 jewellery demand, 11 fuel up, 12 fuel down, 13 technology, 14 tourism, 15 storm, 16 company contract, 17 company accident, 18 company scandal, 19 company profit rumour).");
+		IConsolePrint(CC_HELP, "Make a market news event now (test tool, single player, after 'stock_dev on'). Usage: 'stock_event' (a random kind) or 'stock_event <0-28>' (a kind: 0 boom, 1 recession, 2 inflation, 3 rate cut hope, 4 war, 5 peace, 6 bank scare, 7 gold mine found, 8 mine strike, 9 central banks buy gold, 10 jewellery demand, 11 fuel up, 12 fuel down, 13 technology, 14 tourism, 15 storm, 16 company revenue up, 17 company profit down, 18 company distress, 19 company profit up, 20 company revenue down, 21 company loss, 22 company value up, 23 company value down, 24 company bankruptcy, 25 rate hike, 26 central banks sell gold, 27 jewellery demand drop, 28 profit taking). Company kinds (16-24) are made only when TRUE for a company now, otherwise a kind is drawn by weight.");
 		return true;
 	}
 	if (argv.size() > 2) return false;
@@ -174,7 +176,7 @@ static bool ConStockEvent(std::span<std::string_view> argv)
 		const std::string_view text = argv[1];
 		const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
 		if (error != std::errc() || end != text.data() + text.size() || value >= MARKET_EVENT_KIND_COUNT) {
-			IConsolePrint(CC_ERROR, "The kind must be a whole number from 0 to 19.");
+			IConsolePrint(CC_ERROR, "The kind must be a whole number from 0 to 28.");
 			return true;
 		}
 		kind = static_cast<int>(value);
@@ -185,6 +187,22 @@ static bool ConStockEvent(std::span<std::string_view> argv)
 	return true;
 }
 
+/** Print how the four groups of citizens do with gold, all towns added up. Read only. */
+static bool ConCitizenGold(std::span<std::string_view> argv)
+{
+	if (argv.empty()) {
+		IConsolePrint(CC_HELP, "Show how the citizens trade gold. Usage: 'citizen_gold'. For each group (hoarders, speculators, overtraders, balanced savers) of all towns: gold held, cash, result of closed sales, won / lost sales and the money that went through their orders.");
+		return true;
+	}
+	static const char *const names[citizengold::STYLE_COUNT] = { "hoarders", "speculators", "overtraders", "balanced", };
+	for (size_t i = 0; i < citizengold::STYLE_COUNT; i++) {
+		const citizengold::Book b = _town_treasury.GetStyleTotals(static_cast<citizengold::Style>(i));
+		IConsolePrint(CC_DEFAULT, "{}: gold {}.{:02} oz  cash {}  result {}  sales won {} lost {}  turnover {}", names[i], b.gold_cz / 100, b.gold_cz % 100, b.cash, b.profit, b.wins, b.losses, b.turnover);
+	}
+	IConsolePrint(CC_DEFAULT, "towns with an account {}, treasuries {}", _town_treasury.accounts.size(), _town_treasury.GetTotalTreasury());
+	return true;
+}
+
 void RegisterStockConsoleCommands()
 {
 	IConsole::CmdRegister("stock_dev", ConStockDev);
@@ -192,4 +210,5 @@ void RegisterStockConsoleCommands()
 	IConsole::CmdRegister("stock_event", ConStockEvent);
 	IConsole::CmdRegister("cargo_prices", ConCargoPrices);
 	IConsole::CmdRegister("gold_factors", ConGoldFactors);
+	IConsole::CmdRegister("citizen_gold", ConCitizenGold);
 }
