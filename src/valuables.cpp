@@ -86,21 +86,27 @@ void ValuablesManager::StepFast()
 	}
 }
 
-/** Every game day: the slow drift of every valuable takes a random step and is pulled back towards 0 a little. */
+/**
+ * Every game hour: the slow drift of every valuable takes a small random step and is pulled back towards 0 a little.
+ * It used to take one big step per game day, which showed as a jump of the price at midnight. 24 steps of 1/5 of the size (5 is about the
+ * square root of 24) give the same spread over a day, and the pull is 1/24 of the daily pull. Nothing new is saved.
+ */
 void ValuablesManager::StepSlow()
 {
 	for (size_t k = 0; k < VALUABLE_COUNT; k++) {
 		const ValuableInfo &info = Info(k);
-		int64_t drift = this->drift_ppm[k] + this->RandomSigned(info.drift_step_ppm) - this->drift_ppm[k] / 60;
+		int64_t pull = this->drift_ppm[k] / (DRIFT_PULL_DAYS * DRIFT_STEPS_PER_DAY);
+		if (pull == 0 && this->drift_ppm[k] != 0) pull = this->drift_ppm[k] > 0 ? 1 : -1; // Integer division must not stop the pull.
+		const int64_t drift = this->drift_ppm[k] + this->RandomSigned(info.drift_step_ppm / DRIFT_STEP_DIVISOR) - pull;
 		this->drift_ppm[k] = std::clamp<int64_t>(drift, -info.drift_max_ppm, info.drift_max_ppm);
 	}
 }
 
-/** A smooth wave from -PPM to +PPM with the given period; day is the number of the game day, phase moves the wave. */
-static int64_t SmoothWave(int64_t day, int64_t phase, int64_t period)
+/** A smooth wave from -PPM to +PPM with the given period; t_now is the game time, phase moves the wave (both in the unit of the period, here game minutes). */
+static int64_t SmoothWave(int64_t t_now, int64_t phase, int64_t period)
 {
 	if (period < 2) return 0;
-	const int64_t t = (day + phase) % period;
+	const int64_t t = (t_now + phase) % period;
 	const int64_t half = period / 2;
 	/* A triangle from -1 to +1 and back ... */
 	const int64_t x = t < half ? -PPM + 2 * PPM * t / half : PPM - 2 * PPM * (t - half) / std::max<int64_t>(1, period - half);
@@ -127,8 +133,10 @@ int64_t ValuablesManager::GetBaseFixed(size_t index) const
 
 	int64_t price = info.anchor * STOCK_PRICE_SCALE * follow_ppm / PPM;
 
-	const int64_t day = static_cast<int64_t>(std::min<uint64_t>(GameTimeManager::Get().GetCurrentDayIndex(), INT32_MAX));
-	const int64_t cycle = info.cycle_ppm * SmoothWave(day, static_cast<int64_t>(index) * 137, info.cycle_days) / PPM;
+	/* The cycle runs on game MINUTES, not on whole days, so it does not step at midnight. */
+	constexpr int64_t MPD = GameTimeManager::MINUTES_PER_DAY;
+	const int64_t minutes = static_cast<int64_t>(std::min<uint64_t>(GameTimeManager::Get().GetTotalGameMinutes(), static_cast<uint64_t>(INT32_MAX) * MPD));
+	const int64_t cycle = info.cycle_ppm * SmoothWave(minutes, static_cast<int64_t>(index) * 137 * MPD, info.cycle_days * MPD) / PPM;
 
 	price = price * (PPM + cycle) / PPM;
 	price = price * (PPM + this->drift_ppm[index]) / PPM;
@@ -136,8 +144,8 @@ int64_t ValuablesManager::GetBaseFixed(size_t index) const
 	return std::max<int64_t>(STOCK_MIN_PRICE * STOCK_PRICE_SCALE, price);
 }
 
-/** The drift takes one step per game day of the clock, like the gold market. */
-static const GameTimeSubscription _valuables_daily(GameTimeEvent::Day, [](const GameTimeSnapshot &)
+/** The drift takes a small step every game hour of the clock (not one big step at midnight). */
+static const GameTimeSubscription _valuables_hourly(GameTimeEvent::Hour, [](const GameTimeSnapshot &)
 {
 	_valuables.StepSlow();
 });

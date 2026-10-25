@@ -6,7 +6,7 @@
  */
 
 /**
- * @file stock_console.cpp Console commands of the mod for testing: 'stock_dev on|off', 'stock_skip <time>', 'stock_event [kind]' and 'cargo_prices'.
+ * @file stock_console.cpp Console commands of the mod for testing: 'stock_dev on|off', 'stock_skip <time>', 'stock_event [kind]', 'cargo_prices' and 'gold_factors'.
  * They are registered by apply_overlay.py, which adds one call to IConsoleStdLibRegister() of console_cmds.cpp.
  */
 
@@ -16,6 +16,7 @@
 #include <string>
 #include <string_view>
 #include "stock_dev.h"
+#include "3rdparty/fmt/format.h"
 #include "console_func.h"
 #include "console_internal.h"
 #include "network/network.h"
@@ -23,6 +24,7 @@
 #include "game_time/game_time_manager.h"
 #include "market_events.h"
 #include "cargo_market.h"
+#include "gold_reserve.h"
 #include "cargotype.h"
 #include "strings_func.h"
 
@@ -126,6 +128,26 @@ static bool ConCargoPrices(std::span<std::string_view> argv)
 	return true;
 }
 
+/** Print what moves the gold price: every factor of the target, the limit, and the price now. Read only, works always. */
+static bool ConGoldFactors(std::span<std::string_view> argv)
+{
+	if (argv.empty()) {
+		IConsolePrint(CC_HELP, "Show what moves the gold price. Usage: 'gold_factors'. Prints the factors of the target price (inflation, cash, demand, scarcity, safe haven), the target before and after the limit, the price now, the price at midnight and the market stock.");
+		return true;
+	}
+	if (_gold_reserve.GetPriceCents() <= 0) {
+		IConsolePrint(CC_ERROR, "The gold market has not started yet.");
+		return true;
+	}
+	const GoldFactors f = _gold_reserve.GetFactors();
+	auto pct = [](int64_t ppm) { return fmt::format("{}.{:02}%", ppm / 10000, (ppm < 0 ? -ppm : ppm) % 10000 / 100); };
+	auto money = [](int64_t cents) { return fmt::format("{}.{:02}", cents / 100, (cents < 0 ? -cents : cents) % 100); };
+	IConsolePrint(CC_DEFAULT, "inflation {}  cash {}  demand {}  scarcity {}  safe haven {}", pct(f.inflation_ppm), pct(f.cash_ppm), pct(f.demand_ppm), pct(f.scarcity_ppm), pct(f.haven_ppm));
+	IConsolePrint(CC_DEFAULT, "anchor (base x inflation) {}  target before limit {}  target {}", money(f.anchor_cents), money(f.raw_cents), money(f.target_cents));
+	IConsolePrint(CC_DEFAULT, "price now {}  price at midnight {}  pressure {} ppm  market stock {} oz  history days {}", money(_gold_reserve.GetPriceCents()), money(_gold_reserve.GetDayStartCents()), _gold_reserve.pressure_ppm, _gold_reserve.market_stock_oz, _gold_reserve.history_cents.size());
+	return true;
+}
+
 /** Register the commands. Called from IConsoleStdLibRegister(). */
 /** 'stock_event [kind]': make a random market event now (test tool). Without a number the kind is drawn by weight. */
 static bool ConStockEvent(std::span<std::string_view> argv)
@@ -167,4 +189,5 @@ void RegisterStockConsoleCommands()
 	IConsole::CmdRegister("stock_skip", ConStockSkip);
 	IConsole::CmdRegister("stock_event", ConStockEvent);
 	IConsole::CmdRegister("cargo_prices", ConCargoPrices);
+	IConsole::CmdRegister("gold_factors", ConGoldFactors);
 }

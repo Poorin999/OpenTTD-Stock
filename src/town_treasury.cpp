@@ -53,9 +53,10 @@ static int64_t ReferencePriceCents()
 }
 
 /** The citizens buy gold with part of their savings. */
-static void CitizensBuy(TownAccount &a, int64_t cap_oz)
+static void CitizensBuy(TownAccount &a, int64_t cap_oz, int64_t scale_ppm)
 {
-	int64_t n = _gold_reserve.GetMaxBuyOunces(a.savings * TOWN_GOLD_BUY_SHARE_PERCENT / (100 * TOWN_GOLD_TRADES_PER_DAY));
+	int64_t n = _gold_reserve.GetMaxBuyOunces(a.savings * TOWN_GOLD_BUY_SHARE_PERCENT / (100 * TOWN_GOLD_TRADES_PER_DAY) * scale_ppm / GoldReserveManager::PPM);
+	cap_oz = std::max<int64_t>(1, cap_oz * scale_ppm / GoldReserveManager::PPM);
 	/* Never take the market below half of its start stock: the citizens must not make gold scarce on their own. */
 	n = std::min({n, cap_oz, _gold_reserve.market_stock_oz - GoldReserveManager::MARKET_STOCK_START / 2});
 	if (n <= 0) return;
@@ -75,11 +76,11 @@ static void CitizensBuy(TownAccount &a, int64_t cap_oz)
 }
 
 /** The citizens sell part of their gold; the tax on the profit goes to the treasury. */
-static void CitizensSell(TownAccount &a, int64_t cap_oz)
+static void CitizensSell(TownAccount &a, int64_t cap_oz, int64_t scale_ppm)
 {
 	if (a.gold_oz <= 0) return;
 	const int64_t held = a.gold_oz;
-	const int64_t n = std::min(held, std::max<int64_t>(1, std::min(cap_oz, std::max<int64_t>(1, held * TOWN_GOLD_SELL_SHARE_PERCENT / (100 * TOWN_GOLD_TRADES_PER_DAY)))));
+	const int64_t n = std::min(held, std::max<int64_t>(1, std::min(cap_oz, std::max<int64_t>(1, held * TOWN_GOLD_SELL_SHARE_PERCENT / (100 * TOWN_GOLD_TRADES_PER_DAY) * scale_ppm / GoldReserveManager::PPM))));
 
 	const int64_t gross = _gold_reserve.GetSellProceeds(n);
 	const int64_t commission = std::min(gross, GoldReserveManager::GetCommission(gross));
@@ -99,7 +100,11 @@ static void CitizensSell(TownAccount &a, int64_t cap_oz)
 			_gold_reserve.pressure_ppm - n * GoldReserveManager::PPM / GoldReserveManager::DEPTH_OUNCES);
 }
 
-/** One game hour: the citizens buy gold when it is cheap and sell when it is dear, 1/24 of the daily share per hour. Only towns that already have an account (made by TownsDaily). */
+/**
+ * One game hour: the citizens compare the price with the average of the last 30 days. Further than 0.2% below it they buy, further than 0.2% above
+ * it they sell, so they trade in most hours. The size grows with the distance: full size (1/24 of the daily share) at 2% below (buy) or 3% above (sell),
+ * smaller closer to the average. Only towns that already have an account (made by TownsDaily) and 10 days of price history are needed.
+ */
 static void TownsHourly()
 {
 	if (_game_mode != GM_NORMAL) return;
@@ -107,17 +112,21 @@ static void TownsHourly()
 
 	const int64_t ref = ReferencePriceCents();
 	if (ref <= 0) return;
-	const int64_t price = _gold_reserve.price_cents;
-	const bool cheap = price * GoldReserveManager::PPM < ref * (GoldReserveManager::PPM - TOWN_GOLD_BUY_BELOW_PPM);
-	const bool dear  = price * GoldReserveManager::PPM > ref * (GoldReserveManager::PPM + TOWN_GOLD_SELL_ABOVE_PPM);
-	if (!cheap && !dear) return;
+	const int64_t PPM = GoldReserveManager::PPM;
+	const int64_t dev_ppm = (_gold_reserve.price_cents - ref) * PPM / ref; // + dear, - cheap
+	if (dev_ppm > -TOWN_GOLD_TRADE_BAND_PPM && dev_ppm < TOWN_GOLD_TRADE_BAND_PPM) return;
+
+	const bool buy = dev_ppm < 0;
+	const int64_t dist = buy ? -dev_ppm : dev_ppm;
+	const int64_t full = buy ? TOWN_GOLD_BUY_BELOW_PPM : TOWN_GOLD_SELL_ABOVE_PPM;
+	const int64_t scale_ppm = std::clamp<int64_t>(dist * PPM / full, PPM / 10, PPM);
 
 	const int64_t cap_oz = std::max<int64_t>(1, _gold_reserve.market_stock_oz / (TOWN_GOLD_DAILY_STOCK_DIV * TOWN_GOLD_TRADES_PER_DAY));
 	for (Town *t : Town::Iterate()) {
 		if (t->cache.population < TOWN_MIN_POPULATION) continue;
 		auto it = _town_treasury.accounts.find(t->index.base());
 		if (it == _town_treasury.accounts.end()) continue;
-		if (cheap) CitizensBuy(it->second, cap_oz); else CitizensSell(it->second, cap_oz);
+		if (buy) CitizensBuy(it->second, cap_oz, scale_ppm); else CitizensSell(it->second, cap_oz, scale_ppm);
 	}
 }
 

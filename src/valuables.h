@@ -39,6 +39,10 @@ inline bool IsValuableSymbol(size_t symbol)
 	return symbol >= STOCK_FIRST_VALUABLE && symbol < STOCK_SYMBOLS;
 }
 
+static constexpr int64_t DRIFT_STEPS_PER_DAY = 24; ///< The drift steps once per game hour.
+static constexpr int64_t DRIFT_STEP_DIVISOR = 5;   ///< One hourly step is 1/5 of the daily step (5 is about the square root of 24: the same spread over a day).
+static constexpr int64_t DRIFT_PULL_DAYS = 60;     ///< The drift is pulled back to 0 by 1/60 per game day.
+
 /** The fixed properties of a valuable. */
 struct ValuableInfo {
 	const char *code;       ///< Short code of the symbol, e.g. XAU.
@@ -52,7 +56,7 @@ struct ValuableInfo {
 	int64_t cycle_ppm;      ///< Height of the slow cycle, in ppm of the price (+- this).
 	int64_t cycle_days;     ///< Length of the slow cycle in game days.
 	int64_t drift_max_ppm;  ///< The slow random drift stays inside +- this.
-	int64_t drift_step_ppm; ///< Largest step of the drift per game day.
+	int64_t drift_step_ppm; ///< Size of the drift step per game DAY; it is taken in DRIFT_STEPS_PER_DAY small steps (see StepSlow).
 	int64_t noise_ppm;      ///< Largest fresh noise per economy day.
 };
 

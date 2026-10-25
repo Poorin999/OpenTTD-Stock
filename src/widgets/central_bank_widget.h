@@ -39,6 +39,8 @@ enum CentralBankWidgets : WidgetID {
 	WID_CBP_PANEL,          ///< Panel of the monetary policy window: price index, inflation, policy shift and the loan rates.
 	WID_PN_CAPTION,         ///< Caption of the news window (Transport Payrolls).
 	WID_PN_PANEL,           ///< Panel of the news window: the reports of the Transport Payrolls and their effect on gold.
+	WID_MN_CAPTION,         ///< Caption of the market news window.
+	WID_MN_PANEL,           ///< Panel of the market news window: the lead story and the list of the latest events.
 };
 
 #endif /* WIDGETS_CENTRAL_BANK_WIDGET_H */

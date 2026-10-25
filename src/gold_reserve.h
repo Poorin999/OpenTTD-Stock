@@ -33,6 +33,18 @@ enum class CreditTier : uint8_t {
  * into the reserve (demand), and the safe haven effect when the company values of the map fall.
  * Saved in the 'STCK' chunk together with the wallets.
  */
+/** The parts of the price that the economy of the game asks for (all factors in ppm, 1.0 = 1,000,000); see GoldReserveManager::GetFactors. */
+struct GoldFactors {
+	int64_t anchor_cents = 0;    ///< Base price x inflation: the line the price is kept near.
+	int64_t inflation_ppm = 0;   ///< Inflation of the game.
+	int64_t cash_ppm = 0;        ///< Cash in circulation against what inflation alone explains (half of the difference counts).
+	int64_t demand_ppm = 0;      ///< Buying and selling of companies, citizens and news.
+	int64_t scarcity_ppm = 0;    ///< Stock of the market.
+	int64_t haven_ppm = 0;       ///< Safe haven: company values of the map fell.
+	int64_t raw_cents = 0;       ///< anchor x cash x demand x scarcity x haven, before the limit.
+	int64_t target_cents = 0;    ///< The target after the soft and the hard limit around the anchor.
+};
+
 struct GoldReserveManager {
 	static constexpr int64_t BASE_PRICE_CENTS = 2000 * 100; ///< Price of one ounce at the start (no inflation, baseline cash supply, no demand), in 1/100 of a money unit.
 	static constexpr int64_t OUNCES_PER_TON = 32151;        ///< Troy ounces in one metric ton (rounded).
@@ -48,6 +60,8 @@ struct GoldReserveManager {
 	static constexpr int64_t MARKET_STOCK_CAP = MARKET_STOCK_START * 3 / 2; ///< Deliveries never fill the market stock above this (1.5 x the start stock, was 2 x).
 	static constexpr int64_t MINE_DAILY_INTAKE_MAX_OZ = 400; ///< The market takes at most this many ounces from mines per game day (0.2% of the start stock); more is not added.
 	static constexpr int64_t SCARCITY_FLOOR_DIV = 4;        ///< The scarcity factor stops growing when the stock is 1/4 of the start stock (price x4).
+	static constexpr int64_t TARGET_SOFT_DEV_PPM = 250'000; ///< The target may be 25% away from anchor (base price x inflation) without any limit; further away it moves only a third as fast.
+	static constexpr int64_t TARGET_MAX_DEV_PPM = 500'000;  ///< The target is never more than 50% above or below the anchor (the scarcity, cash and demand together can not run away).
 	static constexpr int64_t GLIDE_PERCENT_PER_DAY = 5;     ///< The price moves this share of the way to its target in one game day (it glides there minute by minute, not in one jump at midnight).
 	static constexpr int64_t GLIDE_EVERY_MINUTES = 2;       ///< The live price is updated every this many game minutes (same pace as the Terminal).
 	static constexpr size_t HISTORY_MAX_DAYS = 730;         ///< Number of daily prices that are kept for the gold chart (the oldest are dropped).
@@ -68,6 +82,7 @@ struct GoldReserveManager {
 	void UpdateDaily();
 	void UpdateGlide(uint64_t total_minutes);
 	int64_t ComputeTargetCents() const;
+	GoldFactors GetFactors() const;
 	int64_t GetDayStartCents() const;
 	static int64_t GlideCents(int64_t day_start, int64_t target, int64_t minute_of_day);
 

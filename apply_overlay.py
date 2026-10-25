@@ -392,6 +392,51 @@ GOLD_WINDOW_NAME = "Gold Investment Types"
 GOLD_NAME_KEYS = {"STR_GRAPH_MENU_OPERATING_PROFIT_GRAPH": "", "STR_GRAPH_OPERATING_PROFIT_CAPTION": "{WHITE}"}
 
 
+NEWS_MENU_KEY = "STR_GRAPH_MENU_INCOME_GRAPH"
+NEWS_MENU_NAME = "Market News"
+INCOME_NEWS_MARKER = "INCOME_NEWS_PATCH"
+
+
+def patch_income_graph_to_news(tree):
+    """The menu entry Graphs > Income graph becomes Market News: ShowIncomeGraph() opens the market news window (market_news_gui.cpp) and the
+    entry is renamed in every language file. The income graph window itself stays in the code but can no longer be opened.
+    In place, at an anchor; nothing is written when the anchor is missing."""
+    target = tree / "src" / "graph_gui.cpp"
+    if not target.is_file():
+        sys.exit(f"ERROR: {target} not found in the OpenTTD tree")
+    text, crlf = _read_lf(target)
+    if INCOME_NEWS_MARKER in text:
+        print("graph_gui.cpp: income graph already replaced by the news")
+    else:
+        m = re.search(r"^void ShowIncomeGraph\(\)\s*\{[^{}]*\}[ \t]*\n", text, re.M)
+        if not m:
+            sys.exit("ERROR: void ShowIncomeGraph() { ... } not found in graph_gui.cpp (anchor of the income graph / news patch)")
+        body = f"void ShowIncomeGraph() /* {INCOME_NEWS_MARKER}: the old income graph window can not be opened any more */\n{{\n\tShowMarketNewsWindow();\n}}\n"
+        text = text[:m.start()] + body + text[m.end():]
+        if '#include "market_news_gui.h"' not in text:
+            includes = list(re.finditer(r'^#include "[^"\n]+"[^\n]*\n', text, re.M))
+            if not includes:
+                sys.exit("ERROR: no #include found in graph_gui.cpp (anchor of the income graph / news patch)")
+            text = text[:includes[-1].end()] + f'#include "market_news_gui.h" /* {INCOME_NEWS_MARKER} */\n' + text[includes[-1].end():]
+        _write_like(target, text, crlf)
+        print("graph_gui.cpp: ShowIncomeGraph() now opens the market news window")
+
+    lang = tree / "src" / "lang"
+    changed = 0
+    found = 0
+    for f in sorted(lang.glob("*.txt")):
+        t, c = _read_lf(f)
+        if re.search(r"^" + NEWS_MENU_KEY + r"\s*:", t, re.M): found += 1
+        new = re.sub(r"^(" + NEWS_MENU_KEY + r"\s*:).*$", lambda mm: mm.group(1) + NEWS_MENU_NAME, t, flags=re.M)
+        if new != t:
+            _write_like(f, new, c)
+            changed += 1
+    if found == 0:
+        print(f"WARNING: {NEWS_MENU_KEY} not found in any src/lang/*.txt: the menu entry keeps the old name")
+    else:
+        print(f"lang: the income graph menu entry is now called '{NEWS_MENU_NAME}' ({changed} language files)")
+
+
 def patch_graph_window_name(tree):
     """Renames the operating profit graph (menu entry and window caption) in english.txt and in every other language file."""
     lang = tree / "src" / "lang"
@@ -661,6 +706,7 @@ def patch_vat(tree):
 def main(tree):
     patch_graph_files(tree)
     patch_graph_window_name(tree)
+    patch_income_graph_to_news(tree)
     patch_cargo_delivery(tree)
     patch_cargo_market(tree)
     patch_vat(tree)

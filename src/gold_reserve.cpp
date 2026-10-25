@@ -212,22 +212,31 @@ int64_t GoldReserveManager::GetDayStartCents() const
 	return this->history_cents.empty() ? this->price_cents : this->history_cents.back();
 }
 
-/** The price that the economy of the game asks for now: base price x inflation x cash x demand x scarcity x safe haven. Pure function of the state, the same on every client. */
-int64_t GoldReserveManager::ComputeTargetCents() const
+/**
+ * The parts of the price that the economy of the game asks for now. Pure function of the state, the same on every client.
+ * The cash in circulation is compared with what inflation alone explains (baseline x inflation), not with the baseline: the pay of OpenTTD
+ * grows with inflation, so the cash grows with it, and counting both would count inflation twice. The result may not run away from
+ * anchor = base price x inflation: beyond 25% it moves a third as fast, beyond 50% it stops.
+ */
+GoldFactors GoldReserveManager::GetFactors() const
 {
-	/* 1. Inflation of the game (1.0 = 1 << 16). */
-	const int64_t inflation = std::clamp<int64_t>((static_cast<int64_t>(_economy.inflation_prices) * PPM) >> 16, PPM / 2, 20 * PPM);
+	GoldFactors f;
 
-	/* 2. Cash in circulation against the cash at the start: half of the change goes into the price. */
+	/* 1. Inflation of the game (1.0 = 1 << 16). */
+	f.inflation_ppm = std::clamp<int64_t>((static_cast<int64_t>(_economy.inflation_prices) * PPM) >> 16, PPM / 2, 20 * PPM);
+	f.anchor_cents = BASE_PRICE_CENTS * f.inflation_ppm / PPM;
+
+	/* 2. Cash in circulation against the cash that inflation explains: half of the difference goes into the price. */
 	const int64_t supply = this->GetCirculatingCash();
-	const int64_t supply_factor = this->baseline_supply > 0 ? std::clamp<int64_t>(PPM + (supply - this->baseline_supply) * PPM / this->baseline_supply / 2, PPM / 2, 3 * PPM) : PPM;
+	const int64_t expected = this->baseline_supply * f.inflation_ppm / PPM;
+	f.cash_ppm = expected > 0 ? std::clamp<int64_t>(PPM + (supply - expected) * PPM / expected / 2, PPM / 2, 3 * PPM) : PPM;
 
 	/* 3. Demand of the reserve: what the companies, the citizens and the news bought (and sold). */
-	const int64_t demand_factor = PPM + std::clamp<int64_t>(this->pressure_ppm, -PRESSURE_MAX_PPM, PRESSURE_MAX_PPM);
+	f.demand_ppm = PPM + std::clamp<int64_t>(this->pressure_ppm, -PRESSURE_MAX_PPM, PRESSURE_MAX_PPM);
 
 	/* 3b. Scarcity: the market has a limited stock. Half of the stock left = twice the price, down to a quarter (x4). Stock above the start makes it cheaper. */
 	const int64_t stock_floor = MARKET_STOCK_START / SCARCITY_FLOOR_DIV;
-	const int64_t scarcity_factor = std::clamp<int64_t>(PPM * MARKET_STOCK_START / std::max(this->market_stock_oz, stock_floor), PPM / 2, SCARCITY_FLOOR_DIV * PPM);
+	f.scarcity_ppm = std::clamp<int64_t>(PPM * MARKET_STOCK_START / std::max(this->market_stock_oz, stock_floor), PPM / 2, SCARCITY_FLOOR_DIV * PPM);
 
 	/* 4. Safe haven: when the company values of the map fall from one quarter to the next, gold gets up to 20% dearer. */
 	int64_t now_value = 0, before_value = 0;
@@ -235,16 +244,30 @@ int64_t GoldReserveManager::ComputeTargetCents() const
 		now_value += static_cast<int64_t>(c->old_economy[0].company_value);
 		before_value += static_cast<int64_t>(c->old_economy[1].company_value);
 	}
-	int64_t haven_factor = PPM;
-	if (before_value > 0 && now_value < before_value) haven_factor += std::min<int64_t>(PPM / 5, (before_value - now_value) * PPM / before_value / 2);
+	f.haven_ppm = PPM;
+	if (before_value > 0 && now_value < before_value) f.haven_ppm += std::min<int64_t>(PPM / 5, (before_value - now_value) * PPM / before_value / 2);
 
-	int64_t target = BASE_PRICE_CENTS;
-	target = target * inflation / PPM;
-	target = target * supply_factor / PPM;
-	target = target * demand_factor / PPM;
-	target = target * scarcity_factor / PPM;
-	target = target * haven_factor / PPM;
-	return std::max<int64_t>(target, BASE_PRICE_CENTS / 10);
+	int64_t raw = f.anchor_cents;
+	raw = raw * f.cash_ppm / PPM;
+	raw = raw * f.demand_ppm / PPM;
+	raw = raw * f.scarcity_ppm / PPM;
+	raw = raw * f.haven_ppm / PPM;
+	f.raw_cents = std::max<int64_t>(raw, 1);
+
+	/* The limit around the anchor. */
+	int64_t dev = f.anchor_cents > 0 ? (f.raw_cents - f.anchor_cents) * PPM / f.anchor_cents : 0;
+	const int64_t sign = dev < 0 ? -1 : 1;
+	int64_t mag = dev < 0 ? -dev : dev;
+	if (mag > TARGET_SOFT_DEV_PPM) mag = TARGET_SOFT_DEV_PPM + (mag - TARGET_SOFT_DEV_PPM) / 3;
+	mag = std::min(mag, TARGET_MAX_DEV_PPM);
+	f.target_cents = std::max<int64_t>(f.anchor_cents * (PPM + sign * mag) / PPM, BASE_PRICE_CENTS / 10);
+	return f;
+}
+
+/** The price that the economy of the game asks for now (see GetFactors). */
+int64_t GoldReserveManager::ComputeTargetCents() const
+{
+	return this->GetFactors().target_cents;
 }
 
 /**

@@ -12,6 +12,11 @@
 #include "market_events.h"
 #include "market_news_ai.h"
 #include "stock_base.h"
+#include <chrono>
+#include "window_func.h"
+#include "timer/timer.h"
+#include "timer/timer_window.h"
+#include "widgets/central_bank_widget.h"
 #include "core/format.hpp"
 #include "gfx_func.h"
 #include "palette_func.h"
@@ -154,4 +159,67 @@ bool MarketNewsPanel::Click(const Rect &r, Point pt)
 	if (id == this->selected_id) return false;
 	this->selected_id = id;
 	return true;
+}
+
+/** Window number of the market news window inside the class WC_CENTRAL_BANK (0 bank, 1 statement, 2 past statements, 3 buy gold, 4 policy, 5 payroll news, 6 market news). */
+static constexpr int MN_WINDOW_NUMBER = 6;
+
+/** The market news window: the news panel in a window of its own. The menu entry Graphs > Market News opens it (it replaces the income graph). */
+struct MarketNewsWindow : Window {
+	MarketNewsPanel news; ///< Which story is open.
+
+	/** Redraw regularly: the news come by themselves. */
+	const IntervalTimer<TimerWindow> redraw_interval = {std::chrono::milliseconds(500), [this](auto) {
+		this->SetDirty();
+	}};
+
+	MarketNewsWindow(WindowDesc &desc) : Window(desc)
+	{
+		this->InitNested(MN_WINDOW_NUMBER);
+	}
+
+	void OnInvalidateData([[maybe_unused]] int data = 0, [[maybe_unused]] bool gui_scope = true) override
+	{
+		this->SetDirty();
+	}
+
+	void DrawWidget(const Rect &r, WidgetID widget) const override
+	{
+		if (widget == WID_MN_PANEL) this->news.Draw(r);
+	}
+
+	void OnClick(Point pt, WidgetID widget, [[maybe_unused]] int click_count) override
+	{
+		if (widget != WID_MN_PANEL) return;
+		if (this->news.Click(this->GetWidget<NWidgetBase>(WID_MN_PANEL)->GetCurrentRect(), pt)) this->SetDirty();
+	}
+};
+
+static constexpr std::initializer_list<NWidgetPart> _nested_market_news_widgets = {
+	NWidget(NWID_HORIZONTAL),
+		NWidget(WWT_CLOSEBOX, COLOUR_GREY),
+		NWidget(WWT_CAPTION, COLOUR_GREY, WID_MN_CAPTION), SetStringTip(STR_MARKET_NEWS_CAPTION, STR_TOOLTIP_WINDOW_TITLE_DRAG_THIS),
+		NWidget(WWT_SHADEBOX, COLOUR_GREY),
+		NWidget(WWT_STICKYBOX, COLOUR_GREY),
+	EndContainer(),
+	NWidget(WWT_PANEL, COLOUR_GREY, WID_MN_PANEL), SetMinimalSize(576, 330), SetFill(1, 1), SetResize(1, 1),
+	EndContainer(),
+};
+
+static WindowDesc _market_news_desc(
+	WDP_AUTO, "market_news", 0, 0,
+	WC_CENTRAL_BANK, WC_NONE,
+	{},
+	_nested_market_news_widgets
+);
+
+void ShowMarketNewsWindow()
+{
+	if (BringWindowToFrontById(WC_CENTRAL_BANK, MN_WINDOW_NUMBER) != nullptr) return;
+	new MarketNewsWindow(_market_news_desc);
+}
+
+bool IsMarketNewsWindowOpen()
+{
+	return FindWindowById(WC_CENTRAL_BANK, MN_WINDOW_NUMBER) != nullptr;
 }
