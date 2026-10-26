@@ -124,6 +124,11 @@ int main(){
 	CHECK(100'000LL*PolicyIorbBp(0)/BANK_INTEREST_DIVISOR==9);
 	for(int64_t sh=POLICY_SHIFT_MIN_BP; sh<=POLICY_EMERGENCY_SHIFT_MAX_BP; sh+=25) CHECK(PolicyIorbBp(sh) <= BankShiftedRateBp(BANK_RATE_GOOD_MIN_BP,sh));
 
+	/* IORB cash ceiling: only the first BANK_IORB_CASH_CEILING of the idle cash earns interest */
+	CHECK(IorbCashBase(0)==0 && IorbCashBase(-5)==0 && IorbCashBase(1'000)==1'000);
+	CHECK(IorbCashBase(BANK_IORB_CASH_CEILING)==BANK_IORB_CASH_CEILING && IorbCashBase(BANK_IORB_CASH_CEILING+1)==BANK_IORB_CASH_CEILING && IorbCashBase(INT64_MAX)==BANK_IORB_CASH_CEILING);
+	CHECK(IorbCashBase(BANK_IORB_CASH_CEILING-1)==BANK_IORB_CASH_CEILING-1);
+	CHECK(IorbCashBase(INT64_MAX)*PolicyIorbBp(POLICY_EMERGENCY_SHIFT_MAX_BP)/BANK_INTEREST_DIVISOR>0); // no overflow at the top of the range
 	/* loan rate with the news spread: adds to the risk rate, stays inside floor / ceiling, never touches the penalty rate, never below IORB */
 	{ BankAccount a0; a0.debt=1'000'000; BankAccount a1=a0, a2=a0, a3=a0, a4=a0;
 	  BankDayResult r0=BankSettleDay(a0, 10'000'000, 5'000'000, 1, 0, 0);
