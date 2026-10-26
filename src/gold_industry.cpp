@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <iterator>
+#include <variant>
 
 #include "safeguards.h"
 
@@ -79,23 +80,29 @@ static void MakeBankTownOnly(IndustrySpec &spec)
 	}(spec);
 }
 
-static void AddAcceptedCargo(IndustrySpec &spec, CargoType cargo)
+/* Labels, not CargoType numbers: ResetIndustries() runs BEFORE SetupCargoForClimate() (ResetNewGRFData in newgrf.cpp), so at this point the cargo
+ * table and the label map still belong to the PREVIOUS climate (or are empty at start-up). A CargoType number stored here points into the wrong table
+ * (a slot that is invalid in the new climate -> "<invalid cargo>"). The labels are translated into numbers later, by FinaliseIndustriesArray()
+ * in newgrf.cpp, when the cargo table of the new climate is ready. */
+static bool AcceptsLabel(const IndustrySpec &spec, CargoLabel label)
 {
-	for (CargoType c : spec.accepts_cargo) {
-		if (c == cargo) return;
+	for (const auto &v : spec.accepts_cargo_label) {
+		if (const CargoLabel *l = std::get_if<CargoLabel>(&v); l != nullptr && *l == label) return true;
 	}
-	for (CargoType &c : spec.accepts_cargo) {
-		if (c == INVALID_CARGO) { c = cargo; return; }
+	return false;
+}
+
+static void AddAcceptedLabel(IndustrySpec &spec, CargoLabel label)
+{
+	if (AcceptsLabel(spec, label)) return;
+	for (auto &v : spec.accepts_cargo_label) {
+		if (const CargoLabel *l = std::get_if<CargoLabel>(&v); l != nullptr && *l == CT_INVALID) { v = label; return; }
 	}
 }
 
-/** Called at the end of ResetIndustries(). */
+/** Called at the end of ResetIndustries(). Works on cargo LABELS only (see AddAcceptedLabel). */
 void ApplyGoldIndustries()
 {
-	const CargoType valuables = GetCargoTypeByLabel(CargoLabel{'VALU'});
-	const CargoType diamonds = GetCargoTypeByLabel(CargoLabel{'DIAM'});
-	const CargoType gold = GetCargoTypeByLabel(CargoLabel{'GOLD'});
-
 	IndustrySpec *gold_mine = nullptr;
 	const IndustrySpec *iron_mine = nullptr;
 	const IndustrySpec *copper_mine = nullptr;
@@ -110,20 +117,10 @@ void ApplyGoldIndustries()
 	const LandscapeType landscape = _settings_game.game_creation.landscape;
 	if (gold_mine != nullptr && (landscape == LandscapeType::Temperate || landscape == LandscapeType::Tropic)) {
 		const IndustrySpec *look = landscape == LandscapeType::Temperate ? iron_mine : copper_mine;
-		CargoType out = INVALID_CARGO;
-		CargoLabel out_label{0};
-		if (gold != INVALID_CARGO) {
-			/* The normal case: the cargo Gold has been added to this climate (patch_gold_cargo). */
-			out = gold; out_label = CargoLabel{'GOLD'};
-		} else if (valuables != INVALID_CARGO) {
-			/* Fallback when the cargo patch is not there: the cargo of the climate that takes the place of gold. */
-			out = valuables; out_label = CargoLabel{'VALU'};
-		} else if (diamonds != INVALID_CARGO) {
-			out = diamonds; out_label = CargoLabel{'DIAM'};
-		}
-		if (out != INVALID_CARGO && look != nullptr) {
-			gold_mine->produced_cargo[0] = out;
-			SetOutputLabel(*gold_mine, out_label);
+		if (look != nullptr) {
+			/* The mine produces Gold in every climate (the cargo is added by patch_gold_cargo). Only the label is set; the number is filled in later. */
+			gold_mine->produced_cargo[0] = INVALID_CARGO;
+			SetOutputLabel(*gold_mine, CargoLabel{'GOLD'});
 			CopyLayouts(*gold_mine, *look);
 			gold_mine->enabled = true;
 			/* Appears like in Sub-arctic: the same chance on a new map and in the game, for every climate. */
@@ -134,18 +131,18 @@ void ApplyGoldIndustries()
 		}
 	}
 
-	/* Banks take the gold cargo of the climate (Valuables, Gold or Diamonds, whichever exists). A bank is found by what it accepts, not by its
-	 * name: an industry that accepts one of these cargos is a bank. In the original economy this already holds in every climate (the Temperate
-	 * bank takes Valuables, the Sub-arctic / Sub-tropical bank takes Gold / Diamonds), so this only fills a free input slot when one is missing. */
+	/* Banks accept Gold in every climate. A bank is found by what it accepts, not by its name: the original banks accept the mixed cargo
+	 * Valuables / Gold / Diamonds (MCT_VALUABLES_GOLD_DIAMONDS), which resolves to the first one that exists (Valuables, then Gold, then Diamonds).
+	 * With Gold added to every climate that is Valuables in Temperate (so Gold is added as an extra label) and Gold in Sub-tropical (so Diamonds
+	 * are added, the diamonds of the real diamond mine). Sub-arctic already has Gold. */
 	for (IndustrySpec &spec : _industry_specs) {
 		bool is_bank = false;
-		for (const CargoType c : spec.accepts_cargo) {
-			if (c != INVALID_CARGO && (c == valuables || c == gold || c == diamonds)) is_bank = true;
+		for (const auto &v : spec.accepts_cargo_label) {
+			if (const MixedCargoType *m = std::get_if<MixedCargoType>(&v); m != nullptr && *m == MCT_VALUABLES_GOLD_DIAMONDS) is_bank = true;
 		}
 		if (!is_bank) continue;
-		for (const CargoType c : {valuables, gold, diamonds}) {
-			if (c != INVALID_CARGO) AddAcceptedCargo(spec, c);
-		}
+		if (landscape == LandscapeType::Temperate) AddAcceptedLabel(spec, CargoLabel{'GOLD'});
+		if (landscape == LandscapeType::Tropic) AddAcceptedLabel(spec, CargoLabel{'DIAM'});
 
 		/* A bank that has no chance at map creation but one in the game (the Temperate bank): give it the same chance at creation, so that OpenTTD forces
 		 * one at the start of a new map, and let it be built in any town (not only in one of 1200 people or more). */
