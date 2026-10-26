@@ -920,35 +920,61 @@ def patch_town_gui(tree):
 
 COMPANY_INFO_MARKER = "COMPANY_INFO_PATCH"
 COMPANY_INFRA_FUNC = "ShowCompanyInfrastructureOfMod"  # public wrapper of the static ShowCompanyInfrastructure() of company_gui.cpp
+COMPANY_FACE_FUNC = "ShowCompanyFaceOfMod"  # public wrapper of the static DoSelectCompanyManagerFace() of company_gui.cpp
 
 
 def patch_company_info(tree):
     """ShowCompany() (company_gui.cpp) opens the company window of the mod (company_info_gui.cpp) instead of the original one. The original window
-    stays reachable: ShowOriginalCompanyWindow() sets _company_info_use_original, and then ShowCompany() builds the original window as before."""
+    stays reachable: ShowOriginalCompanyWindow() sets _company_info_use_original, and then ShowCompany() builds the original window as before.
+    Two public wrappers are added next to ShowCompany(), because the functions they call are static in company_gui.cpp:
+    ShowCompanyInfrastructureOfMod (infrastructure window) and ShowCompanyFaceOfMod (the face window of OpenTTD, which is a window of its own; its parent
+    must be a window with the company as window number, so a company window is made for a moment when none is open and closed again)."""
     rx = r"^void ShowCompany\(CompanyID company\)\s*\{\n"
     p = find_definition(tree, rx)
     if p is None:
         sys.exit("ERROR: ShowCompany not found in any src/*.cpp (anchor of the company window patch)")
     s, crlf = _read_lf(p)
-    if COMPANY_INFO_MARKER in s and COMPANY_INFRA_FUNC in s:
-        print(f"{p.name}: ShowCompany() already opens the company window of the mod")
-        return
+    changed = []
+    m0 = re.search(rx, s, re.M)
     if COMPANY_INFRA_FUNC not in s:
         # ShowCompanyInfrastructure() is static in company_gui.cpp (15.3): add a public function next to ShowCompany() that calls it.
         # It is declared (static) near the top of the file, so it is known at this point.
-        m0 = re.search(rx, s, re.M)
         wrapper = ("void " + COMPANY_INFRA_FUNC + "(CompanyID company) { ShowCompanyInfrastructure(company); } // " + COMPANY_INFO_MARKER + "\n\n")
         s = s[:m0.start()] + wrapper + s[m0.start():]
-    if COMPANY_INFO_MARKER + "\n\n" in s and "ShowCompanyInfoWindow(company); return; }" in s:
-        _write_like(p, s, crlf)
-        print(f"{p.name}: added {COMPANY_INFRA_FUNC}()")
-        return
+        changed.append(COMPANY_INFRA_FUNC)
+    if COMPANY_FACE_FUNC not in s:
+        # DoSelectCompanyManagerFace(Window *parent) is static and declared near the top of company_gui.cpp (known here, like ShowCompanyInfrastructure).
+        if not re.search(r"DoSelectCompanyManagerFace\(Window \*", s):
+            sys.exit("ERROR: DoSelectCompanyManagerFace not found in company_gui.cpp (anchor of the face wrapper)")
+        m0 = re.search(rx, s, re.M)
+        wrapper = ("void " + COMPANY_FACE_FUNC + "(CompanyID company) // " + COMPANY_INFO_MARKER + "\n"
+                   "{\n"
+                   "\tWindow *w = FindWindowById(WC_COMPANY, company.base());\n"
+                   "\tconst bool temporary = (w == nullptr);\n"
+                   "\tif (temporary) {\n"
+                   "\t\t_company_info_use_original = true;\n"
+                   "\t\tShowCompany(company);\n"
+                   "\t\t_company_info_use_original = false;\n"
+                   "\t\tw = FindWindowById(WC_COMPANY, company.base());\n"
+                   "\t}\n"
+                   "\tif (w == nullptr) return;\n"
+                   "\tDoSelectCompanyManagerFace(w);\n"
+                   "\tif (temporary) w->Close(); // The face window only compares its parent pointer, it never uses it.\n"
+                   "}\n\n")
+        s = s[:m0.start()] + wrapper + s[m0.start():]
+        changed.append(COMPANY_FACE_FUNC)
     m = re.search(rx, s, re.M)
-    add = ("\tif (!_company_info_use_original) { ShowCompanyInfoWindow(company); return; } // " + COMPANY_INFO_MARKER + "\n\n")
-    s = s[:m.end()] + add + s[m.end():]
+    if "ShowCompanyInfoWindow(company); return; }" not in s:
+        add = ("\tif (!_company_info_use_original) { ShowCompanyInfoWindow(company); return; } // " + COMPANY_INFO_MARKER + "\n\n")
+        s = s[:m.end()] + add + s[m.end():]
+        changed.append("ShowCompany hook")
+    if not changed:
+        print(f"{p.name}: ShowCompany() already opens the company window of the mod")
+        return
     s = ensure_include(s, '#include "company_info_gui.h"', ['#include "company_func.h"', '#include "stdafx.h"'])
+    s = ensure_include(s, '#include "window_func.h"', ['#include "company_func.h"', '#include "stdafx.h"'])
     _write_like(p, s, crlf)
-    print(f"{p.name}: ShowCompany() opens the company window of the mod")
+    print(f"{p.name}: company window patch: " + ", ".join(changed))
 
 
 def main(tree):
