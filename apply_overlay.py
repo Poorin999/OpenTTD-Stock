@@ -947,7 +947,8 @@ def patch_company_info(tree):
         if not re.search(r"DoSelectCompanyManagerFace\(Window \*", s):
             sys.exit("ERROR: DoSelectCompanyManagerFace not found in company_gui.cpp (anchor of the face wrapper)")
         m0 = re.search(rx, s, re.M)
-        wrapper = ("void " + COMPANY_FACE_FUNC + "(CompanyID company) // " + COMPANY_INFO_MARKER + "\n"
+        wrapper = ("void ShowCompany(CompanyID company); // " + COMPANY_INFO_MARKER + " (declared here: the wrapper comes before the definition of ShowCompany)\n"
+                   "void " + COMPANY_FACE_FUNC + "(CompanyID company) // " + COMPANY_INFO_MARKER + "\n"
                    "{\n"
                    "\tWindow *w = FindWindowById(WC_COMPANY, company.base());\n"
                    "\tconst bool temporary = (w == nullptr);\n"
