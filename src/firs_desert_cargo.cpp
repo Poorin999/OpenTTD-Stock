@@ -74,16 +74,18 @@ size_t FirsDesertCargoCount()
  * @param n Index in the table, below FirsDesertCargoCount().
  * @param out Free cargo slot (it is the first free slot of CargoSpec::array).
  * @param bitnum Cargo bit number to give it (unique, 32 or higher: no default cargo and no NewGRF 32-bit cargo mask uses it).
+ * @param first Start of CargoSpec::array (private, so SetupCargoForClimate() passes it in).
+ * @param last End of CargoSpec::array.
  * @return True when the slot was filled; false when the cargo is already in the climate or its base cargo is missing (the slot is left as it was).
  */
-bool MakeFirsDesertCargo(size_t n, CargoSpec &out, uint8_t bitnum)
+bool MakeFirsDesertCargo(size_t n, CargoSpec &out, uint8_t bitnum, const CargoSpec *first, const CargoSpec *last)
 {
 	if (n >= std::size(FIRS_DESERT)) return false;
 	const FirsDesertCargo &d = FIRS_DESERT[n];
 
-	if (std::ranges::find(CargoSpec::array, d.label, &CargoSpec::label) != std::end(CargoSpec::array)) return false;
-	auto base = std::ranges::find(CargoSpec::array, d.base, &CargoSpec::label);
-	if (base == std::end(CargoSpec::array)) return false;
+	if (std::find_if(first, last, [&](const CargoSpec &c) { return c.label == d.label; }) != last) return false;
+	const CargoSpec *base = std::find_if(first, last, [&](const CargoSpec &c) { return c.label == d.base; });
+	if (base == last) return false;
 
 	out = *base;
 	out.label = d.label;
@@ -94,7 +96,8 @@ bool MakeFirsDesertCargo(size_t n, CargoSpec &out, uint8_t bitnum)
 	out.multiplier = d.multiplier;
 	out.classes = d.liquid ? CargoClasses({CargoClass::Liquid, CargoClass::NonPotable}) : CargoClasses({CargoClass::Bulk, CargoClass::NonPotable});
 	out.initial_payment = d.payment;
-	out.transit_periods = {d.days1, d.days2};
+	out.transit_periods[0] = d.days1;
+	out.transit_periods[1] = d.days2;
 	out.is_freight = d.freight;
 	out.name = d.name;
 	out.name_single = d.name_single;
