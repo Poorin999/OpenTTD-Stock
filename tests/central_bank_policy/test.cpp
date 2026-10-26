@@ -17,12 +17,12 @@ int main(){
 	CHECK(PolicyRoundMove(300,50)==50); CHECK(PolicyRoundMove(-300,50)==-50);
 	CHECK(PolicyRoundMove(300,75)==75); CHECK(PolicyRoundMove(60,75)==50); CHECK(PolicyRoundMove(90,75)==75);
 	for(int g=-400; g<=400; g++) for(int ms : {50,75}){ int64_t m=PolicyRoundMove(g,ms); CHECK(m%25==0); CHECK(std::llabs(m)<=ms); }
-	/* meetings: exactly 8 per 365 days, first day of each period, gap 45..46 */
+	/* meetings: exactly 8 per 365 days; the first of the year is on day 12 (POLICY_FIRST_MEETING_DAY), the others keep the 45..46 day periods, gaps 35..56 */
 	int cnt=0; int64_t prev=-1; int mn=999,mx=0;
 	for(int64_t d=0; d<365*5; d++){ if(PolicyMeetingIndex(d)!=PolicyMeetingIndex(d-1)){ cnt++; if(prev>=0){mn=std::min<int>(mn,d-prev);mx=std::max<int>(mx,d-prev);} prev=d; } }
 	CHECK(cnt==8*5+1-1+0 || cnt==8*5); printf("meetings in 5y: %d gap %d..%d\n",cnt,mn,mx);
-	CHECK(mn>=45 && mx<=46);
-	for(int64_t d=0; d<400; d++){ int64_t n=PolicyDaysToNextMeeting(d); CHECK(n>=1&&n<=46); CHECK(PolicyMeetingIndex(d+n)==PolicyMeetingIndex(d)+1); CHECK(n==1 || PolicyMeetingIndex(d+n-1)==PolicyMeetingIndex(d)); }
+	CHECK(mn>=35 && mx<=56);
+	for(int64_t d=0; d<400; d++){ int64_t n=PolicyDaysToNextMeeting(d); CHECK(n>=1&&n<=56); CHECK(PolicyMeetingIndex(d+n)==PolicyMeetingIndex(d)+1); CHECK(n==1 || PolicyMeetingIndex(d+n-1)==PolicyMeetingIndex(d)); }
 
 	/* scenario: steady 2.5% inflation, normal growth -> holds, no move */
 	{ MonetaryPolicy p; int64_t idx=1'000'000; int moves=0, meet=0;
