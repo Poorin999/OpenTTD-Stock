@@ -45,6 +45,9 @@ enum CentralBankWidgets : WidgetID {
 	WID_CP_CAPTION,         ///< Caption of the cargo prices window.
 	WID_CP_PANEL,           ///< Panel of the cargo prices window: the price of each cargo and the towns that pay most and least.
 	WID_CB_LOG_SCROLL,      ///< Scrollbar of the account log in the bank window.
+	WID_MN_OIL,             ///< Button of the market news window: opens the oil market window.
+	WID_OM_CAPTION,         ///< Caption of the oil market window.
+	WID_OM_PANEL,           ///< Panel of the oil market window: oil price, stock, fuel cost and the latest oil news.
 };
 
 #endif /* WIDGETS_CENTRAL_BANK_WIDGET_H */

@@ -149,6 +149,25 @@ static void RealGoldNewsDaily(const GameTimeSnapshot &now)
 	if (ounces < 100) ounces = 0;
 }
 
+/** Once per game day: an oil stock far above or far below its start level becomes news (the price follows the stock and the news, see MarketValuablePushPpm). */
+static void RealOilNewsDaily(const GameTimeSnapshot &now)
+{
+	if (_game_mode != GM_NORMAL || _gold_reserve.GetPriceCents() <= 0) return; // The valuables have no price before the market has started.
+	bool glut = false;
+	int severity = 1;
+	const int64_t stock = _valuables.oil_stock_barrels;
+	if (!oilmath::NewsFromStock(oilmath::StockPermille(stock), glut, severity)) return;
+	const MarketEventKind kind = glut ? MarketEventKind::OilWellsFound : MarketEventKind::OilSupplyShort;
+	const int64_t minute = static_cast<int64_t>(now.total_minutes);
+	if (_market_events.RecentlyReportedGold(kind, minute, oilmath::NEWS_GAP_DAYS)) return; // Reads the log: fact_ppm > 0 (a real story).
+	MarketEvent e = _market_events.NewEvent(kind, minute, severity);
+	e.fact_ppm = std::max<int64_t>(1, stock * MARKET_PPM / oilmath::STOCK_START);
+	e.fact2 = std::clamp<int64_t>(stock, 0, 2'000'000'000);
+	PublishMarketEvent(e);
+}
+
+static const GameTimeSubscription _real_oil_news_daily(GameTimeEvent::Day, [](const GameTimeSnapshot &now) { RealOilNewsDaily(now); }, 31);
+
 static const GameTimeSubscription _real_gold_news_daily(GameTimeEvent::Day, [](const GameTimeSnapshot &now) { RealGoldNewsDaily(now); }, 30);
 
 /**

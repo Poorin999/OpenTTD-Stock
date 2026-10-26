@@ -240,6 +240,14 @@ inline const MarketStoryTexts &MarketStoryTextsOf(MarketEventKind kind)
 		{ { "ความต้องการแพลตตินัมลดลง ราคาอ่อนตัว", "ผู้ผลิตเครื่องประดับและตัวเร่งปฏิกิริยาซื้อน้อยลง" },
 		  { "ผู้ผลิตเครื่องประดับและตัวเร่งปฏิกิริยาลดการสั่งซื้อแพลตตินัม ความต้องการที่ลดลงทำให้ราคาแพลตตินัมปรับลงในช่วงนี้",
 		    "ยอดสั่งแพลตตินัมจากโรงงานชะลอตัว ผู้ค้าลดสต็อก ราคาแพลตตินัมจึงอ่อนตัวลง" } },
+		/* OilWellsFound ({P} = the oil stock against the start stock) */
+		{ { "น้ำมันล้นตลาด สต็อกสูงถึง {P} ของระดับเริ่มต้น ราคาน้ำมันอ่อนตัว", "บ่อน้ำมันส่งน้ำมันเข้าตลาดมากเกินความต้องการ" },
+		  { "น้ำมันดิบที่ส่งถึงสถานีทำให้สต็อกในตลาดสูงถึง {P} ของระดับเริ่มต้น อุปทานที่ล้นทำให้ราคาน้ำมันอ่อนตัว ต้นทุนเชื้อเพลิงของรถ เรือ และเครื่องบินจึงมีแนวโน้มลดลง",
+		    "ผู้ค้าน้ำมันเทขายเพราะสต็อกในตลาดเพิ่มเป็น {P} ของระดับเริ่มต้น ราคาน้ำมันจึงถูกกดดัน" } },
+		/* OilSupplyShort ({P} = the oil stock against the start stock) */
+		{ { "น้ำมันขาดตลาด สต็อกเหลือ {P} ของระดับเริ่มต้น ราคาน้ำมันพุ่ง", "นักลงทุนกว้านซื้อน้ำมันจนสต็อกตลาดร่อยหรอ" },
+		  { "สต็อกน้ำมันในตลาดเหลือเพียง {P} ของระดับเริ่มต้น อุปทานที่ตึงตัวผลักราคาน้ำมันให้สูงขึ้น ต้นทุนเชื้อเพลิงของรถ เรือ และเครื่องบินจึงมีแนวโน้มเพิ่มขึ้น",
+		    "ผู้ซื้อแย่งน้ำมันที่เหลืออยู่ในตลาด สต็อกลดเหลือ {P} ของระดับเริ่มต้น ราคาน้ำมันจึงขยับขึ้น" } },
 	};
 	const size_t i = static_cast<size_t>(kind);
 	return table[i < MARKET_EVENT_KIND_COUNT ? i : 0];
@@ -294,6 +302,7 @@ inline std::string MarketFactText(MarketEventKind kind, int64_t fact_ppm)
 {
 	if (fact_ppm == 0) return std::string();
 	if (MarketKindIsRealGoldKind(kind)) return MarketGroupedNumber(fact_ppm) + " ออนซ์"; // Real gold news: ounces (an old random one has 0 and returned above).
+	if (MarketKindIsRealOilKind(kind)) return MarketPercentText(fact_ppm); // The oil stock against the start stock.
 	if (kind == MarketEventKind::TownMilestone) return MarketGroupedNumber(fact_ppm);
 	if (kind == MarketEventKind::TownGrew || kind == MarketEventKind::TownShrank) return MarketPercentText(fact_ppm);
 	if (kind == MarketEventKind::WeatherStorm || kind == MarketEventKind::WeatherMeteor) return MarketGroupedNumber(fact_ppm);
@@ -367,6 +376,9 @@ inline std::string MarketFactLine(const MarketEvent &e)
 		}
 		return "ข้อมูลจริงจากตลาดทอง: ธนาคารกลางขาย " + MarketGroupedNumber(e.fact_ppm) + " ออนซ์ (" + MarketPercentText(MarketBankFactShare(e.fact2) * 1'000)
 				+ " ของทองที่ถือ) ทองสำรองรวม " + MarketPercentText(MarketBankFactBacking(e.fact2) * 100) + " ของเงินสด เพดาน " + MarketPercentText(MARKET_BANK_SELL_LEVEL_BP * 100);
+	}
+	if (MarketKindIsRealOilKind(e.kind) && e.fact_ppm > 0) {
+		return "ข้อมูลจริงจากตลาดน้ำมัน: สต็อก " + MarketGroupedNumber(e.fact2) + " บาร์เรล (" + MarketPercentText(e.fact_ppm) + " ของสต็อกเริ่มต้น)";
 	}
 	if (MarketKindIsTown(e.kind) || MarketKindIsWeather(e.kind)) {
 		const std::string tp = MarketFactText(e.kind, e.fact_ppm);
@@ -466,7 +478,7 @@ inline MarketStory ComposeMarketStory(const MarketEvent &e, const std::string &c
 	int valuable_index = -1;
 	const int64_t valuable_push = MarketValuablePushPpm(e.kind, e.severity, valuable_index);
 	if (valuable_push != 0) {
-		add(std::string(valuable_index == 1 ? "ราคาเงิน (XAG): " : "ราคาแพลตตินัม (XPT): ") + MarketPpmText(valuable_push) + (valuable_push > 0 ? " (มีแนวโน้มปรับขึ้น)" : " (มีแนวโน้มปรับลง)") + " แล้วค่อยๆ ลดลงใน " + std::to_string(MARKET_VALUABLE_NEWS_DAYS) + " วัน");
+		add(std::string(valuable_index == 1 ? "ราคาเงิน (XAG): " : (valuable_index == 4 ? "ราคาน้ำมัน (XTI): " : "ราคาแพลตตินัม (XPT): ")) + MarketPpmText(valuable_push) + (valuable_push > 0 ? " (มีแนวโน้มปรับขึ้น)" : " (มีแนวโน้มปรับลง)") + " แล้วค่อยๆ ลดลงใน " + std::to_string(MARKET_VALUABLE_NEWS_DAYS) + " วัน");
 	}
 	const int64_t town_boost = MarketTownBoostPpm(e.kind, e.severity);
 	if (town_boost != 0) {

@@ -14,6 +14,7 @@
 #include "central_bank.h"
 #include "CargoMarketMath.h"
 #include "market_events.h"
+#include "valuables.h"
 #include "command_func.h"
 #include "company_base.h"
 #include "company_func.h"
@@ -132,7 +133,7 @@ static const GameTimeSubscription _tax_daily(GameTimeEvent::Day, [](const GameTi
 	}
 
 	/* Fuel: only while the fuel index is above its plain price. The index is read from the news log at this game minute. */
-	const int64_t fuel_index = _market_events.FuelIndexPpm(static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes()));
+	const int64_t fuel_index = FuelIndexWithOilPpm(_market_events.FuelIndexPpm(static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes()))); // News index changed by the oil market (valuables.cpp).
 
 	for (const Company *c : Company::Iterate()) {
 		const size_t i = c->index.base();

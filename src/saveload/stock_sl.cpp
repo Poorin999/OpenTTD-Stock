@@ -225,7 +225,7 @@ struct STCKChunkHandler : ChunkHandler {
 		}
 
 		/* The price model of the valuables: one row each, the state of the random number generator is the same in every row. */
-		if (_valuables.rng_state != 0 || _valuables.diamond_stock_carats != ValuablesManager::DIAMOND_STOCK_START) {
+		if (_valuables.rng_state != 0 || _valuables.diamond_stock_carats != ValuablesManager::DIAMOND_STOCK_START || _valuables.oil_stock_barrels != ValuablesManager::OIL_STOCK_START) {
 			for (size_t k = 0; k < VALUABLE_COUNT; k++) {
 				StockRecord r;
 				r.kind = SRK_VALUABLES;
@@ -234,6 +234,7 @@ struct STCKChunkHandler : ChunkHandler {
 				r.v2 = _valuables.noise_ppm[k];
 				r.v3 = static_cast<int64_t>(_valuables.rng_state);
 				if (k == static_cast<size_t>(ValuableId::Diamond)) r.v4 = _valuables.diamond_stock_carats + 1; // 0 = a savegame from before: the start stock.
+				if (k == static_cast<size_t>(ValuableId::Oil)) r.v4 = _valuables.oil_stock_barrels + 1; // Same: 0 = the start stock.
 				write(r);
 			}
 		}
@@ -753,6 +754,7 @@ struct STCKChunkHandler : ChunkHandler {
 					_valuables.noise_ppm[r.a] = std::clamp<int64_t>(r.v2, -4 * ValuablesManager::Info(r.a).noise_ppm, 4 * ValuablesManager::Info(r.a).noise_ppm);
 					if (r.v3 != 0) _valuables.rng_state = static_cast<uint64_t>(r.v3);
 					if (r.a == static_cast<size_t>(ValuableId::Diamond) && r.v4 > 0) _valuables.diamond_stock_carats = r.v4 - 1;
+					if (r.a == static_cast<size_t>(ValuableId::Oil) && r.v4 > 0) _valuables.oil_stock_barrels = r.v4 - 1;
 					break;
 
 				case SRK_PAYROLL: {

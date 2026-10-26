@@ -5,12 +5,13 @@
  * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
  */
 
-/** @file valuables.h The valuables of the trading terminal: gold, silver, platinum and diamonds, traded like shares (candles, SL/TP, leverage, wallets). */
+/** @file valuables.h The valuables of the trading terminal: gold, silver, platinum, diamonds and oil, traded like shares (candles, SL/TP, leverage, wallets). */
 
 #ifndef VALUABLES_H
 #define VALUABLES_H
 
 #include "company_type.h"
+#include "oil_market_math.h"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -21,6 +22,7 @@ enum class ValuableId : uint8_t {
 	Silver,    ///< XAG: follows gold with its own cycle and drift (1 unit = 10 ounces).
 	Platinum,  ///< XPT: follows gold with its own cycle and drift (1 unit = 1 ounce).
 	Diamond,   ///< XDI: only loosely linked to gold, the most volatile (1 unit = 1 carat).
+	Oil,       ///< XTI: crude oil, NOT linked to gold; it has a stock of its own (oil wells add to it) and sets the fuel cost of vehicles (1 unit = 1 barrel).
 	End,       ///< End marker.
 };
 
@@ -82,6 +84,20 @@ struct ValuablesManager {
 	static constexpr int64_t DIAMOND_SCARCITY_FLOOR_DIV = 4;                   ///< The scarcity factor stops growing at 1/4 of the start stock (price x4).
 	int64_t diamond_stock_carats = DIAMOND_STOCK_START; ///< Carats that the market still has. Saved (v4 of the SRK_VALUABLES row of the diamond, +1).
 	int64_t diamond_mine_allowance = DIAMOND_MINE_DAILY_MAX; ///< Carats that mines may still add (a bucket, +1/24 of the daily maximum every hour). Not saved.
+
+	/* The oil market has a stock of its own (barrels). Oil wells add to it (OilFromDelivery), the terminal draws on it, and the world pulls it
+	 * back towards the start stock a little every hour (supply and demand of the rest of the world). The less is left, the dearer the oil. */
+	static constexpr int64_t OIL_STOCK_START = oilmath::STOCK_START;                  ///< Barrels that the market has at the start.
+	static constexpr int64_t OIL_STOCK_CAP = oilmath::STOCK_CAP;                      ///< Deliveries never fill the stock above this (1.5 x the start stock).
+	static constexpr int64_t OIL_BARRELS_PER_UNIT = oilmath::BARRELS_PER_UNIT;        ///< One delivered unit of oil adds at most this many barrels.
+	static constexpr int64_t OIL_WELL_DAILY_MAX = oilmath::WELL_DAILY_MAX;            ///< The market takes at most this many barrels from wells per game day.
+	static constexpr int64_t OIL_REBALANCE_PERMILLE = oilmath::REBALANCE_PERMILLE;    ///< Every game day the world moves the stock this many thousandths of the way back to the start stock.
+	static constexpr int64_t OIL_SCARCITY_FLOOR_DIV = oilmath::SCARCITY_FLOOR_DIV;    ///< The scarcity factor stops growing at 1/4 of the start stock (price x4).
+	static constexpr int64_t OIL_FUEL_PASS_PERCENT = oilmath::FUEL_PASS_PERCENT;      ///< Vehicles feel this share of the change of the oil price (see FuelIndexWithOilPpm).
+	int64_t oil_stock_barrels = OIL_STOCK_START;                            ///< Barrels that the market still has. Saved (v4 of the SRK_VALUABLES row of the oil, +1).
+	int64_t oil_well_allowance = OIL_WELL_DAILY_MAX;                        ///< Barrels that wells may still add (a bucket, +1/24 of the daily maximum every hour). Not saved.
+	int64_t OilScarcityPpm() const;
+	static int64_t OilYieldPpm(int64_t stock_barrels);
 	int64_t DiamondScarcityPpm() const;
 	static int64_t DiamondYieldPpm(int64_t stock_carats);
 
@@ -105,6 +121,21 @@ static constexpr size_t STOCK_DIAMOND_SYMBOL = STOCK_FIRST_VALUABLE + static_cas
 
 /** A trade in the terminal moves the real diamond stock: a buy (a long opens, a short closes) takes carats out of it, a sell (a short opens, a long closes) gives them back. */
 void DiamondTerminalTrade(bool buy, uint32_t carats);
+
+/** Oil that is delivered to a station adds to the oil stock (hook: GoldFromDelivery in gold_reserve.cpp). */
+void OilFromDelivery(uint count);
+
+/** The symbol number of the oil (XTI) in the terminal. */
+static constexpr size_t STOCK_OIL_SYMBOL = STOCK_FIRST_VALUABLE + static_cast<size_t>(ValuableId::Oil);
+
+/** A trade in the terminal moves the real oil stock: a buy takes barrels out of it, a sell gives them back. */
+void OilTerminalTrade(bool buy, uint32_t barrels);
+
+/** The oil price now against the oil price at the start, in ppm (1,000,000 = plain price), limited to 0.5 .. 3.0. Same on every client. */
+int64_t OilPriceIndexPpm();
+
+/** The fuel index of the news (1,000,000 = plain price) changed by the oil market: OIL_FUEL_PASS_PERCENT of the oil price change is added on top. */
+int64_t FuelIndexWithOilPpm(int64_t news_index_ppm);
 
 /** The leverage of a symbol as the divisor of the margin (10 for the shares of a company). */
 int64_t GetStockMarginDivisor(size_t symbol);

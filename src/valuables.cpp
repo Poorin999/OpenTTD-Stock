@@ -5,7 +5,7 @@
  * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
  */
 
-/** @file valuables.cpp The price model of the valuables (gold, silver, platinum, diamonds) of the trading terminal. */
+/** @file valuables.cpp The price model of the valuables (gold, silver, platinum, diamonds, oil) of the trading terminal. */
 
 #include "stdafx.h"
 #include "valuables.h"
@@ -30,6 +30,7 @@ static constexpr ValuableInfo _valuable_info[VALUABLE_COUNT] = {
 	{"XAG", "Silver",   "10 oz",    250,   950'000, 15,  3'000, 15,  100'000,  300,   150'000,     9'000, 4'000},
 	{"XPT", "Platinum", "1 oz",    1000,   800'000, 10,  3'000, 15,   80'000,  450,   180'000,     9'000, 3'000},
 	{"XDI", "Diamonds", "1 carat",  600,   350'000,  5,  6'000, 10,  120'000,  700,   250'000,    10'000, 2'000},
+	{"XTI", "Oil",      "1 barrel",  60,         0, 10,  2'000, 15,  150'000,  420,   200'000,    12'000, 3'000},
 };
 
 const ValuableInfo &ValuablesManager::Info(size_t index)
@@ -52,6 +53,44 @@ void ValuablesManager::Reset()
 	this->rng_state = 0;
 	this->diamond_stock_carats = DIAMOND_STOCK_START;
 	this->diamond_mine_allowance = DIAMOND_MINE_DAILY_MAX;
+	this->oil_stock_barrels = OIL_STOCK_START;
+	this->oil_well_allowance = OIL_WELL_DAILY_MAX;
+}
+
+/** The price factor of the oil stock: start stock / stock now, x0.5 .. x4 (half the stock = twice the price). */
+int64_t ValuablesManager::OilScarcityPpm() const
+{
+	return oilmath::ScarcityPpm(this->oil_stock_barrels);
+}
+
+/** What wells may add: all of it up to the start stock, falling in a straight line to 0 at the cap (a full market does not want more). */
+int64_t ValuablesManager::OilYieldPpm(int64_t stock_barrels)
+{
+	return oilmath::YieldPpm(stock_barrels);
+}
+
+void OilTerminalTrade(bool buy, uint32_t barrels)
+{
+	_valuables.oil_stock_barrels = buy ? std::max<int64_t>(0, _valuables.oil_stock_barrels - barrels) : _valuables.oil_stock_barrels + barrels;
+}
+
+void OilFromDelivery(uint count)
+{
+	const int64_t barrels = oilmath::DeliveredBarrels(count, _valuables.oil_stock_barrels, _valuables.oil_well_allowance);
+	if (barrels <= 0) return;
+	_valuables.oil_stock_barrels += barrels;
+	_valuables.oil_well_allowance -= barrels;
+}
+
+int64_t OilPriceIndexPpm()
+{
+	const int64_t base = _valuables.GetBaseFixed(static_cast<size_t>(ValuableId::Oil));
+	return oilmath::PriceIndexPpm(base, ValuablesManager::Info(static_cast<size_t>(ValuableId::Oil)).anchor * STOCK_PRICE_SCALE);
+}
+
+int64_t FuelIndexWithOilPpm(int64_t news_index_ppm)
+{
+	return oilmath::FuelIndexPpm(news_index_ppm, OilPriceIndexPpm());
 }
 
 /** The price factor of the diamond stock: start stock / stock now, x0.5 .. x4 (half the stock = twice the price). */
@@ -131,6 +170,10 @@ void ValuablesManager::StepSlow()
 	/* Diamond stock: the world takes its share every hour; the bucket of what mines may add fills by 1/24 of the daily maximum. */
 	this->diamond_stock_carats = std::max<int64_t>(0, this->diamond_stock_carats - DIAMOND_DEMAND_DAILY / DRIFT_STEPS_PER_DAY);
 	this->diamond_mine_allowance = std::min(DIAMOND_MINE_DAILY_MAX, this->diamond_mine_allowance + DIAMOND_MINE_DAILY_MAX / DRIFT_STEPS_PER_DAY);
+
+	/* Oil stock: the world pulls it back towards the start stock (1/24 of the daily step per hour); the bucket of what wells may add fills. */
+	this->oil_stock_barrels += oilmath::RebalanceStep(this->oil_stock_barrels, DRIFT_STEPS_PER_DAY);
+	this->oil_well_allowance = std::min(OIL_WELL_DAILY_MAX, this->oil_well_allowance + OIL_WELL_DAILY_MAX / DRIFT_STEPS_PER_DAY);
 	for (size_t k = 0; k < VALUABLE_COUNT; k++) {
 		const ValuableInfo &info = Info(k);
 		int64_t pull = this->drift_ppm[k] / (DRIFT_PULL_DAYS * DRIFT_STEPS_PER_DAY);
@@ -181,6 +224,7 @@ int64_t ValuablesManager::GetBaseFixed(size_t index) const
 	price = price * (PPM + this->noise_ppm[index]) / PPM;
 	price = price * (PPM + _market_events.ValuablePushPpm(static_cast<int>(index), minutes)) / PPM; // Silver and platinum news of the last days (read from the log).
 	if (index == static_cast<size_t>(ValuableId::Diamond)) price = price * this->DiamondScarcityPpm() / PPM; // The less diamonds in the market, the dearer.
+	if (index == static_cast<size_t>(ValuableId::Oil)) price = price * this->OilScarcityPpm() / PPM; // The less oil in the market, the dearer.
 	return std::max<int64_t>(STOCK_MIN_PRICE * STOCK_PRICE_SCALE, price);
 }
 

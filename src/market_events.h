@@ -39,6 +39,7 @@
 #define MARKET_EVENTS_H
 
 #include <algorithm>
+#include "oil_market_math.h"
 #include <array>
 #include <cstdint>
 #include <deque>
@@ -142,6 +143,8 @@ enum class MarketEventKind : uint8_t {
 	SilverDemandSurge,   ///< Silver (XAG): industry buys more silver, the price rises for a while.
 	PlatinumMineStrike,  ///< Platinum (XPT): a strike at the mines cuts the supply, the price rises for a while.
 	PlatinumDemandDrop,  ///< Platinum (XPT): the makers of catalysts and jewellery buy less, the price falls for a while.
+	OilWellsFound,       ///< Oil (XTI), REAL: the oil stock of the market is far above its start level (wells delivered, nobody bought), the oil price falls for a while. fact_ppm = stock against the start stock (ppm), fact2 = barrels.
+	OilSupplyShort,      ///< Oil (XTI), REAL: the oil stock is far below its start level (traders bought it out), the oil price rises for a while. Same facts.
 	Count,
 };
 
@@ -213,6 +216,8 @@ inline const MarketEventDef &MarketEventInfo(MarketEventKind kind)
 		{  0,      0,      0,   0,      0,      0,  3, false }, // SilverDemandSurge
 		{  0,      0,      0,   0,      0,      0,  3, false }, // PlatinumMineStrike
 		{  0,      0,      0,   0,      0,      0,  3, false }, // PlatinumDemandDrop
+		{  0,      0,      0,   0,      0,      0,  0, false }, // OilWellsFound (never drawn by weight: made from the real oil stock, market_events.cpp)
+		{  0,      0,      0,   0,      0,      0,  0, false }, // OilSupplyShort (same)
 	};
 	const size_t i = static_cast<size_t>(kind);
 	return table[i < MARKET_EVENT_KIND_COUNT ? i : 0];
@@ -300,6 +305,12 @@ inline int64_t MarketFuelEffectPpm(MarketEventKind kind, int severity)
 	return 0;
 }
 
+/** True for the two kinds that are made from the real oil stock (oil_market_math.h). */
+inline bool MarketKindIsRealOilKind(MarketEventKind kind)
+{
+	return kind == MarketEventKind::OilWellsFound || kind == MarketEventKind::OilSupplyShort;
+}
+
 /** The name of a group of cargo, for the story. */
 inline const char *MarketCargoGroupName(MarketCargoGroup g)
 {
@@ -325,6 +336,8 @@ inline int64_t MarketValuablePushPpm(MarketEventKind kind, int severity, int &va
 		case MarketEventKind::SilverDemandSurge:  valuable = 1; return  MARKET_VALUABLE_PUSH_PPM * pct / 100;
 		case MarketEventKind::PlatinumMineStrike: valuable = 2; return  MARKET_VALUABLE_PUSH_PPM * pct / 100;
 		case MarketEventKind::PlatinumDemandDrop: valuable = 2; return -MARKET_VALUABLE_PUSH_PPM * pct / 100;
+		case MarketEventKind::OilWellsFound:      valuable = 4; return -MARKET_VALUABLE_PUSH_PPM * pct / 100; // 4 = ValuableId::Oil
+		case MarketEventKind::OilSupplyShort:     valuable = 4; return  MARKET_VALUABLE_PUSH_PPM * pct / 100;
 		default: return 0;
 	}
 }

@@ -54,6 +54,7 @@
 
 #include "gfx_func.h"
 #include "object_type.h"
+#include "object_cmd.h" /* CommandTraits<CMD_BUILD_OBJECT> (build fix 11); object_type.h alone has no command traits */
 #include "tilehighlight_func.h"
 #include "tilehighlight_type.h"
 

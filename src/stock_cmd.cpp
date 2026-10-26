@@ -72,6 +72,9 @@ CommandCost CmdStockOpen(DoCommandFlags flags, CompanyID target, StockOrderType 
 	/* Diamonds are real: a long cannot take more carats than the market has. */
 	if (market && buy && target.base() == STOCK_DIAMOND_SYMBOL && _valuables.diamond_stock_carats < static_cast<int64_t>(volume)) return CommandCost(STR_GOLD_ERROR_NO_STOCK);
 
+	/* Oil is real too: a long cannot take more barrels than the market has. */
+	if (market && buy && target.base() == STOCK_OIL_SYMBOL && _valuables.oil_stock_barrels < static_cast<int64_t>(volume)) return CommandCost(STR_GOLD_ERROR_NO_STOCK);
+
 	int64_t entry = 0;
 	if (market) {
 		/* The market price, moved by the market impact of this order. */

@@ -221,6 +221,7 @@ void GoldFromDelivery(CargoType cargo, uint count)
 	if (count == 0 || !IsValidCargoType(cargo)) return;
 	const CargoLabel label = CargoSpec::Get(cargo)->label;
 	if (label == CargoLabel{'DIAM'}) { DiamondsFromDelivery(count); return; } // Diamonds have a stock of their own (valuables.cpp).
+	if (label == CargoLabel{'OIL_'}) { OilFromDelivery(count); return; } // So has oil (valuables.cpp); it never counts as gold.
 	if (label != CT_GOLD && label != CargoLabel{'VALU'}) return;
 	if (_gold_reserve.price_cents <= 0) return; // The market has not started.
 

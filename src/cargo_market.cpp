@@ -11,6 +11,7 @@
 #include "cargo_market.h"
 #include "central_bank.h"
 #include "market_events.h"
+#include "valuables.h"
 #include "cargotype.h"
 #include "station_base.h"
 #include "town.h"
@@ -207,7 +208,7 @@ Money CargoMarketAdjustIncome(CargoType cargo_type, Money income)
 	 * The fuel surcharge (60% of the part of the fuel index above 1.0, at most +24%) comes on top, for every cargo except gold and valuables. */
 	int64_t factor = _cargo_market.GetPricePpm(cargo_type) * _cargo_market.GetFreightPpm(cargo_type) / cargomarket::PPM;
 	if (!CargoMarketIsGoldCargo(cargo_type)) {
-		factor = factor * cargomarket::FuelIncomeFactorPpm(_market_events.FuelIndexPpm(static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes()))) / cargomarket::PPM;
+		factor = factor * cargomarket::FuelIncomeFactorPpm(FuelIndexWithOilPpm(_market_events.FuelIndexPpm(static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes())))) / cargomarket::PPM;
 	}
 	return static_cast<Money>(cargomarket::ApplyPrice(static_cast<int64_t>(income), factor));
 }

@@ -20,7 +20,7 @@ int main()
 	/* Table sanity. */
 	for (size_t k = 0; k < MARKET_EVENT_KIND_COUNT; k++) {
 		const MarketEventDef &d = MarketEventInfo(static_cast<MarketEventKind>(k));
-		CHECK(d.weight > 0);
+		CHECK(d.weight > 0 || MarketKindIsRealOilKind(static_cast<MarketEventKind>(k))); // The two real oil kinds have weight 0: never drawn.
 		{
 			const MarketEventKind kk = static_cast<MarketEventKind>(k);
 			int vi = -1;
@@ -63,7 +63,7 @@ int main()
 		if (d.company) CHECK(e.target == 0 || e.target == 2 || e.target == 5 || e.target == 7);
 		(void)world_only_company;
 	}
-	CHECK(seen.size() == MARKET_EVENT_KIND_COUNT - 7); // The 7 town news and weather kinds are never drawn: they are made from the real state of the towns.
+	CHECK(seen.size() == MARKET_EVENT_KIND_COUNT - 9); // The 7 town news and weather kinds and the 2 oil kinds are never drawn: they are made from the real state of the towns and of the oil stock.
 	CHECK(max_gold <= MARKET_EVENT_GOLD_MAX_PPM && max_share <= MARKET_EVENT_SHARE_MAX_PPM);
 	CHECK(sev[1] > sev[2] && sev[2] > sev[3] && sev[3] > 0);
 	std::printf("severity 1/2/3 = %d/%d/%d, max gold %lld ppm, max share %lld ppm\n", sev[1], sev[2], sev[3], (long long)max_gold, (long long)max_share);
@@ -295,7 +295,7 @@ int main()
 			CHECK(static_cast<size_t>(f.kind) == k);
 		}
 		/* A kind that was already in the old games keeps its number (savegames). */
-		CHECK(static_cast<int>(MarketEventKind::ProfitTaking) == 28 && static_cast<int>(MarketEventKind::CoalShortage) == 29 && static_cast<int>(MarketEventKind::TownBoom) == 37 && MARKET_EVENT_KIND_COUNT == 49 && static_cast<int>(MarketEventKind::TownGrew) == 38 && static_cast<int>(MarketEventKind::WeatherDroughtEnd) == 44 && static_cast<int>(MarketEventKind::SilverMineFound) == 45 && static_cast<int>(MarketEventKind::PlatinumDemandDrop) == 48);
+		CHECK(static_cast<int>(MarketEventKind::ProfitTaking) == 28 && static_cast<int>(MarketEventKind::CoalShortage) == 29 && static_cast<int>(MarketEventKind::TownBoom) == 37 && MARKET_EVENT_KIND_COUNT == 51 && static_cast<int>(MarketEventKind::OilWellsFound) == 49 && static_cast<int>(MarketEventKind::OilSupplyShort) == 50 && static_cast<int>(MarketEventKind::TownGrew) == 38 && static_cast<int>(MarketEventKind::WeatherDroughtEnd) == 44 && static_cast<int>(MarketEventKind::SilverMineFound) == 45 && static_cast<int>(MarketEventKind::PlatinumDemandDrop) == 48);
 
 		/* The story says what the news does. */
 		MarketEvent sc; sc.kind = MarketEventKind::CoalShortage; sc.severity = 2; sc.variant = 1;

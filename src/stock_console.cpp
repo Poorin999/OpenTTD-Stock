@@ -186,6 +186,7 @@ static bool ConGoldFactors(std::span<std::string_view> argv)
 	IConsolePrint(CC_DEFAULT, "anchor (base x inflation) {}  target before limit {}  target {}", money(f.anchor_cents), money(f.raw_cents), money(f.target_cents));
 	IConsolePrint(CC_DEFAULT, "price now {}  price at midnight {}  pressure {} ppm  market stock {} oz  history days {}", money(_gold_reserve.GetPriceCents()), money(_gold_reserve.GetDayStartCents()), _gold_reserve.pressure_ppm, _gold_reserve.market_stock_oz, _gold_reserve.history_cents.size());
 	IConsolePrint(CC_DEFAULT, "diamond stock {} carats  diamond scarcity {}", _valuables.diamond_stock_carats, pct(_valuables.DiamondScarcityPpm()));
+	IConsolePrint(CC_DEFAULT, "oil stock {} barrels  oil scarcity {}  oil price index {}  fuel pass {}%", _valuables.oil_stock_barrels, pct(_valuables.OilScarcityPpm()), pct(OilPriceIndexPpm()), ValuablesManager::OIL_FUEL_PASS_PERCENT);
 	return true;
 }
 

@@ -511,6 +511,7 @@ void StockMarket::ApplyImpact(CompanyID target, bool buy, uint32_t volume)
 	/* Every executed order is traded volume: it goes into the running candles, where the chart shows it as bars. */
 	this->AddTradedVolume(target, volume);
 	if (i == STOCK_DIAMOND_SYMBOL) DiamondTerminalTrade(buy, volume); // The terminal draws on the real diamond stock.
+	if (i == STOCK_OIL_SYMBOL) OilTerminalTrade(buy, volume); // And on the real oil stock.
 
 	const int64_t shift = buy ? GetImpactPpm(volume, i) : -GetImpactPpm(volume, i);
 	this->impact[i] = std::clamp<int64_t>(this->impact[i] + shift, -STOCK_IMPACT_MAX_PPM, STOCK_IMPACT_MAX_PPM);

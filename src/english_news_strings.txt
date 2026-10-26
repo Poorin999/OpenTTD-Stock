@@ -3,3 +3,6 @@ STR_MARKET_NEWS_CAPTION                                         :Market News
 STR_CARGO_PRICES_CAPTION                                      :Cargo Prices
 STR_MARKET_NEWS_CARGO_BUTTON                                    :Cargo Prices
 STR_MARKET_NEWS_CARGO_TIP                                       :{BLACK}Show what each cargo pays now, and which towns pay most
+STR_OIL_MARKET_CAPTION                                          :Oil Market
+STR_MARKET_NEWS_OIL_BUTTON                                      :Oil Market
+STR_MARKET_NEWS_OIL_TIP                                         :{BLACK}Show the oil price, the oil stock, what fuel costs the vehicles and the latest oil news
