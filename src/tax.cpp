@@ -148,9 +148,10 @@ static const GameTimeSubscription _tax_quarter(GameTimeEvent::Day, [](const Game
 	if (_game_mode != GM_NORMAL) return;
 	const uint64_t day = now.total_minutes / GameTimeManager::MINUTES_PER_DAY;
 	if (day == 0 || day % GameTimeManager::DAYS_PER_QUARTER != 0) return;
+	const int64_t index_ppm = GetPriceIndexPpm();
 	for (const Company *c : Company::Iterate()) {
 		const CompanyEconomyEntry &last = c->old_economy[0];
 		const int64_t profit = static_cast<int64_t>(last.income) + static_cast<int64_t>(last.expenses);
-		BookTax(c->index, LedgerItem::TaxIncome, profit * TAX_INCOME_QUARTER_PERCENT / 100);
+		BookTax(c->index, LedgerItem::TaxIncome, IncomeTaxOfQuarter(profit, index_ppm));
 	}
 }, 10);

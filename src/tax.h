@@ -17,7 +17,9 @@
  *  - VAT:            7% of every income from cargo delivery, taken when the income is paid.
  *  - Capital gains:  15% of every profit of a closed trade and of a gold sale, taken when the profit is paid.
  *  - Dividend tax:   10% of dividends that a company receives.
- *  - Income tax:     15% of the profit of the quarter (income - expenses of the quarter that has just closed), every 90 game days.
+ *  - Income tax:     progressive tax on the profit of the quarter (income - expenses of the quarter that has just closed), every 90 game days:
+ *                    15% up to TAX_INCOME_BRACKET1, 28% up to TAX_INCOME_BRACKET2, 40% above (only the part inside each step is taxed that way).
+ *                    The steps are multiplied by the price index, so inflation does not push a company into a higher step by itself.
  * The fixed amounts (land, transport) are multiplied by the price index of the game, so they follow inflation.
  * All maths is integer; everything runs from the clock of the mod or from game events, so it is the same on every client.
  */
@@ -38,7 +40,28 @@ static constexpr int64_t TAX_AIRCRAFT_DAY = 200;          ///< Transport tax per
 static constexpr int64_t TAX_VAT_PERCENT = 7;             ///< VAT on the income of cargo delivery.
 static constexpr int64_t TAX_CAPITAL_GAINS_PERCENT = 15;  ///< Tax on the profit of closed trades and gold sales.
 static constexpr int64_t TAX_DIVIDEND_PERCENT = 10;       ///< Tax on dividends received.
-static constexpr int64_t TAX_INCOME_QUARTER_PERCENT = 15; ///< Tax on the profit of a quarter.
+static constexpr int64_t TAX_INCOME_QUARTER_PERCENT = 15; ///< Income tax rate of the first step (profit up to TAX_INCOME_BRACKET1).
+static constexpr int64_t TAX_INCOME_BRACKET1 = 5'000'000;  ///< End of the first step, quarter profit at price index 1.0.
+static constexpr int64_t TAX_INCOME_BRACKET2 = 20'000'000; ///< End of the second step, quarter profit at price index 1.0.
+static constexpr int64_t TAX_INCOME_PERCENT_2 = 28;        ///< Income tax rate between the two steps.
+static constexpr int64_t TAX_INCOME_PERCENT_3 = 40;        ///< Income tax rate above the second step.
+
+/**
+ * Income tax of one quarter, by steps.
+ * @param profit Profit of the quarter (a loss or 0 gives 0).
+ * @param index_ppm Price index in ppm (GetPriceIndexPpm), 1,000,000 = 1.0; the steps are scaled by it.
+ * @return The tax, integer only.
+ */
+inline int64_t IncomeTaxOfQuarter(int64_t profit, int64_t index_ppm)
+{
+	if (profit <= 0) return 0;
+	const int64_t b1 = TAX_INCOME_BRACKET1 * index_ppm / 1'000'000;
+	const int64_t b2 = TAX_INCOME_BRACKET2 * index_ppm / 1'000'000;
+	int64_t tax = std::min(profit, b1) * TAX_INCOME_QUARTER_PERCENT / 100;
+	if (profit > b1) tax += (std::min(profit, b2) - b1) * TAX_INCOME_PERCENT_2 / 100;
+	if (profit > b2) tax += (profit - b2) * TAX_INCOME_PERCENT_3 / 100;
+	return tax;
+}
 
 /** VAT on an income of cargo delivery: taken from the company cash now. */
 void ChargeVat(CompanyID company, int64_t income);
