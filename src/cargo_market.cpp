@@ -27,22 +27,65 @@ CargoMarket _cargo_market;
 
 namespace {
 
+/**
+ * What the mod knows about a kind of cargo, found by its LABEL (never by its number: the numbers depend on the climate and on the NewGRFs that are loaded).
+ * One table instead of many `if` lines, so that a new cargo (for example from an industry NewGRF) is added in ONE place. A cargo that is not in the table
+ * gets the defaults: no news group, elasticity DEFAULT_ELASTICITY_PPM, local weight LOCAL_WEIGHT_OTHER_PPM. Its price still follows supply and demand
+ * (that part needs no label); only the news of a group and the special reaction of the cargo are missing.
+ */
+struct CargoRule {
+	CargoLabel label;
+	MarketCargoGroup group;   ///< The group of cargo that the news can move (market_events.h); None for none.
+	int64_t elasticity_ppm;   ///< How strongly the price answers to supply, in ppm (food a lot, coal and ore little).
+	int64_t local_weight_ppm; ///< How much the cargo follows the town that it is delivered to, in ppm.
+	bool people;              ///< Passengers and mail: people are not goods (elasticity 0, the fare follows the crowd).
+};
+
+static constexpr int64_t DEFAULT_ELASTICITY_PPM = 500'000; ///< Elasticity of a cargo that is not in the table.
+
+/** The rule of a cargo, or nullptr when the label is not in the table. */
+const CargoRule *FindCargoRule(const CargoSpec *cs)
+{
+	static const CargoRule rules[] = {
+		/* label            news group              elasticity  local weight                               people */
+		{ CargoLabel{'PASS'}, MarketCargoGroup::People, 0,        cargomarket::LOCAL_WEIGHT_PEOPLE_PPM,   true  },
+		{ CargoLabel{'MAIL'}, MarketCargoGroup::People, 0,        cargomarket::LOCAL_WEIGHT_PEOPLE_PPM,   true  },
+		{ CargoLabel{'FOOD'}, MarketCargoGroup::Farm,   800'000,  cargomarket::LOCAL_WEIGHT_CONSUMER_PPM, false },
+		{ CargoLabel{'FRUT'}, MarketCargoGroup::Farm,   800'000,  cargomarket::LOCAL_WEIGHT_OTHER_PPM,    false },
+		{ CargoLabel{'MILK'}, MarketCargoGroup::Farm,   800'000,  cargomarket::LOCAL_WEIGHT_OTHER_PPM,    false },
+		{ CargoLabel{'GOOD'}, MarketCargoGroup::None,   550'000,  cargomarket::LOCAL_WEIGHT_CONSUMER_PPM, false },
+		{ CargoLabel{'COAL'}, MarketCargoGroup::Coal,   350'000,  cargomarket::LOCAL_WEIGHT_OTHER_PPM,    false },
+		{ CargoLabel{'IORE'}, MarketCargoGroup::Build,  350'000,  cargomarket::LOCAL_WEIGHT_OTHER_PPM,    false },
+		{ CargoLabel{'CORE'}, MarketCargoGroup::Build,  350'000,  cargomarket::LOCAL_WEIGHT_OTHER_PPM,    false },
+		{ CargoLabel{'OIL_'}, MarketCargoGroup::Oil,    350'000,  cargomarket::LOCAL_WEIGHT_OTHER_PPM,    false },
+		{ CargoLabel{'WOOD'}, MarketCargoGroup::Build,  350'000,  cargomarket::LOCAL_WEIGHT_OTHER_PPM,    false },
+		{ CargoLabel{'RFPR'}, MarketCargoGroup::Oil,    DEFAULT_ELASTICITY_PPM, cargomarket::LOCAL_WEIGHT_OTHER_PPM, false },
+		{ CargoLabel{'STEL'}, MarketCargoGroup::Build,  DEFAULT_ELASTICITY_PPM, cargomarket::LOCAL_WEIGHT_OTHER_PPM, false },
+		{ CargoLabel{'GRAI'}, MarketCargoGroup::Farm,   DEFAULT_ELASTICITY_PPM, cargomarket::LOCAL_WEIGHT_OTHER_PPM, false },
+		{ CargoLabel{'WHEA'}, MarketCargoGroup::Farm,   DEFAULT_ELASTICITY_PPM, cargomarket::LOCAL_WEIGHT_OTHER_PPM, false },
+		{ CargoLabel{'MAIZ'}, MarketCargoGroup::Farm,   DEFAULT_ELASTICITY_PPM, cargomarket::LOCAL_WEIGHT_OTHER_PPM, false },
+		{ CargoLabel{'LVST'}, MarketCargoGroup::Farm,   DEFAULT_ELASTICITY_PPM, cargomarket::LOCAL_WEIGHT_OTHER_PPM, false },
+		{ CargoLabel{'FISH'}, MarketCargoGroup::Farm,   DEFAULT_ELASTICITY_PPM, cargomarket::LOCAL_WEIGHT_OTHER_PPM, false },
+	};
+	for (const CargoRule &r : rules) {
+		if (r.label == cs->label) return &r;
+	}
+	return nullptr;
+}
+
 /** Passengers and mail: people are not goods. */
 bool IsPeopleCargo(const CargoSpec *cs)
 {
-	return cs->label == CargoLabel{'PASS'} || cs->label == CargoLabel{'MAIL'};
+	const CargoRule *r = FindCargoRule(cs);
+	return r != nullptr && r->people;
 }
 
 /** How strongly the price of a cargo answers to supply, in ppm. Food reacts a lot, coal and ore little; unknown cargo 0.5.
  *  People (passengers, mail) 0: carrying more people does not lower the fare; the backlog of people waiting moves it (freight rate). */
 int64_t ElasticityPpm(const CargoSpec *cs)
 {
-	const CargoLabel l = cs->label;
-	if (IsPeopleCargo(cs)) return 0;
-	if (l == CargoLabel{'FOOD'} || l == CargoLabel{'FRUT'} || l == CargoLabel{'MILK'}) return 800'000;
-	if (l == CargoLabel{'GOOD'}) return 550'000;
-	if (l == CargoLabel{'COAL'} || l == CargoLabel{'IORE'} || l == CargoLabel{'CORE'} || l == CargoLabel{'OIL_'} || l == CargoLabel{'WOOD'}) return 350'000;
-	return 500'000;
+	const CargoRule *r = FindCargoRule(cs);
+	return r != nullptr ? r->elasticity_ppm : DEFAULT_ELASTICITY_PPM;
 }
 
 /** Units of cargo waiting in one GoodsEntry (OpenTTD 15: the cargo list is in GetData(), which exists only when something is stored). */
@@ -60,24 +103,16 @@ bool IsGoldMarketCargo(const CargoSpec *cs)
 /** The group of cargo that the news can move (market_events.h) for a cargo type; None for the others. */
 MarketCargoGroup NewsGroupOf(const CargoSpec *cs)
 {
-	const CargoLabel l = cs->label;
-	if (l == CargoLabel{'PASS'} || l == CargoLabel{'MAIL'}) return MarketCargoGroup::People;
-	if (l == CargoLabel{'OIL_'} || l == CargoLabel{'RFPR'}) return MarketCargoGroup::Oil;
-	if (l == CargoLabel{'COAL'}) return MarketCargoGroup::Coal;
-	if (l == CargoLabel{'GRAI'} || l == CargoLabel{'WHEA'} || l == CargoLabel{'MAIZ'} || l == CargoLabel{'LVST'} || l == CargoLabel{'MILK'} ||
-			l == CargoLabel{'FRUT'} || l == CargoLabel{'FOOD'} || l == CargoLabel{'FISH'}) return MarketCargoGroup::Farm;
-	if (l == CargoLabel{'WOOD'} || l == CargoLabel{'STEL'} || l == CargoLabel{'IORE'} || l == CargoLabel{'CORE'}) return MarketCargoGroup::Build;
-	return MarketCargoGroup::None;
+	const CargoRule *r = FindCargoRule(cs);
+	return r != nullptr ? r->group : MarketCargoGroup::None;
 }
 
 /** How much a cargo follows the town that it is delivered to, in ppm: people fully, goods and food a lot, raw material a little, gold and valuables not at all. */
 int64_t LocalWeightPpm(const CargoSpec *cs)
 {
 	if (IsGoldMarketCargo(cs)) return 0;
-	const CargoLabel l = cs->label;
-	if (l == CargoLabel{'PASS'} || l == CargoLabel{'MAIL'}) return cargomarket::LOCAL_WEIGHT_PEOPLE_PPM;
-	if (l == CargoLabel{'GOOD'} || l == CargoLabel{'FOOD'}) return cargomarket::LOCAL_WEIGHT_CONSUMER_PPM;
-	return cargomarket::LOCAL_WEIGHT_OTHER_PPM;
+	const CargoRule *r = FindCargoRule(cs);
+	return r != nullptr ? r->local_weight_ppm : cargomarket::LOCAL_WEIGHT_OTHER_PPM;
 }
 
 /** The money factor of the price index (cash in circulation against the start), without the inflation of the game: OpenTTD pays inflated cargo already. */
