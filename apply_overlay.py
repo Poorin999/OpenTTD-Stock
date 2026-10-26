@@ -42,7 +42,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "central_bank.h": "src", "central_bank.cpp": "src",
     "tax.h": "src", "tax.cpp": "src",
     "cargo_market.h": "src", "cargo_market.cpp": "src", "CargoMarketMath.h": "src",
-    "town_treasury.h": "src", "town_treasury.cpp": "src", "citizen_gold.h": "src", "citizen_terminal.h": "src", "gold_market_math.h": "src",
+    "town_treasury.h": "src", "town_treasury.cpp": "src", "citizen_gold.h": "src", "citizen_terminal.h": "src", "gold_market_math.h": "src", "oil_market_math.h": "src", "oil_market_gui.h": "src", "oil_market_gui.cpp": "src",
     "gold_reserve.h": "src", "gold_reserve.cpp": "src", "gold_industry.cpp": "src",
     "valuables.h": "src", "valuables.cpp": "src",
     "gold_panel.h": "src", "gold_panel.cpp": "src", "gold_buy_gui.cpp": "src",
@@ -73,7 +73,7 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_GOLD_BUY", "buy gold for the reserve"),
     ("CMD_GOLD_SELL", "sell gold of the reserve"),
 ]
-NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "company_info_gui.cpp", "company_info_gui.h", "company_info_math.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
+NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "oil_market_math.h", "oil_market_gui.cpp", "oil_market_gui.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "company_info_gui.cpp", "company_info_gui.h", "company_info_math.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
                "RetailMath.h", "RetailMarketManager.h", "RetailMarketManager.cpp",
                "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]

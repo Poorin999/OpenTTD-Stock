@@ -69,6 +69,14 @@ jobs:
       with:
         arch: x64
 
+    # ccache keeps the compiled objects between runs. The 900 files of OpenTTD itself do not change, so a later run compiles only the files of the mod
+    # that changed (minutes instead of about 14). If ccache can not cache a compile it just runs the compiler, so this can not break the build.
+    - name: Setup ccache
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: windows-2022-openttd-15.3
+        max-size: 1G
+
     # Source archives that vcpkg downloaded are kept between runs, so one good download is enough for all later builds.
     - name: Cache vcpkg downloads
       uses: actions/cache@v4
@@ -95,6 +103,10 @@ jobs:
           if cmake .. \
             -GNinja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_POLICY_DEFAULT_CMP0141=NEW \
+            -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded \
             -DVCPKG_TARGET_TRIPLET=x64-windows-static \
             -DCMAKE_TOOLCHAIN_FILE="${{ steps.vcpkg.outputs.vcpkg-cmake }}"; then
             configured=1
@@ -104,7 +116,23 @@ jobs:
           sleep 90
         done
         [ "$configured" -eq 1 ] || exit 1
-        cmake --build .
+        # "-k 0" = keep going after a failed file, so ONE run shows the errors of ALL files (not only the first one). The whole output is also saved
+        # to build.log for the summary step below. (bash runs with pipefail, so a failed build still fails the step.)
+        cmake --build . -- -k 0 2>&1 | tee ../build.log
+
+    # Only when the build failed: every distinct compiler / linker error in one list at the top of the run page (the "Summary" tab).
+    - name: Summary of build errors (on failure)
+      if: failure()
+      shell: bash
+      run: |
+        if [ -f openttd/build.log ]; then
+          {
+            echo '### Build errors (each distinct line once)'
+            echo '```'
+            grep -E "error (C|LNK|D)[0-9]+|: error:|fatal error" openttd/build.log | sed 's/^[0-9]*: *//' | sort -u | head -150
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
 
     # Only when the build failed: the real vcpkg error is in these logs, not in the NuGet noise at the end of the console log.
     - name: Upload vcpkg logs (on failure)
