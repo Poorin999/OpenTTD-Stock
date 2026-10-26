@@ -167,6 +167,7 @@ static constexpr int64_t POLICY_UNSCHEDULED_CUT_BP = 50;     ///< The unschedule
 static constexpr int64_t POLICY_UNSCHEDULED_HIKE_BP = 75;    ///< The unscheduled hike: 0.75%.
 static constexpr bool BANK_IORB_ENABLED = true;              ///< The bank pays interest on the unborrowed cash of the companies (IORB). Set to false for no interest on cash.
 static constexpr bool BANK_IORB_CREATES_MONEY = true;        ///< true: IORB is NEW money (like the reserves of a central bank): the cash in circulation grows, so it feeds the price index and the inflation. false: it is paid from the own money of the bank (above BANK_IORB_BUDGET_FLOOR).
+static constexpr int64_t BANK_IORB_TAX_PERCENT = 28;         ///< Tax withheld from every IORB payment (the interest on idle cash): the company gets the rest. The tax is NOT created at all (it never becomes money), so idle cash grows more slowly. 0 = no tax.
 static constexpr int64_t BANK_IORB_CREATE_MAX_PERCENT = 1;   ///< The IORB that is created in one day is at most this percent of the cash in circulation (a safety limit; the normal amount is about 0.01%).
 static constexpr int64_t POLICY_NEWS_EXPIRE_DAYS = 14;       ///< A crisis in the news that has not led to a meeting within 14 game days is forgotten.
 static constexpr int64_t POLICY_NEWS_CUT_BP = 50;            ///< Unscheduled cut after a crisis in the news: 0.50%.
@@ -189,7 +190,10 @@ static constexpr int64_t BANK_RATE_CEIL_BP = 1400;           ///< ... and never 
  */
 static constexpr int64_t POLICY_EMERGENCY_ON_BP = 1000;          ///< Emergency mode starts above 10% yearly inflation.
 static constexpr int64_t POLICY_EMERGENCY_OFF_BP = 700;          ///< Emergency mode ends below 7% yearly inflation.
-static constexpr int64_t POLICY_EMERGENCY_STEP_BP = 75;          ///< Speed limit in emergency mode: 0.75% per meeting (the Fed did 75 bp in 2022).
+static constexpr int64_t POLICY_EMERGENCY_REVIEW_DAYS = 5;       ///< In emergency mode the bank reviews the rate every 5 game days (instead of the 8 meetings per year). 0 = same schedule as always.
+static constexpr int64_t POLICY_EMERGENCY_STEP_BP = 75;          ///< Speed limit in emergency mode: 0.75% per review (the Fed did 75 bp in 2022).
+static constexpr int64_t POLICY_HYPER_INFLATION_BP = 4500;       ///< Sharper rule: at 45% yearly inflation or more (the reading is capped at 50% and averaged, so a real 50% shows as about 45%) the bank moves faster.
+static constexpr int64_t POLICY_HYPER_STEP_BP = 150;             ///< Speed limit at that inflation: 1.50% per review (twice the emergency step). With a review every 5 days the top of the range is reached in about 40 days. A bigger step also pushes the gold down more (PolicyGoldPushPpm).
 static constexpr int64_t POLICY_EMERGENCY_SHIFT_MAX_BP = 1500;   ///< Highest shift in emergency mode: +15%.
 static constexpr int64_t BANK_RATE_CEIL_EMERGENCY_BP = 2500;     ///< Loan rate ceiling while the shift is above the normal ceiling: 25%.
 static constexpr int64_t BANK_PENALTY_EMERGENCY_EXTRA_BP = BANK_RATE_CEIL_EMERGENCY_BP - BANK_RATE_CEIL_BP; ///< Added to the penalty rate: 26% .. 29%, above the loan ceiling.
@@ -514,6 +518,27 @@ static constexpr size_t BANK_GOLD_LOG_MAX = 6;            ///< How many trades t
  */
 static constexpr bool BANK_GOLD_MOVES_CASH = false;
 
+/*
+ * ---- Real causes for a gold fall (roadmap 0f) -----------------------------------------------------------------------------
+ * (a) Open market operation: when the gold price is far above its anchor (base price x inflation) or the measured inflation is very high, the
+ *     bank SELLS gold of its own reserve into the market even though its backing is not above BANK_GOLD_SELL_ABOVE_BP. The sale is the same as
+ *     the normal sale (CentralBank::TradeGold: daily cap, market stock up, demand pressure down, news), but it stops at BANK_OMO_MIN_BACKING_BP,
+ *     so the bank never sells itself into the buy zone.
+ * (b) Short in the Terminal: the bank sells XAU short with a volume that grows with the price above the anchor (CentralBank::ShortGold). The
+ *     volume pushes the gold demand down (like a big sell order, but with the depth of the Terminal), and every game day the position is
+ *     marked to market: a falling price earns money for the bank, a rising price costs it (never below 0). Nothing of it is saved: the
+ *     volume is a pure function of today's price and the anchor, so every client gets the same.
+ */
+static constexpr bool BANK_OMO_ENABLED = true;                 ///< Switch for (a).
+static constexpr int64_t BANK_OMO_PRICE_ABOVE_PPM = 200'000;   ///< (a) starts when the gold price is 20% or more above the anchor ...
+static constexpr int64_t BANK_OMO_INFLATION_BP = 1500;         ///< ... or when the measured yearly inflation is 15% or more.
+static constexpr int64_t BANK_OMO_MIN_BACKING_BP = 7000;       ///< (a) never sells below 70% backing (the bank buys again below BANK_GOLD_BUY_BELOW_BP, 60%).
+static constexpr bool BANK_SHORT_ENABLED = true;               ///< Switch for (b).
+static constexpr int64_t BANK_SHORT_FROM_PPM = 150'000;        ///< (b) starts when the price is 15% above the anchor ...
+static constexpr int64_t BANK_SHORT_FULL_PPM = 450'000;        ///< ... and reaches its full size at 45% above it.
+static constexpr int64_t BANK_SHORT_PUSH_MAX_PPM = 10'000;     ///< Full size: the demand is pushed down by 1% per game day (the pressure fades 3% a day, so it stays far below the 30% limit).
+static constexpr int64_t BANK_SHORT_DEPTH_OUNCES = 500'000;    ///< Depth of the Terminal for the bank: 25 times the depth of a company order (like the citizens). The volume of the short = push x this (1% = 5,000 oz).
+
 /** One gold trade of the bank, for the policy window. */
 struct BankGoldTrade {
 	int64_t day = 0;          ///< Game day.
@@ -538,6 +563,9 @@ struct CentralBank {
 	void AnnounceMeeting(int64_t shift_before);
 	void ApplyMarketEffect();
 	void PayIorb();
+	void ShortGold();
+	int64_t short_oz_today = 0;        ///< Ounces that the bank is short in the Terminal today (0 = no short); only for the display. Not saved.
+	int64_t short_pnl_total = 0;       ///< Money units that the short has earned (or lost) since the game was loaded; only for the display. Not saved.
 	int64_t iorb_created = 0;          ///< IORB that was paid since the game was loaded (money units); only for the display. Not saved.
 	/** Auction value of the stations and infrastructure of a company in bankruptcy (money units, at the auction price). Not saved. */
 	std::array<int64_t, MAX_COMPANIES> auction_infra{};
@@ -582,6 +610,7 @@ enum class LedgerItem : uint8_t {
 	TaxDividend,     ///< Tax on dividends received.
 	TaxIncome,       ///< Income tax on the profit of the quarter.
 	FuelCost,        ///< Extra fuel cost per running vehicle per game day while the fuel index is above its plain price (tax.cpp, the cost step of the cargo prices). Expense, NOT paid to the central bank. Appended last: the index is saved.
+	TaxInterest,     ///< Tax withheld from the IORB interest on idle cash (BANK_IORB_TAX_PERCENT). Expense, withheld at the source. Appended last: the index is saved.
 	End,
 };
 static constexpr size_t LEDGER_ITEMS = static_cast<size_t>(LedgerItem::End);

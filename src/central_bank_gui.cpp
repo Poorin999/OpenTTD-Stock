@@ -202,6 +202,7 @@ static void DrawAccountStatement(const Rect &r, int offset)
 	booked("Capital Gains Tax 15% (trades & gold)", LedgerItem::TaxCapitalGains);
 	booked("Dividend Tax 10%", LedgerItem::TaxDividend);
 	booked("Income Tax 15% (profit of the quarter)", LedgerItem::TaxIncome);
+	booked("IORB Tax 28% (interest on cash)", LedgerItem::TaxInterest);
 
 	category("Fuel (paid to the market, not a tax)");
 	booked("Fuel Cost (extra, when fuel is dear)", LedgerItem::FuelCost);
@@ -361,6 +362,7 @@ static void DrawArchiveStatement(const Rect &r, int age)
 	booked("Capital Gains Tax 15% (trades & gold)", LedgerItem::TaxCapitalGains);
 	booked("Dividend Tax 10%", LedgerItem::TaxDividend);
 	booked("Income Tax 15% (profit of the quarter)", LedgerItem::TaxIncome);
+	booked("IORB Tax 28% (interest on cash)", LedgerItem::TaxInterest);
 
 	category("Fuel (paid to the market, not a tax)");
 	booked("Fuel Cost (extra, when fuel is dear)", LedgerItem::FuelCost);
@@ -587,6 +589,7 @@ struct CentralBankWindow : Window {
 			case LedgerItem::TaxCapitalGains: return CbText("ภาษีกำไรจากการเทรด", "Capital gains tax");
 			case LedgerItem::TaxDividend:     return CbText("ภาษีเงินปันผล", "Dividend tax");
 			case LedgerItem::TaxIncome:       return CbText("ภาษีเงินได้ไตรมาส", "Income tax");
+			case LedgerItem::TaxInterest:     return CbText("ภาษีดอกเบี้ยเงินสด (IORB)", "IORB tax");
 			case LedgerItem::BankGoldOp:      return e.amount >= 0 ? CbText("ธนาคารซื้อทอง: เงินเข้า", "Bank gold buy: cash in") : CbText("ธนาคารขายทอง: เงินออก", "Bank gold sale: cash out");
 			default:                          return "";
 		}
@@ -900,7 +903,7 @@ static int DrawMonetaryPolicy(const Rect *r)
 		row(a0, a1, CbText("ทิศทาง (Bias)", "Bias"), p.measured ? (p.wanted_gap_bp >= POLICY_HOLD_BAND_BP ? std::string(CbText("ตึงตัว (อยากขึ้น)", "tightening")) : (p.wanted_gap_bp <= -POLICY_HOLD_BAND_BP ? std::string(CbText("ผ่อนคลาย (อยากลด)", "easing")) : std::string(CbText("เป็นกลาง", "neutral")))) : std::string("-"), TC_GREY);
 		row(a0, a1, CbText("ผลต่อตลาดล่าสุด (ทอง / หุ้น)", "Last market push (gold / shares)"), p.measured ? fmt::format("{} / {}", pct(p.last_gold_push_ppm / 100, true), pct(p.last_share_push_ppm / 100, true)) : std::string("-"), p.last_gold_push_ppm > 0 ? CBP_GOOD : (p.last_gold_push_ppm < 0 ? CBP_WARN : TC_GREY));
 		row(a0, a1, CbText("โหมดนโยบาย", "Policy mode"), p.emergency ? CbText("ฉุกเฉิน (เงินเฟ้อสูง)", "EMERGENCY (high inflation)") : (p.Extended() ? CbText("กำลังกลับสู่ปกติ", "returning to normal") : CbText("ปกติ", "Normal")), p.emergency ? CBP_BAD : (p.Extended() ? CBP_WARN : TC_GREY));
-		row(a0, a1, CbText("ประชุม FOMC ครั้งต่อไป", "Next FOMC meeting"), fmt::format("{} {}", p.last_decision_day < 0 ? POLICY_DECISION_DAYS : PolicyDaysToNextMeeting(today), CbText("วัน", "days")), TC_GREY);
+		row(a0, a1, CbText("ประชุม FOMC ครั้งต่อไป", "Next FOMC meeting"), fmt::format("{} {}", p.last_decision_day < 0 ? POLICY_DECISION_DAYS : ((p.emergency && POLICY_EMERGENCY_REVIEW_DAYS > 0) ? std::max<int64_t>(1, POLICY_EMERGENCY_REVIEW_DAYS - (today - p.last_decision_day)) : PolicyDaysToNextMeeting(today)), CbText("วัน", "days")), TC_GREY);
 		col_bottom[0] = col_top + card_height(n1);
 
 		/* Column 1, card 2: the rates now. 6 rows. */

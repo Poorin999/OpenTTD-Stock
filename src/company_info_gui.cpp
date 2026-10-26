@@ -583,7 +583,7 @@ struct CompanyInfoWindow : Window {
 		/* Tabs: the first one is this window. */
 		if (InRect(l.tabs[1], pt)) { ShowCompanyFinances(this->company); return; }
 		if (InRect(l.tabs[2], pt)) { this->OpenVehicleList(); return; }
-		if (InRect(l.tabs[3], pt)) { ShowCompanyInfrastructure(this->company); return; }
+		if (InRect(l.tabs[3], pt)) { ShowCompanyInfrastructureOfMod(this->company); return; }
 
 		/* Face and headquarters: only the original window can do these. */
 		if (InRect(l.face_btn, pt)) {

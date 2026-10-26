@@ -21,4 +21,10 @@ void ShowCompanyInfoWindow(CompanyID company);
 /** Open the original OpenTTD company window, for the things that only it can do (new face, build or move the headquarters). */
 void ShowOriginalCompanyWindow(CompanyID company);
 
+/**
+ * Open the infrastructure window of OpenTTD. ShowCompanyInfrastructure() is `static` in company_gui.cpp of OpenTTD 15.3, so it can not be called from
+ * here; apply_overlay.py (patch_company_info) adds this function to company_gui.cpp, where it calls it.
+ */
+void ShowCompanyInfrastructureOfMod(CompanyID company);
+
 #endif /* COMPANY_INFO_GUI_H */

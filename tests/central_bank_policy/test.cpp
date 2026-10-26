@@ -135,6 +135,24 @@ int main(){
 	  CHECK(r4.defaulted && r4.rate_bp==BankPenaltyRateBp(1,0));
 	  for(int64_t sh=POLICY_SHIFT_MIN_BP; sh<=POLICY_EMERGENCY_SHIFT_MAX_BP; sh+=25) for(int64_t sp : {0,25,150}) CHECK(PolicyIorbBp(sh) <= BankShiftedRateBp(BANK_RATE_GOOD_MIN_BP+sp,sh)); }
 
+	/* emergency mode: reviews every POLICY_EMERGENCY_REVIEW_DAYS days, never closer, and the normal schedule when calm */
+	{ MonetaryPolicy p; double idx=1e6; int64_t prev=-1; int64_t min_gap_emerg=9999, max_gap_emerg=0; int em_reviews=0; int64_t last_day=-1;
+	  for(int64_t day=0; day<365*4; day++){ idx*=1.0+0.18/365;
+	     bool was_emerg=p.emergency;
+	     bool m=p.Update(day,(int64_t)idx,1'000'000'000LL,1'000'000'000LL,0,false);
+	     if(m){ if(was_emerg && prev>=0){ min_gap_emerg=std::min(min_gap_emerg,day-prev); max_gap_emerg=std::max(max_gap_emerg,day-prev); em_reviews++; } prev=day; last_day=day; } }
+	  printf("emergency reviews %d gap %lld..%lld\n",em_reviews,(long long)min_gap_emerg,(long long)max_gap_emerg);
+	  CHECK(em_reviews>20); CHECK(min_gap_emerg==POLICY_EMERGENCY_REVIEW_DAYS); CHECK(max_gap_emerg==POLICY_EMERGENCY_REVIEW_DAYS); (void)last_day; }
+
+	/* sharper rule at about 50% inflation: steps of up to POLICY_HYPER_STEP_BP, never above the shift limit, and 75 at most below that inflation */
+	{ MonetaryPolicy p; double idx=1e6; int64_t maxstep_hyper=0, maxstep_other=0; int64_t maxshift=-9999;
+	  for(int64_t day=0; day<365*3; day++){ idx*=1.0+0.60/365; if(idx>1e12) idx=1e12;
+	     bool m=p.Update(day,(int64_t)idx,1'000'000'000LL,1'000'000'000LL,0,false);
+	     if(m){ int64_t a=std::llabs(p.last_step_bp); bool was_hyper = p.emergency && p.inflation_bp>=POLICY_HYPER_INFLATION_BP; if(was_hyper) maxstep_hyper=std::max(maxstep_hyper,a); else maxstep_other=std::max(maxstep_other,a); CHECK(p.shift_bp%25==0); }
+	     maxshift=std::max(maxshift,p.shift_bp); CHECK(p.shift_bp<=POLICY_EMERGENCY_SHIFT_MAX_BP); }
+	  printf("hyper: max step at 45%%+ inflation %lld, before %lld, max shift %lld\n",(long long)maxstep_hyper,(long long)maxstep_other,(long long)maxshift);
+	  CHECK(maxstep_hyper>POLICY_EMERGENCY_STEP_BP); CHECK(maxstep_hyper<=POLICY_HYPER_STEP_BP); CHECK(maxstep_other<=POLICY_EMERGENCY_STEP_BP); CHECK(maxshift==POLICY_EMERGENCY_SHIFT_MAX_BP); }
+
 	/* loan rates still the same numbers at shift 0 */
 	CHECK(BankShiftedRateBp(BANK_RATE_GOOD_MIN_BP,0)==350); CHECK(BankShiftedRateBp(BANK_RATE_POOR_MAX_BP,0)==1200);
 	CHECK(BankPolicyCreditPercent(0)==50);

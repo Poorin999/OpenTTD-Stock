@@ -154,6 +154,19 @@ static int64_t BankWithdrawCash(int64_t amount)
 }
 
 /**
+ * Open market operation (roadmap 0f, a): true when the gold price is BANK_OMO_PRICE_ABOVE_PPM or more above its anchor (base price x inflation),
+ * or the measured yearly inflation is BANK_OMO_INFLATION_BP or more. Integer only.
+ */
+static bool BankOpenMarketWanted(const MonetaryPolicy &policy)
+{
+	if (!BANK_OMO_ENABLED) return false;
+	const int64_t price = _gold_reserve.GetPriceCents();
+	const int64_t anchor = _gold_reserve.GetFactors().anchor_cents;
+	if (price > 0 && anchor > 0 && price * POLICY_PPM > anchor * (POLICY_PPM + BANK_OMO_PRICE_ABOVE_PPM)) return true;
+	return policy.measured && policy.inflation_bp >= BANK_OMO_INFLATION_BP;
+}
+
+/**
  * The gold trade of the bank, once per game day (see the constants BANK_GOLD_* in central_bank.h): buys below the target backing
  * with the budget, sells its own gold above the upper limit. The budget is in 1/100 of a money unit, like the prices.
  * With BANK_GOLD_MOVES_CASH the trade also moves the cash of the companies (see the constants in central_bank.h): a purchase puts the
@@ -194,11 +207,13 @@ void CentralBank::TradeGold(int64_t day)
 		_gold_reserve.market_stock_oz -= ounces;
 		_gold_reserve.pressure_ppm = std::min<int64_t>(GoldReserveManager::PRESSURE_MAX_PPM,
 				_gold_reserve.pressure_ppm + ounces * GoldReserveManager::PPM / GoldReserveManager::DEPTH_OUNCES);
-	} else if (backing > BANK_GOLD_SELL_ABOVE_BP) {
+	} else if (backing > BANK_GOLD_SELL_ABOVE_BP || (backing > BANK_OMO_MIN_BACKING_BP && BankOpenMarketWanted(this->policy))) {
+		/* Normal sale (backing above its upper limit), or an open market operation (price or inflation far above the anchor): in that case the bank only sells down to BANK_OMO_MIN_BACKING_BP. */
+		const int64_t sell_limit_bp = backing > BANK_GOLD_SELL_ABOVE_BP ? BANK_GOLD_SELL_ABOVE_BP : BANK_OMO_MIN_BACKING_BP;
 		price_cents = _gold_reserve.GetBidCents();
 		if (price_cents <= 0) return;
-		int64_t excess = std::max<int64_t>(0, value - (cash / 10'000 * BANK_GOLD_SELL_ABOVE_BP + cash % 10'000 * BANK_GOLD_SELL_ABOVE_BP / 10'000));
-		if (BANK_GOLD_MOVES_CASH) excess = excess * 10'000 / (10'000 - BANK_GOLD_SELL_ABOVE_BP); // The money that leaves circulation makes the cash smaller.
+		int64_t excess = std::max<int64_t>(0, value - (cash / 10'000 * sell_limit_bp + cash % 10'000 * sell_limit_bp / 10'000));
+		if (BANK_GOLD_MOVES_CASH) excess = excess * 10'000 / (10'000 - sell_limit_bp); // The money that leaves circulation makes the cash smaller.
 		ounces = excess * 100 / price_cents;
 		ounces = std::min({ounces, BankGoldDailyCapOz(_gold_reserve.bank_reserve_oz), _gold_reserve.bank_reserve_oz});
 		if (BANK_GOLD_MOVES_CASH) ounces = std::min(ounces, BankWithdrawCapacity() * 100 / price_cents); // The buyers can only pay with their unborrowed cash.
@@ -269,7 +284,12 @@ bool MonetaryPolicy::Update(int64_t day, int64_t index_ppm, int64_t value_now, i
 		this->last_decision_day = day;
 		return false;
 	}
-	if (PolicyMeetingIndex(day) <= PolicyMeetingIndex(this->last_decision_day)) return false; // Not a meeting day.
+	if (this->emergency && POLICY_EMERGENCY_REVIEW_DAYS > 0) {
+		/* Emergency mode: a review every POLICY_EMERGENCY_REVIEW_DAYS game days, counted from the last decision (a scheduled one or an unscheduled one). */
+		if (elapsed < POLICY_EMERGENCY_REVIEW_DAYS) return false;
+	} else if (PolicyMeetingIndex(day) <= PolicyMeetingIndex(this->last_decision_day)) {
+		return false; // Not a meeting day.
+	}
 
 	/* A meeting every 45 days sees a short, noisy stretch of the index: the Fed looks at the 12 months, so the reading is averaged with the one before it. */
 	const int64_t reading_bp = std::clamp<int64_t>((index_ppm - this->prev_index_ppm) * 10'000 * BANK_DAYS_PER_YEAR / (this->prev_index_ppm * std::max<int64_t>(1, elapsed)), -2000, 5000);
@@ -300,7 +320,8 @@ bool MonetaryPolicy::Update(int64_t day, int64_t index_ppm, int64_t value_now, i
 	const int64_t expected_gap = this->measured ? this->wanted_gap_bp - this->last_step_bp : 0;
 	this->wanted_gap_bp = wanted - this->shift_bp;
 	/* The wide step also applies while the shift is still above the normal ceiling after the emergency, so it comes back down fast. */
-	const int64_t max_step = this->Extended() ? POLICY_EMERGENCY_STEP_BP : POLICY_BIG_STEP_BP;
+	int64_t max_step = this->Extended() ? POLICY_EMERGENCY_STEP_BP : POLICY_BIG_STEP_BP;
+	if (this->emergency && this->inflation_bp >= POLICY_HYPER_INFLATION_BP) max_step = POLICY_HYPER_STEP_BP; // Sharper rule at about 50% inflation.
 	int64_t step = PolicyRoundMove(this->wanted_gap_bp, max_step);
 	const int64_t shift_before = this->shift_bp;
 	this->shift_bp = std::clamp<int64_t>(this->shift_bp + step, POLICY_SHIFT_MIN_BP, this->Extended() || this->emergency ? POLICY_EMERGENCY_SHIFT_MAX_BP : POLICY_SHIFT_MAX_BP);
@@ -929,12 +950,46 @@ void CentralBank::PayIorb()
 		if (d <= 0) continue;
 		const int64_t share = pay_total >= total ? d : (BankShareOf(pay_total >> shift, d >> shift, total >> shift) << shift);
 		if (share <= 0) continue;
-		c->money += Money(share);
+		/* The interest is taxed at the source: the company is booked the whole interest as income and the tax as an expense, but only
+		 * the rest reaches its cash. The tax is never paid out, so with created money it is simply never created. */
+		const int64_t tax = share * BANK_IORB_TAX_PERCENT / 100;
+		const int64_t net = share - tax;
+		c->money += Money(net);
 		RecordLedger(c->index, LedgerItem::BankInterest, share);
-		paid += share;
+		if (tax > 0) RecordLedger(c->index, LedgerItem::TaxInterest, -tax);
+		paid += net;
 	}
-	if (!BANK_IORB_CREATES_MONEY) this->trading_revenue_cents -= paid * 100; // Created money costs the bank nothing.
+	if (!BANK_IORB_CREATES_MONEY) this->trading_revenue_cents -= paid * 100; // Created money costs the bank nothing; paid money does (net of the tax).
 	this->iorb_created += paid;
+}
+
+/**
+ * The short of the bank in the Terminal (roadmap 0f, b), once per game day. The more the gold price is above its anchor (base price x inflation),
+ * the bigger the short: nothing below BANK_SHORT_FROM_PPM, the full size at BANK_SHORT_FULL_PPM. The short pushes the gold demand down and is marked to
+ * market against the change of the daily price (a falling price earns, a rising price costs; the own money of the bank never goes below 0).
+ * No saved value: the size is a pure function of the price today. Integer only, the same on every client.
+ */
+void CentralBank::ShortGold()
+{
+	this->short_oz_today = 0;
+	if (!BANK_SHORT_ENABLED) return;
+	const int64_t price = _gold_reserve.GetPriceCents();
+	const int64_t anchor = _gold_reserve.GetFactors().anchor_cents;
+	if (price <= 0 || anchor <= 0) return;
+	const int64_t dev_ppm = (price - anchor) * POLICY_PPM / anchor;
+	if (dev_ppm <= BANK_SHORT_FROM_PPM) return;
+	const int64_t push = std::min<int64_t>(BANK_SHORT_PUSH_MAX_PPM, (dev_ppm - BANK_SHORT_FROM_PPM) * BANK_SHORT_PUSH_MAX_PPM / (BANK_SHORT_FULL_PPM - BANK_SHORT_FROM_PPM));
+	if (push <= 0) return;
+	const int64_t volume_oz = push * BANK_SHORT_DEPTH_OUNCES / POLICY_PPM;
+	_gold_reserve.pressure_ppm = std::max<int64_t>(-GoldReserveManager::PRESSURE_MAX_PPM, _gold_reserve.pressure_ppm - push);
+	this->short_oz_today = volume_oz;
+
+	/* Mark to market: the change of the price between the last two daily points. A short earns when the price fell. */
+	const std::vector<int64_t> &h = _gold_reserve.history_cents;
+	if (h.size() < 2) return;
+	const int64_t pnl_money = volume_oz * (h[h.size() - 2] - h[h.size() - 1]) / 100;
+	this->trading_revenue_cents = std::max<int64_t>(0, this->trading_revenue_cents + pnl_money * 100);
+	this->short_pnl_total += pnl_money;
 }
 
 /** The words of the news item for an unscheduled meeting. */
@@ -1043,6 +1098,7 @@ void CentralBank::UpdateDaily(int64_t day)
 	}
 	this->PayIorb();
 	this->TradeGold(day);
+	this->ShortGold();
 
 	SnapshotYearlyExpenses();
 	InvalidateWindowData(WC_STOCK_MARKET, 0);

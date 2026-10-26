@@ -20,6 +20,8 @@
  *  - Income tax:     progressive tax on the profit of the quarter (income - expenses of the quarter that has just closed), every 90 game days:
  *                    15% up to TAX_INCOME_BRACKET1, 28% up to TAX_INCOME_BRACKET2, 40% above (only the part inside each step is taxed that way).
  *                    The steps are multiplied by the price index, so inflation does not push a company into a higher step by itself.
+ *  - IORB tax:       BANK_IORB_TAX_PERCENT (central_bank.h) of the interest that the bank pays on idle cash, withheld at the source in CentralBank::PayIorb
+ *                    (LedgerItem::TaxInterest). The withheld part is never created as money.
  * The fixed amounts (land, transport) are multiplied by the price index of the game, so they follow inflation.
  * All maths is integer; everything runs from the clock of the mod or from game events, so it is the same on every client.
  */

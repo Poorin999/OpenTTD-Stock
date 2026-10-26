@@ -919,6 +919,7 @@ def patch_town_gui(tree):
 
 
 COMPANY_INFO_MARKER = "COMPANY_INFO_PATCH"
+COMPANY_INFRA_FUNC = "ShowCompanyInfrastructureOfMod"  # public wrapper of the static ShowCompanyInfrastructure() of company_gui.cpp
 
 
 def patch_company_info(tree):
@@ -929,8 +930,18 @@ def patch_company_info(tree):
     if p is None:
         sys.exit("ERROR: ShowCompany not found in any src/*.cpp (anchor of the company window patch)")
     s, crlf = _read_lf(p)
-    if COMPANY_INFO_MARKER in s:
+    if COMPANY_INFO_MARKER in s and COMPANY_INFRA_FUNC in s:
         print(f"{p.name}: ShowCompany() already opens the company window of the mod")
+        return
+    if COMPANY_INFRA_FUNC not in s:
+        # ShowCompanyInfrastructure() is static in company_gui.cpp (15.3): add a public function next to ShowCompany() that calls it.
+        # It is declared (static) near the top of the file, so it is known at this point.
+        m0 = re.search(rx, s, re.M)
+        wrapper = ("void " + COMPANY_INFRA_FUNC + "(CompanyID company) { ShowCompanyInfrastructure(company); } // " + COMPANY_INFO_MARKER + "\n\n")
+        s = s[:m0.start()] + wrapper + s[m0.start():]
+    if COMPANY_INFO_MARKER + "\n\n" in s and "ShowCompanyInfoWindow(company); return; }" in s:
+        _write_like(p, s, crlf)
+        print(f"{p.name}: added {COMPANY_INFRA_FUNC}()")
         return
     m = re.search(rx, s, re.M)
     add = ("\tif (!_company_info_use_original) { ShowCompanyInfoWindow(company); return; } // " + COMPANY_INFO_MARKER + "\n\n")
