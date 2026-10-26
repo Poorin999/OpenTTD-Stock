@@ -874,12 +874,12 @@ def patch_firs_desert_cargo(tree):
             "\tif (_settings_game.game_creation.landscape == LandscapeType::Tropic) {\n"
             "\t\tsize_t firs_count = FirsDesertCargoCount();\n"
             "\t\tfor (size_t n = 0; n < firs_count && insert != std::end(CargoSpec::array); ++n) {\n"
-            "\t\t\tif (!MakeFirsDesertCargo(n, *insert, static_cast<uint8_t>(32 + n))) continue;\n"
+            "\t\t\tif (!MakeFirsDesertCargo(n, *insert, static_cast<uint8_t>(32 + n), std::begin(CargoSpec::array), std::end(CargoSpec::array))) continue;\n"
             "\t\t\tSetBit(_cargo_mask, insert->Index());\n"
             "\t\t\t++insert;\n"
             "\t\t}\n"
             "\t}\n\n")
-    decl = f"size_t FirsDesertCargoCount(); /* {FIRS_CARGO_MARKER}: firs_desert_cargo.cpp */\nbool MakeFirsDesertCargo(size_t n, CargoSpec &out, uint8_t bitnum);\n\n"
+    decl = f"size_t FirsDesertCargoCount(); /* {FIRS_CARGO_MARKER}: firs_desert_cargo.cpp */\nbool MakeFirsDesertCargo(size_t n, CargoSpec &out, uint8_t bitnum, const CargoSpec *first, const CargoSpec *last);\n\n"
     m = re.search(r"^(?:static )?void SetupCargoForClimate\(", t, re.M)
     if not m:
         print("WARNING: SetupCargoForClimate not found in cargotype.cpp, the FIRS desert cargo is not added")
