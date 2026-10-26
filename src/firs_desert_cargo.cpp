@@ -75,7 +75,7 @@ size_t FirsDesertCargoCount()
  * @param out Free cargo slot (it is the first free slot of CargoSpec::array).
  * @param bitnum Cargo bit number to give it (unique, 32 or higher: no default cargo and no NewGRF 32-bit cargo mask uses it).
  * @param first Start of CargoSpec::array (private, so SetupCargoForClimate() passes it in).
- * @param last End of CargoSpec::array.
+ * @param last End of the filled part of CargoSpec::array (the slot where \a out is): the slots after it still hold the cargo of the previous climate and must not be searched.
  * @return True when the slot was filled; false when the cargo is already in the climate or its base cargo is missing (the slot is left as it was).
  */
 bool MakeFirsDesertCargo(size_t n, CargoSpec &out, uint8_t bitnum, const CargoSpec *first, const CargoSpec *last)
