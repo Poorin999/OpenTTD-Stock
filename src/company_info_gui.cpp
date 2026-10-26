@@ -52,6 +52,12 @@
 #include "window_gui.h"
 #include "zoom_func.h"
 
+#include "gfx_func.h"
+#include "object_type.h"
+#include "tilehighlight_func.h"
+#include "tilehighlight_type.h"
+
+#include "table/sprites.h"
 #include "table/strings.h"
 
 #include "safeguards.h"
@@ -327,6 +333,7 @@ struct CompanyInfoWindow : Window {
 	CompanyID company;                   ///< The company of this window.
 	enum class QueryKind : uint8_t { None, CompanyName, President };
 	QueryKind query_kind = QueryKind::None;
+	bool placing_hq = false;             ///< True while the cursor places the headquarters (own tool, no original window).
 	uint64_t ipo_flash_until = 0;        ///< Game minute until which the footer says that the IPO does not exist yet.
 
 	/** The numbers change all the time: draw again 4 times a second so the cash is the same as in the status bar. */
@@ -656,14 +663,15 @@ struct CompanyInfoWindow : Window {
 
 		/* Face and headquarters: only the original window can do these. */
 		if (InRect(l.face_btn, pt)) {
-			if (mine) ShowOriginalCompanyWindow(this->company);
+			if (mine) ShowCompanyFaceOfMod(this->company); // The face window of OpenTTD itself (wrapper in company_gui.cpp), not the original company window.
 			return;
 		}
 		if (InRect(l.hq_btn, pt)) {
-			if (c->location_of_HQ != INVALID_TILE) {
-				ScrollMainWindowToTile(c->location_of_HQ);
+			const bool has_hq = c->location_of_HQ != INVALID_TILE;
+			if (has_hq && !_ctrl_pressed) {
+				ScrollMainWindowToTile(c->location_of_HQ); // Click: look at the headquarters. Ctrl+click: move it.
 			} else if (mine) {
-				ShowOriginalCompanyWindow(this->company);
+				this->StartPlacingHQ();
 			}
 			return;
 		}
@@ -693,6 +701,36 @@ struct CompanyInfoWindow : Window {
 			this->ipo_flash_until = GameTimeManager::Get().GetTotalGameMinutes() + 6;
 			this->SetDirty();
 		}
+	}
+
+	/** Start (or stop, when it is already on) the tool that places the headquarters: a 2x2 cursor, like the original window. */
+	void StartPlacingHQ()
+	{
+		if (this->placing_hq) {
+			ResetObjectToPlace();
+			this->placing_hq = false;
+			this->SetDirty();
+			return;
+		}
+		SetObjectToPlaceWnd(SPR_CURSOR_HQ, PAL_NONE, HT_RECT, this);
+		SetTileSelectSize(2, 2);
+		this->placing_hq = true;
+		this->SetDirty();
+	}
+
+	void OnPlaceObject([[maybe_unused]] Point pt, TileIndex tile) override
+	{
+		if (!this->IsMine()) return;
+		if (Command<CMD_BUILD_OBJECT>::Post(STR_ERROR_CAN_T_BUILD_COMPANY_HEADQUARTERS, tile, OBJECT_HQ, 0) && !_shift_pressed) {
+			ResetObjectToPlace();
+			this->placing_hq = false;
+		}
+	}
+
+	void OnPlaceObjectAbort() override
+	{
+		this->placing_hq = false;
+		this->SetDirty();
 	}
 
 	void OnQueryTextFinished(std::optional<std::string> str) override

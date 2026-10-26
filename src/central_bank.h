@@ -168,6 +168,7 @@ static constexpr int64_t POLICY_UNSCHEDULED_HIKE_BP = 75;    ///< The unschedule
 static constexpr bool BANK_IORB_ENABLED = true;              ///< The bank pays interest on the unborrowed cash of the companies (IORB). Set to false for no interest on cash.
 static constexpr bool BANK_IORB_CREATES_MONEY = true;        ///< true: IORB is NEW money (like the reserves of a central bank): the cash in circulation grows, so it feeds the price index and the inflation. false: it is paid from the own money of the bank (above BANK_IORB_BUDGET_FLOOR).
 static constexpr int64_t BANK_IORB_TAX_PERCENT = 28;         ///< Tax withheld from every IORB payment (the interest on idle cash): the company gets the rest. The tax is NOT created at all (it never becomes money), so idle cash grows more slowly. 0 = no tax.
+static constexpr int64_t BANK_IORB_CASH_CEILING = 25'000'000;   ///< IORB is paid only on the cash of a company up to this amount (money units): a company with more idle cash earns interest on the first 25 million only, so a very rich company can not grow its cash without limit by sitting on it. 0 = no ceiling.
 static constexpr int64_t BANK_IORB_CREATE_MAX_PERCENT = 1;   ///< The IORB that is created in one day is at most this percent of the cash in circulation (a safety limit; the normal amount is about 0.01%).
 static constexpr int64_t POLICY_NEWS_EXPIRE_DAYS = 14;       ///< A crisis in the news that has not led to a meeting within 14 game days is forgotten.
 static constexpr int64_t POLICY_NEWS_CUT_BP = 50;            ///< Unscheduled cut after a crisis in the news: 0.50%.
@@ -260,6 +261,17 @@ inline int64_t PolicyPrimeBp(int64_t shift_bp) { return PolicyUpperBp(shift_bp) 
 inline int64_t PolicyDiscountBp(int64_t shift_bp) { return PolicyUpperBp(shift_bp); }
 /** Interest on reserve balances: upper bound - 0.10%. */
 inline int64_t PolicyIorbBp(int64_t shift_bp) { return std::max<int64_t>(0, PolicyUpperBp(shift_bp) + POLICY_IORB_SPREAD_BP); }
+
+/**
+ * The part of the idle cash of a company that earns IORB: the cash up to BANK_IORB_CASH_CEILING (0 = no ceiling), and never more than 10^12 (the limit against overflow).
+ * Pure function, the same on every client. A negative or zero cash earns nothing.
+ */
+inline int64_t IorbCashBase(int64_t unborrowed_cash)
+{
+	if (unborrowed_cash <= 0) return 0;
+	const int64_t limit = BANK_IORB_CASH_CEILING > 0 ? std::min<int64_t>(BANK_IORB_CASH_CEILING, 1'000'000'000'000) : 1'000'000'000'000;
+	return std::min(unborrowed_cash, limit);
+}
 
 /** Number of the meeting period that a game day belongs to: 8 per game year, so a meeting is held on the first day of each period. */
 inline int64_t PolicyMeetingIndex(int64_t day) { return day < 0 ? -1 : day * POLICY_MEETINGS_PER_YEAR / BANK_DAYS_PER_YEAR; }

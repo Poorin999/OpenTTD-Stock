@@ -23,7 +23,8 @@ int main()
 		CHECK(d.weight > 0);
 		{
 			const MarketEventKind kk = static_cast<MarketEventKind>(k);
-			const bool other = MarketCargoEffectOf(kk, 1).push_ppm != 0 || MarketDiamondStockPpm(kk, 1) != 0 || MarketTownBoostPpm(kk, 1) != 0;
+			int vi = -1;
+			const bool other = MarketCargoEffectOf(kk, 1).push_ppm != 0 || MarketDiamondStockPpm(kk, 1) != 0 || MarketTownBoostPpm(kk, 1) != 0 || MarketValuablePushPpm(kk, 1, vi) != 0;
 			CHECK(d.gold_dir != 0 || d.share_dir != 0 || other || MarketKindHasTownField(kk)); // Town news and weather have their own effects (weather) or none (town news).
 		}
 		CHECK(d.gold_min <= d.gold_max && d.share_min <= d.share_max);
@@ -294,7 +295,7 @@ int main()
 			CHECK(static_cast<size_t>(f.kind) == k);
 		}
 		/* A kind that was already in the old games keeps its number (savegames). */
-		CHECK(static_cast<int>(MarketEventKind::ProfitTaking) == 28 && static_cast<int>(MarketEventKind::CoalShortage) == 29 && static_cast<int>(MarketEventKind::TownBoom) == 37 && MARKET_EVENT_KIND_COUNT == 45 && static_cast<int>(MarketEventKind::TownGrew) == 38 && static_cast<int>(MarketEventKind::WeatherDroughtEnd) == 44);
+		CHECK(static_cast<int>(MarketEventKind::ProfitTaking) == 28 && static_cast<int>(MarketEventKind::CoalShortage) == 29 && static_cast<int>(MarketEventKind::TownBoom) == 37 && MARKET_EVENT_KIND_COUNT == 49 && static_cast<int>(MarketEventKind::TownGrew) == 38 && static_cast<int>(MarketEventKind::WeatherDroughtEnd) == 44 && static_cast<int>(MarketEventKind::SilverMineFound) == 45 && static_cast<int>(MarketEventKind::PlatinumDemandDrop) == 48);
 
 		/* The story says what the news does. */
 		MarketEvent sc; sc.kind = MarketEventKind::CoalShortage; sc.severity = 2; sc.variant = 1;
@@ -474,7 +475,7 @@ int main()
 		MarketEvent g6 = g1; g6.kind = MarketEventKind::WeatherDroughtEnd; g6.fact_ppm = 17;
 		CHECK(ComposeMarketStory(g6, "Springfield").analysis.find("17 วัน") != std::string::npos && ComposeMarketStory(g6, "Springfield").analysis.find("หยุดโต") == std::string::npos);
 		CHECK(MarketGroupedNumber(0) == "0" && MarketGroupedNumber(999) == "999" && MarketGroupedNumber(1000) == "1,000" && MarketGroupedNumber(-1234567) == "-1,234,567");
-		for (size_t k = static_cast<size_t>(MarketEventKind::TownGrew); k < MARKET_EVENT_KIND_COUNT; k++) {
+		for (size_t k = static_cast<size_t>(MarketEventKind::TownGrew); k <= static_cast<size_t>(MarketEventKind::WeatherDroughtEnd); k++) {
 			for (int v = 0; v < 12; v++) {
 				MarketEvent x; x.kind = static_cast<MarketEventKind>(k); x.variant = static_cast<uint8_t>(v); x.severity = 1 + v % 3; x.fact_ppm = 5'000; x.town = 1;
 				const MarketStory m = ComposeMarketStory(x, "Qtown");
@@ -489,6 +490,53 @@ int main()
 		}
 		CHECK(MarketKindIsTown(MarketEventKind::TownMilestone) && !MarketKindIsTown(MarketEventKind::WeatherStorm) && MarketKindIsWeather(MarketEventKind::WeatherDroughtEnd) && !MarketKindIsWeather(MarketEventKind::TownGrew));
 		CHECK(!MarketKindHasTownField(MarketEventKind::TownBoom)); // a boom keeps its town in fact_ppm (old savegames)
+	}
+
+	/* Silver and platinum news (roadmap 00): they move the price of that valuable only, fade in a straight line, and are read from the log. */
+	{
+		auto ev = [](MarketEventKind k, int sev, int64_t day) { MarketEvent e; e.kind = k; e.severity = static_cast<uint8_t>(sev); e.minute = day * MARKET_MINUTES_PER_DAY; return e; };
+		int w = 0;
+		CHECK(MarketValuablePushPpm(MarketEventKind::SilverMineFound, 1, w) == -MARKET_VALUABLE_PUSH_PPM && w == 1);
+		w = 0; CHECK(MarketValuablePushPpm(MarketEventKind::SilverDemandSurge, 3, w) == MARKET_VALUABLE_PUSH_PPM * 250 / 100 && w == 1);
+		w = 0; CHECK(MarketValuablePushPpm(MarketEventKind::PlatinumMineStrike, 1, w) == MARKET_VALUABLE_PUSH_PPM && w == 2);
+		w = 0; CHECK(MarketValuablePushPpm(MarketEventKind::PlatinumDemandDrop, 1, w) < 0 && w == 2);
+		w = 0; CHECK(MarketValuablePushPpm(MarketEventKind::GoldMineFound, 1, w) == 0 && w == 0);
+		/* No other effect: not gold, not shares, not a company, and they are drawn by weight like the other sector news. */
+		for (MarketEventKind k : { MarketEventKind::SilverMineFound, MarketEventKind::SilverDemandSurge, MarketEventKind::PlatinumMineStrike, MarketEventKind::PlatinumDemandDrop }) {
+			const MarketEventDef &d = MarketEventInfo(k);
+			CHECK(d.gold_dir == 0 && d.share_dir == 0 && !d.company && d.weight > 0);
+			bool cw = false; CHECK(MarketCreditBp(k, 3, cw) == 0 && MarketDiamondStockPpm(k, 3) == 0 && MarketFuelEffectPpm(k, 3) == 0 && MarketCargoEffectOf(k, 3).group == MarketCargoGroup::None);
+			CHECK(!MarketKindIsTown(k) && !MarketKindIsWeather(k) && !MarketKindHasTownField(k));
+		}
+		/* The log: the newest is in front. An empty log pushes nothing; the day it happens the push is full, it fades to 0 after the window. */
+		MarketEvents m;
+		for (int v = 0; v < 4; v++) CHECK(m.ValuablePushPpm(v, 0) == 0);
+		m.log.push_front(ev(MarketEventKind::SilverDemandSurge, 1, 10));
+		CHECK(m.ValuablePushPpm(1, 10 * MARKET_MINUTES_PER_DAY) == MARKET_VALUABLE_PUSH_PPM);
+		CHECK(m.ValuablePushPpm(2, 10 * MARKET_MINUTES_PER_DAY) == 0 && m.ValuablePushPpm(0, 10 * MARKET_MINUTES_PER_DAY) == 0 && m.ValuablePushPpm(3, 10 * MARKET_MINUTES_PER_DAY) == 0 && m.ValuablePushPpm(99, 10 * MARKET_MINUTES_PER_DAY) == 0);
+		const int64_t half = m.ValuablePushPpm(1, (10 + MARKET_VALUABLE_NEWS_DAYS / 2) * MARKET_MINUTES_PER_DAY);
+		CHECK(half > 0 && half < MARKET_VALUABLE_PUSH_PPM && std::llabs(half - MARKET_VALUABLE_PUSH_PPM / 2) <= MARKET_VALUABLE_PUSH_PPM / 20);
+		CHECK(m.ValuablePushPpm(1, (10 + MARKET_VALUABLE_NEWS_DAYS) * MARKET_MINUTES_PER_DAY) == 0);
+		/* Opposite news cancel, same news add up, and the sum is limited. */
+		m.log.push_front(ev(MarketEventKind::SilverMineFound, 1, 10));
+		CHECK(m.ValuablePushPpm(1, 10 * MARKET_MINUTES_PER_DAY) == 0);
+		MarketEvents big;
+		for (int i = 0; i < 6; i++) big.log.push_front(ev(MarketEventKind::PlatinumMineStrike, 3, 10 + i));
+		CHECK(big.ValuablePushPpm(2, 15 * MARKET_MINUTES_PER_DAY) == MARKET_VALUABLE_PUSH_MAX_PPM);
+		MarketEvents down;
+		for (int i = 0; i < 6; i++) down.log.push_front(ev(MarketEventKind::PlatinumDemandDrop, 3, 10 + i));
+		CHECK(down.ValuablePushPpm(2, 15 * MARKET_MINUTES_PER_DAY) == -MARKET_VALUABLE_PUSH_MAX_PPM);
+		/* The price can never go to 0 or below: the lowest factor is 1 - 25%. */
+		CHECK(MARKET_PPM + (-MARKET_VALUABLE_PUSH_MAX_PPM) > 0);
+		/* Every text: both headline variants and both bodies have no { left, and the analysis names the valuable and the days. */
+		for (MarketEventKind k : { MarketEventKind::SilverMineFound, MarketEventKind::SilverDemandSurge, MarketEventKind::PlatinumMineStrike, MarketEventKind::PlatinumDemandDrop }) {
+			for (int v = 0; v < 4; v++) {
+				MarketEvent x; x.kind = k; x.variant = static_cast<uint8_t>(v); x.severity = 1 + v % 3;
+				const MarketStory st = ComposeMarketStory(x, "");
+				CHECK(!st.headline.empty() && !st.body.empty() && st.headline.find("{") == std::string::npos && st.body.find("{") == std::string::npos);
+				CHECK(st.analysis.find(k == MarketEventKind::SilverMineFound || k == MarketEventKind::SilverDemandSurge ? "XAG" : "XPT") != std::string::npos && st.analysis.find("20 วัน") != std::string::npos);
+			}
+		}
 	}
 
 	/* Fuel index from the log (step 4 of the cargo prices). */

@@ -11,6 +11,7 @@
 #include "valuables.h"
 #include "stock_base.h"
 #include "gold_reserve.h"
+#include "market_events.h"
 #include "settings_type.h"
 #include "game_time/game_time_manager.h"
 #include "timer/timer.h"
@@ -178,6 +179,7 @@ int64_t ValuablesManager::GetBaseFixed(size_t index) const
 	price = price * (PPM + cycle) / PPM;
 	price = price * (PPM + this->drift_ppm[index]) / PPM;
 	price = price * (PPM + this->noise_ppm[index]) / PPM;
+	price = price * (PPM + _market_events.ValuablePushPpm(static_cast<int>(index), minutes)) / PPM; // Silver and platinum news of the last days (read from the log).
 	if (index == static_cast<size_t>(ValuableId::Diamond)) price = price * this->DiamondScarcityPpm() / PPM; // The less diamonds in the market, the dearer.
 	return std::max<int64_t>(STOCK_MIN_PRICE * STOCK_PRICE_SCALE, price);
 }

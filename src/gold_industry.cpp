@@ -13,6 +13,9 @@
 
 #include "table/strings.h"
 
+#include <algorithm>
+#include <iterator>
+
 #include "safeguards.h"
 
 /*
@@ -25,7 +28,14 @@
  *     exist in those climates and no vehicle of those climates can carry it);
  *  3. it looks like a local mine (Iron ore mine in Temperate, Copper ore mine in Sub-tropical): the graphics of the Sub-arctic gold mine are not
  *     loaded in the other climates;
- *  4. the bank (in every climate) accepts that cargo (found by what it accepts).
+ *  4. the bank (in every climate) accepts that cargo (found by what it accepts);
+ *  5. a bank exists at the start of every new map in Temperate too (OpenTTD builds the Temperate bank only in the game, in a town of 1200 people or more,
+ *     so a new Temperate map had a gold mine and no bank to deliver to).
+ * Not covered: Toyland. It has no gold-like cargo and no bank, and the delivery of ANY cargo with the label GOLD / VALU / DIAM feeds the gold market
+ * (GoldFromDelivery), so a Toyland cargo can not stand in for gold without a check of where it is delivered (see ROADMAP).
+ * A new map gets at least one gold mine and one bank without any code here: OpenTTD forces one industry of every enabled type with an appear chance
+ * above 0 at map creation (`force_at_least_one`, unless the type has IndustryBehaviour::NoBuildMapCreation). Step 1 gives the mine that chance in every
+ * climate, step 5 gives the Temperate bank one; the Sub-arctic and Sub-tropical banks already have it.
  * Every field that is not sure to exist in this version of OpenTTD is reached through a generic lambda with `requires`, so a different
  * name gives a skipped step and not a compile error.
  */
@@ -46,6 +56,23 @@ static void SetOutputLabel(IndustrySpec &spec, CargoLabel label)
 {
 	[&](auto &s) {
 		if constexpr (requires { s.produced_cargo_label[0] = label; }) s.produced_cargo_label[0] = label;
+	}(spec);
+}
+
+/**
+ * Let a bank that OpenTTD builds only in towns of 1200 people or more be built in any town, with the same rule that the Sub-arctic and Sub-tropical bank
+ * have (the tile must be a house): the bank can then also be placed when a map is created, when the towns are still small.
+ * Reached through a generic lambda with `requires`, so a different name in another version of OpenTTD gives a skipped step and not a compile error.
+ */
+static void MakeBankTownOnly(IndustrySpec &spec)
+{
+	[&](auto &s) {
+		if constexpr (requires { s.behaviour.Test(IndustryBehaviour::Town1200More); s.behaviour.Reset(IndustryBehaviour::Town1200More); s.behaviour.Set(IndustryBehaviour::OnlyInTown); }) {
+			if (s.behaviour.Test(IndustryBehaviour::Town1200More)) {
+				s.behaviour.Reset(IndustryBehaviour::Town1200More);
+				s.behaviour.Set(IndustryBehaviour::OnlyInTown);
+			}
+		}
 	}(spec);
 }
 
@@ -109,6 +136,16 @@ void ApplyGoldIndustries()
 		if (!is_bank) continue;
 		for (const CargoType c : {valuables, gold, diamonds}) {
 			if (c != INVALID_CARGO) AddAcceptedCargo(spec, c);
+		}
+
+		/* A bank that has no chance at map creation but one in the game (the Temperate bank): give it the same chance at creation, so that OpenTTD forces
+		 * one at the start of a new map, and let it be built in any town (not only in one of 1200 people or more). */
+		if (!spec.enabled) continue;
+		const uint8_t creation = *std::max_element(std::begin(spec.appear_creation), std::end(spec.appear_creation));
+		const uint8_t ingame = *std::max_element(std::begin(spec.appear_ingame), std::end(spec.appear_ingame));
+		if (creation == 0 && ingame > 0) {
+			std::fill(std::begin(spec.appear_creation), std::end(spec.appear_creation), ingame);
+			MakeBankTownOnly(spec);
 		}
 	}
 }

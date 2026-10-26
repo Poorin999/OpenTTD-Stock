@@ -941,7 +941,7 @@ void CentralBank::PayIorb()
 	int64_t total = 0;
 	for (const Company *c : Company::Iterate()) {
 		if (this->accounts[c->index.base()].in_default) continue;
-		const int64_t cash = std::min<int64_t>(GetUnborrowedLiquidCash(c->index), 1'000'000'000'000);
+		const int64_t cash = IorbCashBase(GetUnborrowedLiquidCash(c->index));
 		due[c->index.base()] = cash * rate_bp / BANK_INTEREST_DIVISOR;
 		total += due[c->index.base()];
 	}

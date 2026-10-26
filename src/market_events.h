@@ -138,6 +138,10 @@ enum class MarketEventKind : uint8_t {
 	WeatherMeteor,       ///< One town, REAL: a meteorite hit it. fact_ppm = the damage in money units.
 	WeatherDrought,      ///< One town, REAL: a drought began. fact_ppm = its length in game days.
 	WeatherDroughtEnd,   ///< One town, REAL: the drought is over. fact_ppm = the days it lasted.
+	SilverMineFound,     ///< Silver (XAG): a rich new mine, the silver price falls for a while. Appended last: the number of a kind is saved.
+	SilverDemandSurge,   ///< Silver (XAG): industry buys more silver, the price rises for a while.
+	PlatinumMineStrike,  ///< Platinum (XPT): a strike at the mines cuts the supply, the price rises for a while.
+	PlatinumDemandDrop,  ///< Platinum (XPT): the makers of catalysts and jewellery buy less, the price falls for a while.
 	Count,
 };
 
@@ -205,6 +209,10 @@ inline const MarketEventDef &MarketEventInfo(MarketEventKind kind)
 		{  0,      0,      0,   0,      0,      0,  1, false }, // WeatherMeteor
 		{  0,      0,      0,   0,      0,      0,  1, false }, // WeatherDrought
 		{  0,      0,      0,   0,      0,      0,  1, false }, // WeatherDroughtEnd
+		{  0,      0,      0,   0,      0,      0,  3, false }, // SilverMineFound
+		{  0,      0,      0,   0,      0,      0,  3, false }, // SilverDemandSurge
+		{  0,      0,      0,   0,      0,      0,  3, false }, // PlatinumMineStrike
+		{  0,      0,      0,   0,      0,      0,  3, false }, // PlatinumDemandDrop
 	};
 	const size_t i = static_cast<size_t>(kind);
 	return table[i < MARKET_EVENT_KIND_COUNT ? i : 0];
@@ -233,6 +241,9 @@ static constexpr int64_t MARKET_FUEL_MIN_PPM = -300'000;       ///< ... or 30% b
 static constexpr int64_t MARKET_TOWN_NEWS_DAYS = 10;           ///< A town boom lasts this many game days (fading in a straight line).
 static constexpr int64_t MARKET_TOWN_BOOST_PPM = 100'000;      ///< Growth boost of a town boom at severity 1 (10% faster growth); 17% and 25% at severity 2 and 3.
 static constexpr int64_t MARKET_TOWN_BOOST_MAX_PPM = 300'000;  ///< All the town news together never boost a town by more than this (the same limit as the wealth effect, retail::MAX_BOOST_PPM).
+static constexpr int64_t MARKET_VALUABLE_NEWS_DAYS = 20;        ///< A silver or platinum news item moves the price of that valuable for this many game days (fading in a straight line).
+static constexpr int64_t MARKET_VALUABLE_PUSH_PPM = 80'000;     ///< Such a news at severity 1 moves the price by 8% (13.6% and 20% at severity 2 and 3).
+static constexpr int64_t MARKET_VALUABLE_PUSH_MAX_PPM = 250'000; ///< All the silver or platinum news together never move the price by more than +-25%.
 static constexpr int64_t MARKET_DIAMOND_STOCK_PPM = 40'000;    ///< Diamond news at severity 1 moves the diamond stock by 4% of the start stock; 6.8% and 10% at severity 2 and 3.
 static constexpr int64_t MARKET_CREDIT_NEWS_DAYS = 30;         ///< Credit news fades over this many game days.
 static constexpr int64_t MARKET_CREDIT_COMPANY_BP = 25;        ///< Bad news about a company: its loan rate rises by 0.25% at severity 1 (0.42% and 0.62% at severity 2 and 3).
@@ -299,6 +310,22 @@ inline const char *MarketCargoGroupName(MarketCargoGroup g)
 		case MarketCargoGroup::Build:  return "ไม้ เหล็ก และแร่";
 		case MarketCargoGroup::People: return "ผู้โดยสารและไปรษณีย์";
 		default: return "";
+	}
+}
+
+/**
+ * The push of a silver or platinum news on the price of that valuable, in ppm at the moment it happens (positive: the price rises). 0 for the other kinds.
+ * @param valuable Set to the index of the valuable that the news is about (1 silver, 2 platinum, the order of ValuableId); unchanged for the other kinds.
+ */
+inline int64_t MarketValuablePushPpm(MarketEventKind kind, int severity, int &valuable)
+{
+	const int64_t pct = MarketSeverityPercent(severity);
+	switch (kind) {
+		case MarketEventKind::SilverMineFound:    valuable = 1; return -MARKET_VALUABLE_PUSH_PPM * pct / 100;
+		case MarketEventKind::SilverDemandSurge:  valuable = 1; return  MARKET_VALUABLE_PUSH_PPM * pct / 100;
+		case MarketEventKind::PlatinumMineStrike: valuable = 2; return  MARKET_VALUABLE_PUSH_PPM * pct / 100;
+		case MarketEventKind::PlatinumDemandDrop: valuable = 2; return -MARKET_VALUABLE_PUSH_PPM * pct / 100;
+		default: return 0;
 	}
 }
 
@@ -869,6 +896,26 @@ struct MarketEvents {
 			sum += fx * MarketFadePpm(age, window) / MARKET_PPM;
 		}
 		return MARKET_PPM + std::clamp<int64_t>(sum, MARKET_FUEL_MIN_PPM, MARKET_FUEL_MAX_PPM);
+	}
+
+	/**
+	 * The push of the silver and platinum news on the price of a valuable (index 1 silver, 2 platinum; every other index gives 0) at game minute `minute`, in ppm:
+	 * the news of the last MARKET_VALUABLE_NEWS_DAYS days, each fading in a straight line, added up and limited to +-MARKET_VALUABLE_PUSH_MAX_PPM.
+	 * Read from the log, nothing is saved for it (like FuelIndexPpm).
+	 */
+	int64_t ValuablePushPpm(int valuable, int64_t minute) const
+	{
+		const int64_t window = MARKET_VALUABLE_NEWS_DAYS * MARKET_MINUTES_PER_DAY;
+		int64_t sum = 0;
+		for (const MarketEvent &e : this->log) {
+			const int64_t age = minute - e.minute;
+			if (age >= window) break; // newest first
+			int which = -1;
+			const int64_t fx = MarketValuablePushPpm(e.kind, e.severity, which);
+			if (fx == 0 || which != valuable) continue;
+			sum += fx * MarketFadePpm(age, window) / MARKET_PPM;
+		}
+		return std::clamp<int64_t>(sum, -MARKET_VALUABLE_PUSH_MAX_PPM, MARKET_VALUABLE_PUSH_MAX_PPM);
 	}
 
 	/** The growth boost of a town (index of the town) from town booms, in ppm, at game minute `minute`. */

@@ -26,5 +26,7 @@ void ShowOriginalCompanyWindow(CompanyID company);
  * here; apply_overlay.py (patch_company_info) adds this function to company_gui.cpp, where it calls it.
  */
 void ShowCompanyInfrastructureOfMod(CompanyID company);
+/** Open the face window of OpenTTD for this company (wrapper in company_gui.cpp, added by patch_company_info). */
+void ShowCompanyFaceOfMod(CompanyID company);
 
 #endif /* COMPANY_INFO_GUI_H */
