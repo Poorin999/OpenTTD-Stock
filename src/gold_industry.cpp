@@ -10,6 +10,8 @@
 #include "stdafx.h"
 #include "industrytype.h"
 #include "cargotype.h"
+#include "settings_type.h"
+#include "landscape_type.h"
 
 #include "table/strings.h"
 
@@ -24,14 +26,15 @@
  *
  * What it does, in Temperate and Sub-tropical (in Sub-arctic the gold mine is left as it is):
  *  1. the gold mine is enabled and appears on a new map and in the game like in Sub-arctic;
- *  2. it produces the "gold" cargo of the climate: Valuables (VALU) in Temperate, Diamonds (DIAM) in Sub-tropical (the cargo GOLD does not
- *     exist in those climates and no vehicle of those climates can carry it);
+ *  2. it produces the cargo Gold (GOLD) in every climate. OpenTTD has that cargo in Sub-arctic only; patch_gold_cargo (cargotype.cpp) adds it to the other
+ *     climates (it is carried by armoured trucks, like Valuables and Diamonds). If that patch is not there (anchor missing) the mine falls back to what
+ *     it did before: Valuables (VALU) in Temperate, Diamonds (DIAM) in Sub-tropical;
  *  3. it looks like a local mine (Iron ore mine in Temperate, Copper ore mine in Sub-tropical): the graphics of the Sub-arctic gold mine are not
  *     loaded in the other climates;
  *  4. the bank (in every climate) accepts that cargo (found by what it accepts);
  *  5. a bank exists at the start of every new map in Temperate too (OpenTTD builds the Temperate bank only in the game, in a town of 1200 people or more,
  *     so a new Temperate map had a gold mine and no bank to deliver to).
- * Not covered: Toyland. It has no gold-like cargo and no bank, and the delivery of ANY cargo with the label GOLD / VALU / DIAM feeds the gold market
+ * Not covered: Toyland (neither the cargo nor the mine is added there). It has no gold-like cargo and no bank, and the delivery of ANY cargo with the label GOLD / VALU / DIAM feeds the gold market
  * (GoldFromDelivery), so a Toyland cargo can not stand in for gold without a check of where it is delivered (see ROADMAP).
  * A new map gets at least one gold mine and one bank without any code here: OpenTTD forces one industry of every enabled type with an appear chance
  * above 0 at map creation (`force_at_least_one`, unless the type has IndustryBehaviour::NoBuildMapCreation). Step 1 gives the mine that chance in every
@@ -102,15 +105,21 @@ void ApplyGoldIndustries()
 		if (spec.name == STR_INDUSTRY_NAME_COPPER_ORE_MINE) copper_mine = &spec;
 	}
 
-	if (gold_mine != nullptr && gold == INVALID_CARGO) {
-		/* Not Sub-arctic: the cargo of the climate that takes the place of gold, and the graphics of a local mine. */
-		const IndustrySpec *look = nullptr;
+	/* Temperate and Sub-tropical: the graphics of the Sub-arctic gold mine are not loaded, so the mine takes the look of a local mine. Sub-arctic keeps its own,
+	 * and Toyland gets no gold mine (no tile layout of a local mine, no bank). */
+	const LandscapeType landscape = _settings_game.game_creation.landscape;
+	if (gold_mine != nullptr && (landscape == LandscapeType::Temperate || landscape == LandscapeType::Tropic)) {
+		const IndustrySpec *look = landscape == LandscapeType::Temperate ? iron_mine : copper_mine;
 		CargoType out = INVALID_CARGO;
 		CargoLabel out_label{0};
-		if (valuables != INVALID_CARGO) {
-			out = valuables; out_label = CargoLabel{'VALU'}; look = iron_mine;
+		if (gold != INVALID_CARGO) {
+			/* The normal case: the cargo Gold has been added to this climate (patch_gold_cargo). */
+			out = gold; out_label = CargoLabel{'GOLD'};
+		} else if (valuables != INVALID_CARGO) {
+			/* Fallback when the cargo patch is not there: the cargo of the climate that takes the place of gold. */
+			out = valuables; out_label = CargoLabel{'VALU'};
 		} else if (diamonds != INVALID_CARGO) {
-			out = diamonds; out_label = CargoLabel{'DIAM'}; look = copper_mine;
+			out = diamonds; out_label = CargoLabel{'DIAM'};
 		}
 		if (out != INVALID_CARGO && look != nullptr) {
 			gold_mine->produced_cargo[0] = out;
