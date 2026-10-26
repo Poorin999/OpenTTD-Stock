@@ -633,15 +633,17 @@ struct Ledger {
 
 extern Ledger _ledger;
 
-/** One line of the account log that the Central Bank window shows: what was booked, on which game day, and how much. */
+/** One line of the account log that the Central Bank window shows: what was booked, on which game day, and how much. Bookings of the same kind on the same day (for example the VAT of every delivery) are one line: the amount is added up and #count says how many bookings it holds. */
 struct BankLogEntry {
 	int32_t day = 0;                       ///< Day of the game year (1..365) when it was booked.
+	int32_t year = 0;                      ///< Ledger year of the booking (so day 102 of two different years is not mixed).
 	LedgerItem item = LedgerItem::End;     ///< What was booked.
-	int64_t amount = 0;                    ///< Money in (positive) or out (negative).
+	int64_t amount = 0;                    ///< Money in (positive) or out (negative), the sum of all the bookings of this line.
+	int32_t count = 1;                     ///< How many bookings are added up in this line.
 };
 
-/** How many of the latest lines are kept per company. Only for the display: it is not saved, and it starts empty after a load. */
-static constexpr size_t BANK_LOG_MAX = 16;
+/** How many of the latest lines are kept per company (saved as SRK_BANK_LOG). The window scrolls through them. */
+static constexpr size_t BANK_LOG_MAX = 300;
 
 /** The latest lines of the account log per company, the newest in front. */
 extern std::array<std::deque<BankLogEntry>, MAX_COMPANIES> _bank_log;

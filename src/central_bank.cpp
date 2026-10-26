@@ -528,7 +528,22 @@ void RecordLedger(CompanyID company, LedgerItem item, int64_t amount)
 
 	/* The latest lines for the account log of the Central Bank window (newest in front). */
 	auto &log = _bank_log[company.base()];
-	log.push_front({GameTimeManager::Get().GetCurrentGameDay(), item, amount});
+	const int32_t day = GameTimeManager::Get().GetCurrentGameDay();
+	/* The same kind of booking (same item, same day of the same year, money in or out) is added to the line that already exists, so the many small
+	 * bookings of one day (VAT of every delivery, ...) are one line in the window. Only the first lines are searched: the day is the newest one. */
+	bool merged = false;
+	size_t looked = 0;
+	for (BankLogEntry &e : log) {
+		if (e.day != day || e.year != year) break; // older lines are from another day
+		if (e.item == item && (e.amount > 0) == (amount > 0)) {
+			e.amount += amount;
+			e.count++;
+			merged = true;
+			break;
+		}
+		if (++looked >= 32) break;
+	}
+	if (!merged) log.push_front({day, year, item, amount, 1});
 	while (log.size() > BANK_LOG_MAX) log.pop_back();
 }
 

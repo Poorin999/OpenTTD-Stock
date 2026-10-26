@@ -67,6 +67,7 @@ enum StockRecordKind : uint8_t {
 	SRK_TOWN = 34,    ///< Account of a town: ym = index of the town, b = 1 when the groups have their start wealth, v4 = treasury, v5 = spent on development. v1..v3 (ounces, cost, savings) are only read from older savegames and go to the balanced group. Taxes collected are not saved.
 	SRK_TOWN_NEWS = 38, ///< What the daily town news scan remembers about a town: ym = index of the town, v1 = population at the start of the window, v2 = game day of that snapshot, v3 = number of population marks reached.
 	SRK_TOWN_POS = 37, ///< Open terminal position of a citizen group: a = group (citizengold::Style), b = symbol | 0x80 when long, ym = index of the town, v1 = volume, v2 = entry price, v3 = stop loss, v4 = take profit.
+	SRK_BANK_LOG = 41,  ///< Line of the account log of the bank window: a = company, b = line (LedgerItem), ym = game day of the year, v1 = amount (sum of the bookings), v2 = ledger year, v3 = number of bookings. Written newest first.
 	SRK_GOLD_NEWS = 40, ///< State of the real gold news: ym = ounces that the mines delivered since the last news (mine_news_oz), v1 = shock of today in 1/100 money units (day_shift_cents).
 	SRK_TOWN_BOOK = 36, ///< One group of citizens of a town: a = group (citizengold::Style), ym = index of the town, v1 = gold in hundredths of an ounce, v2 = what it cost, v3 = cash, v4 = profit of closed sales, v5 = wins | losses << 24 | cooldown << 48.
 };
@@ -470,6 +471,21 @@ struct STCKChunkHandler : ChunkHandler {
 					r.v2 = row[item].expense;
 					write(r);
 				}
+			}
+		}
+
+		/* The account log of the bank window (newest first), so it is the same after a load. */
+		for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
+			for (const BankLogEntry &e : _bank_log[i]) {
+				StockRecord r;
+				r.kind = SRK_BANK_LOG;
+				r.a = i;
+				r.b = static_cast<uint8_t>(e.item);
+				r.ym = e.day;
+				r.v1 = e.amount;
+				r.v2 = e.year;
+				r.v3 = e.count;
+				write(r);
 			}
 		}
 
@@ -902,6 +918,11 @@ struct STCKChunkHandler : ChunkHandler {
 				case SRK_LEDGER:
 					if (r.a >= MAX_COMPANIES || r.b >= LEDGER_ITEMS) break;
 					_ledger.years[r.a][r.ym][r.b] = LedgerEntry{std::max<int64_t>(r.v1, 0), std::max<int64_t>(r.v2, 0)};
+					break;
+
+				case SRK_BANK_LOG:
+					if (r.a >= MAX_COMPANIES || r.b >= LEDGER_ITEMS || _bank_log[r.a].size() >= BANK_LOG_MAX) break;
+					_bank_log[r.a].push_back(BankLogEntry{r.ym, static_cast<int32_t>(r.v2), static_cast<LedgerItem>(r.b), r.v1, static_cast<int32_t>(std::max<int64_t>(r.v3, 1))}); // file order = newest first
 					break;
 
 				case SRK_STATS:

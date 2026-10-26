@@ -143,6 +143,19 @@ enum CompanyInfoWidgets : WidgetID {
 /** The window number of a company window inside the class WC_CENTRAL_BANK (0-6 are the bank windows, 100000 + the index of the town are the town finance windows): this + the company. */
 constexpr int CI_WINDOW_BASE = 200000;
 
+/** Height of one text row of the window. It follows the font (Thai letters with tone marks are taller), so nothing is drawn on top of the next row. */
+int InfoRow()
+{
+	return GetCharacterHeight(FS_NORMAL) + ScaleGUITrad(5);
+}
+
+/** The texts of the tabs and of the buttons (Thai / English). Shared by the size calculation and by the drawing. */
+const char *const TAB_TH[4] = {"ข้อมูลบริษัท", "การเงิน", "ยานพาหนะ", "โครงสร้างพื้นฐาน"};
+const char *const TAB_EN[4] = {"Company", "Finance", "Vehicles", "Infrastructure"};
+const char *const BTN_TH[4] = {"เปลี่ยนชื่อบริษัท", "ชื่อประธาน", "ซื้อหุ้น", "IPO บริษัท"};
+const char *const BTN_EN[4] = {"Rename company", "President name", "Stocks", "Company IPO"};
+constexpr int BTN_IPO = 3; ///< Index of the IPO button (orange).
+
 /** All the rectangles of the window, from the rectangle of the panel. Draw and click use the same numbers. */
 struct InfoLayout {
 	Rect tabs[4];
@@ -151,85 +164,132 @@ struct InfoLayout {
 	Rect face, face_btn, hq_btn, net_box;
 	int mid_left = 0, mid_right = 0;
 	Rect swatch[16];
-	Rect btns[5];
+	Rect btns[4];
 	Rect footer;
 	int hdr = 0; ///< Height of the title strip of a card.
 	int pad = 0;
+	int needed_w = 0; ///< The smallest width at which every text fits.
+	int needed_h = 0; ///< The smallest height at which every text fits. A bigger window gives the extra height to the chart.
 };
 
-InfoLayout MakeInfoLayout(const Rect &r)
+/**
+ * Work out all the rectangles. Every height comes from the height of the font, not from fixed pixels, so a tall font (Thai) or a bigger GUI scale
+ * makes the cards taller instead of cutting the text. The window can be made bigger by hand with the resize box; it can not be made smaller than needed_w x needed_h.
+ * @param r The panel.
+ * @param net_text_w Width of the net worth number in the large font.
+ */
+InfoLayout MakeInfoLayout(const Rect &r, int net_text_w)
 {
 	InfoLayout l;
 	const int pad = ScaleGUITrad(8);
 	const int gap = ScaleGUITrad(8);
+	const int fh = GetCharacterHeight(FS_NORMAL);
+	const int fl = GetCharacterHeight(FS_LARGE);
+	const int fs = GetCharacterHeight(FS_SMALL);
+	const int row = InfoRow();
 	l.pad = pad;
-	l.hdr = ScaleGUITrad(18);
+	l.hdr = std::max(ScaleGUITrad(18), fh + ScaleGUITrad(6));
 	const int left = r.left + pad;
 	const int right = r.right - pad;
 	int y = r.top + pad;
 
-	/* The tabs and the date. */
-	const int tab_h = ScaleGUITrad(22);
-	const int tab_widths[4] = {ScaleGUITrad(92), ScaleGUITrad(72), ScaleGUITrad(86), ScaleGUITrad(116)};
+	/* The tabs (as wide as their text) and the date. */
+	const int tab_h = std::max(ScaleGUITrad(22), fh + ScaleGUITrad(10));
+	const int tab_min[4] = {92, 72, 86, 116};
 	int x = left;
 	for (int i = 0; i < 4; i++) {
-		l.tabs[i] = {x, y, x + tab_widths[i], y + tab_h};
-		x += tab_widths[i] + ScaleGUITrad(4);
+		const int w = std::max(ScaleGUITrad(tab_min[i]), static_cast<int>(GetStringBoundingBox(CiText(TAB_TH[i], TAB_EN[i])).width) + ScaleGUITrad(24));
+		l.tabs[i] = {x, y, x + w, y + tab_h};
+		x += w + ScaleGUITrad(4);
 	}
-	l.date = {std::max(x, right - ScaleGUITrad(170)), y, right, y + tab_h};
+	const int date_w = std::max<int>(ScaleGUITrad(170), GetStringBoundingBox(GetString(STR_JUST_DATE_LONG, TimerGameCalendar::date)).width + ScaleGUITrad(8));
+	l.date = {std::max(x, right - date_w), y, right, y + tab_h};
+	const int tabs_w = (x - left) + date_w;
 	y += tab_h + gap;
 
-	/* The three rows of cards. */
-	const int profile_h = ScaleGUITrad(150);
+	/* The card of the history: the face column, the middle column and the box of the net worth. */
+	const int face_size = ScaleGUITrad(72);
+	const int fb_h = std::max(ScaleGUITrad(20), fh + ScaleGUITrad(8));
+	const int hq_h = std::max(ScaleGUITrad(22), fh + ScaleGUITrad(8));
+	const int face_col = std::max(ScaleGUITrad(92), static_cast<int>(GetStringBoundingBox(CiText("เลือกใบหน้าใหม่", "New face")).width) + ScaleGUITrad(16));
+	const int net_w = std::max(ScaleGUITrad(190), net_text_w + 2 * pad);
+	const int col_face_h = face_size + ScaleGUITrad(4) + 2 * row + ScaleGUITrad(6) + fb_h;
+	const int col_mid_h = fl + ScaleGUITrad(2) + row + ScaleGUITrad(4) + 3 * row + ScaleGUITrad(6) + hq_h;
+	const int col_net_h = ScaleGUITrad(6) + row + fl + ScaleGUITrad(6) + 2 * row + ScaleGUITrad(5) + row + ScaleGUITrad(6);
+	const int profile_h = l.hdr + pad + std::max({col_face_h, col_mid_h, col_net_h}) + pad;
+	const int mid_min_w = ScaleGUITrad(210);
 	l.profile = {left, y, right, y + profile_h};
 	y += profile_h + gap;
-	const int row_h = ScaleGUITrad(150);
+
+	/* The row of the vehicles table and of the chart. */
+	const int ops_h = l.hdr + ScaleGUITrad(6) + 6 * row + ScaleGUITrad(3) + pad;
+	const int chart_min_h = l.hdr + ScaleGUITrad(6) + fh + ScaleGUITrad(8) + ScaleGUITrad(60) + fs + ScaleGUITrad(4) + pad;
+	const int row2_min = std::max(ops_h, chart_min_h);
+
+	/* The card of the colours: a line of text and two rows of eight squares. */
+	int sw_text_w = 0;
+	for (const char *name : COLOUR_NAMES) sw_text_w = std::max(sw_text_w, static_cast<int>(GetStringBoundingBox(name, FS_SMALL).width));
+	const int sw_gap = ScaleGUITrad(6);
+	const int sw_min_w = sw_text_w + ScaleGUITrad(6);
+	const int sw_h = std::max(ScaleGUITrad(22), fs + ScaleGUITrad(10));
+	const int col_h = l.hdr + ScaleGUITrad(8) + row + ScaleGUITrad(8) + 2 * sw_h + sw_gap + pad;
+
+	/* The buttons and the line at the bottom. */
+	const int btn_h = std::max(ScaleGUITrad(26), fh + ScaleGUITrad(10));
+	const int btn_gap = ScaleGUITrad(6);
+	int btn_min_w = 0;
+	for (int i = 0; i < 4; i++) btn_min_w = std::max(btn_min_w, static_cast<int>(GetStringBoundingBox(CiText(BTN_TH[i], BTN_EN[i])).width) + ScaleGUITrad(20));
+	const int footer_h = fh + ScaleGUITrad(6);
+
+	/* The smallest size. */
+	l.needed_w = 2 * pad + std::max({tabs_w, pad + face_col + pad + mid_min_w + pad + net_w + pad, 8 * sw_min_w + 7 * sw_gap + 2 * pad, 4 * btn_min_w + 3 * btn_gap, ScaleGUITrad(640)});
+	l.needed_h = pad + tab_h + gap + profile_h + gap + row2_min + gap + col_h + gap + btn_h + ScaleGUITrad(6) + footer_h + pad;
+
+	/* The rest of the height (when the window is bigger) goes to the row of the chart. */
+	const int extra = std::max(0, static_cast<int>(r.bottom - r.top + 1) - l.needed_h);
+	const int row2_h = row2_min + extra;
 	const int mid = left + (right - left) * 46 / 100;
-	l.ops = {left, y, mid - gap / 2, y + row_h};
-	l.chart = {mid + gap / 2, y, right, y + row_h};
-	y += row_h + gap;
-	const int col_h = ScaleGUITrad(116);
+	l.ops = {left, y, mid - gap / 2, y + row2_h};
+	l.chart = {mid + gap / 2, y, right, y + row2_h};
+	y += row2_h + gap;
 	l.colours = {left, y, right, y + col_h};
 	y += col_h + gap;
 
-	/* The buttons and the line at the bottom. */
-	const int btn_h = ScaleGUITrad(26);
-	const int btn_gap = ScaleGUITrad(6);
-	const int bw = (right - left - 4 * btn_gap) / 5;
-	for (int i = 0; i < 5; i++) {
+	const int bw = (right - left - 3 * btn_gap) / 4;
+	for (int i = 0; i < 4; i++) {
 		const int bx = left + i * (bw + btn_gap);
 		l.btns[i] = {bx, y, bx + bw, y + btn_h};
 	}
 	y += btn_h + ScaleGUITrad(6);
-	l.footer = {left, y, right, y + GetCharacterHeight(FS_NORMAL)};
+	l.footer = {left, y, right, y + footer_h};
 
 	/* Inside the card of the history. */
 	const Rect &p = l.profile;
-	const int face_col = ScaleGUITrad(92);
-	const int face_size = ScaleGUITrad(72);
 	const int fx = p.left + pad + (face_col - face_size) / 2;
 	const int fy = p.top + l.hdr + pad;
 	l.face = {fx, fy, fx + face_size, fy + face_size};
-	const int fb_h = ScaleGUITrad(20);
 	l.face_btn = {p.left + pad, p.bottom - pad - fb_h, p.left + pad + face_col, p.bottom - pad};
-	const int net_w = ScaleGUITrad(190);
 	l.net_box = {p.right - pad - net_w, p.top + l.hdr + pad, p.right - pad, p.bottom - pad};
 	l.mid_left = p.left + pad + face_col + pad;
 	l.mid_right = l.net_box.left - pad;
-	l.hq_btn = {l.mid_left, p.bottom - pad - ScaleGUITrad(22), l.mid_right, p.bottom - pad};
+	l.hq_btn = {l.mid_left, p.bottom - pad - hq_h, l.mid_right, p.bottom - pad};
 
 	/* Inside the card of the colours: two rows of eight. */
 	const Rect &c = l.colours;
-	const int sw_gap = ScaleGUITrad(6);
 	const int sw_w = (c.right - c.left - 2 * pad - 7 * sw_gap) / 8;
-	const int sw_h = ScaleGUITrad(22);
-	const int sw_top = c.top + l.hdr + ScaleGUITrad(30);
+	const int sw_top = c.top + l.hdr + ScaleGUITrad(8) + row + ScaleGUITrad(8);
 	for (int i = 0; i < 16; i++) {
 		const int sx = c.left + pad + (i % 8) * (sw_w + sw_gap);
 		const int sy = sw_top + (i / 8) * (sw_h + sw_gap);
 		l.swatch[i] = {sx, sy, sx + sw_w, sy + sw_h};
 	}
 	return l;
+}
+
+/** The net worth of a company as the window shows it: company value + trading wallets - debt at the central bank. */
+int64_t CompanyNetWorth(const Company *c, CompanyID id)
+{
+	return static_cast<int64_t>(CalculateCompanyValue(c)) + GetWalletsTotal(id) - GetCentralBankDebt(id);
 }
 
 bool InRect(const Rect &a, Point pt)
@@ -269,8 +329,8 @@ struct CompanyInfoWindow : Window {
 	QueryKind query_kind = QueryKind::None;
 	uint64_t ipo_flash_until = 0;        ///< Game minute until which the footer says that the IPO does not exist yet.
 
-	/** The numbers change all the time: draw again every second. */
-	const IntervalTimer<TimerWindow> redraw_interval = {std::chrono::milliseconds(1000), [this](auto) {
+	/** The numbers change all the time: draw again 4 times a second so the cash is the same as in the status bar. */
+	const IntervalTimer<TimerWindow> redraw_interval = {std::chrono::milliseconds(250), [this](auto) {
 		if (!Company::IsValidID(this->company)) {
 			this->Close();
 			return;
@@ -302,6 +362,19 @@ struct CompanyInfoWindow : Window {
 		this->SetDirty();
 	}
 
+	/** The panel can not be smaller than what every text needs (the font decides), and can be made bigger with the resize box. */
+	void UpdateWidgetSize(WidgetID widget, Dimension &size, [[maybe_unused]] const Dimension &padding, [[maybe_unused]] Dimension &fill, [[maybe_unused]] Dimension &resize) override
+	{
+		if (widget != WID_CIW_PANEL) return;
+		int net_w = 0;
+		if (const Company *c = Company::GetIfValid(this->company); c != nullptr) {
+			net_w = GetStringBoundingBox(CiMoney(CompanyNetWorth(c, this->company)), FS_LARGE).width;
+		}
+		const InfoLayout l = MakeInfoLayout({0, 0, ScaleGUITrad(4000), ScaleGUITrad(4000)}, net_w);
+		size.width = std::max<uint>(size.width, l.needed_w);
+		size.height = std::max<uint>(size.height, l.needed_h);
+	}
+
 	/** A button: flat box, outline, the text in the middle. */
 	static void DrawButton(const Rect &b, const std::string &text, PixelColour fill, TextColour colour, bool enabled = true)
 	{
@@ -328,18 +401,17 @@ struct CompanyInfoWindow : Window {
 		const Company *c = Company::GetIfValid(this->company);
 		if (c == nullptr) return;
 
-		const InfoLayout l = MakeInfoLayout(r);
+		const int64_t net = CompanyNetWorth(c, this->company);
+		const InfoLayout l = MakeInfoLayout(r, GetStringBoundingBox(CiMoney(net), FS_LARGE).width);
 		const int pad = l.pad;
-		const int row = GetCharacterHeight(FS_NORMAL) + ScaleGUITrad(4);
+		const int row = InfoRow();
 		const bool mine = this->IsMine();
 		const PixelColour line = GetColourGradient(COLOUR_GREY, SHADE_LIGHT);
 		const PixelColour box_fill = GetColourGradient(COLOUR_GREY, SHADE_NORMAL);
 
 		/* Tabs and date. */
-		const char *const tab_th[4] = {"ข้อมูลบริษัท", "การเงิน", "ยานพาหนะ", "โครงสร้างพื้นฐาน"};
-		const char *const tab_en[4] = {"Company", "Finance", "Vehicles", "Infrastructure"};
 		for (int i = 0; i < 4; i++) {
-			DrawButton(l.tabs[i], CiText(tab_th[i], tab_en[i]), i == 0 ? GetColourGradient(COLOUR_YELLOW, SHADE_DARK) : box_fill, i == 0 ? TC_BLACK : TC_WHITE);
+			DrawButton(l.tabs[i], CiText(TAB_TH[i], TAB_EN[i]), i == 0 ? GetColourGradient(COLOUR_YELLOW, SHADE_DARK) : box_fill, i == 0 ? TC_BLACK : TC_WHITE);
 		}
 		DrawString(l.date.left, l.date.right, l.date.top + (l.date.bottom - l.date.top + 1 - GetCharacterHeight(FS_NORMAL)) / 2, GetString(STR_JUST_DATE_LONG, TimerGameCalendar::date), TC_WHITE, SA_RIGHT);
 
@@ -382,7 +454,6 @@ struct CompanyInfoWindow : Window {
 		{
 			const int64_t cash = static_cast<int64_t>(c->money);
 			const int64_t debt = GetCentralBankDebt(this->company);
-			const int64_t net = static_cast<int64_t>(CalculateCompanyValue(c)) + GetWalletsTotal(this->company) - debt;
 			GfxFillRect(l.net_box.left, l.net_box.top, l.net_box.right, l.net_box.bottom, GetColourGradient(COLOUR_GREY, SHADE_DARKEST));
 			DrawRectOutline(l.net_box, line);
 			const int nl = l.net_box.left + pad;
@@ -468,12 +539,10 @@ struct CompanyInfoWindow : Window {
 		}
 
 		/* ---- The buttons ---- */
-		const char *const btn_th[5] = {"เปลี่ยนชื่อบริษัท", "ชื่อประธาน", "ซื้อหุ้น", "รายละเอียด", "IPO บริษัท"};
-		const char *const btn_en[5] = {"Rename company", "President name", "Stocks", "Details", "Company IPO"};
-		for (int i = 0; i < 5; i++) {
-			const bool ipo = i == 4;
-			const bool enabled = i == 2 || i == 3 || mine;
-			DrawButton(l.btns[i], CiText(btn_th[i], btn_en[i]), ipo ? GetColourGradient(COLOUR_ORANGE, SHADE_NORMAL) : box_fill, ipo ? TC_BLACK : TC_WHITE, enabled);
+		for (int i = 0; i < 4; i++) {
+			const bool ipo = i == BTN_IPO;
+			const bool enabled = i == 2 || mine;
+			DrawButton(l.btns[i], CiText(BTN_TH[i], BTN_EN[i]), ipo ? GetColourGradient(COLOUR_ORANGE, SHADE_NORMAL) : box_fill, ipo ? TC_BLACK : TC_WHITE, enabled);
 		}
 
 		/* ---- The line at the bottom ---- */
@@ -577,7 +646,7 @@ struct CompanyInfoWindow : Window {
 		if (widget != WID_CIW_PANEL) return;
 		const Company *c = Company::GetIfValid(this->company);
 		if (c == nullptr) return;
-		const InfoLayout l = MakeInfoLayout(this->GetWidget<NWidgetBase>(WID_CIW_PANEL)->GetCurrentRect());
+		const InfoLayout l = MakeInfoLayout(this->GetWidget<NWidgetBase>(WID_CIW_PANEL)->GetCurrentRect(), GetStringBoundingBox(CiMoney(CompanyNetWorth(c, this->company)), FS_LARGE).width);
 		const bool mine = this->IsMine();
 
 		/* Tabs: the first one is this window. */
@@ -619,9 +688,7 @@ struct CompanyInfoWindow : Window {
 			ShowQueryString(GetString(STR_COMPANY_INFO_PRESIDENT, this->company), STR_COMPANY_INFO_QUERY_PRESIDENT, 31, this, CS_ALPHANUMERAL, {});
 		} else if (InRect(l.btns[2], pt)) {
 			ShowStockWindow();
-		} else if (InRect(l.btns[3], pt)) {
-			ShowOriginalCompanyWindow(this->company);
-		} else if (InRect(l.btns[4], pt)) {
+		} else if (InRect(l.btns[BTN_IPO], pt)) {
 			/* The IPO system does not exist yet: only say so in the line at the bottom. */
 			this->ipo_flash_until = GameTimeManager::Get().GetTotalGameMinutes() + 6;
 			this->SetDirty();
@@ -649,6 +716,11 @@ constexpr std::initializer_list<NWidgetPart> _nested_company_info_widgets = {
 		NWidget(WWT_STICKYBOX, COLOUR_GREY),
 	EndContainer(),
 	NWidget(WWT_PANEL, COLOUR_GREY, WID_CIW_PANEL), SetMinimalSize(640, 520), SetFill(1, 1), SetResize(1, 1),
+	EndContainer(),
+	NWidget(NWID_HORIZONTAL),
+		NWidget(WWT_PANEL, COLOUR_GREY), SetFill(1, 0), SetResize(1, 0),
+		EndContainer(),
+		NWidget(WWT_RESIZEBOX, COLOUR_GREY),
 	EndContainer(),
 };
 

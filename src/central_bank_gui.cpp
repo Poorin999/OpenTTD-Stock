@@ -403,16 +403,39 @@ struct CentralBankWindow : Window {
 	static constexpr int LOG_ROWS = 8;      ///< Lines of the account log that are shown.
 
 	QueryKind query_kind = QueryKind::None; ///< What the open query window is for.
+	Scrollbar *vscroll = nullptr;           ///< Scrollbar of the account log.
 
-	/** Redraw regularly: the cash of the company changes all the time. */
-	const IntervalTimer<TimerWindow> redraw_interval = {std::chrono::milliseconds(500), [this](auto) {
+	/** Redraw often (about every 100 ms): the cash of the company changes all the time and the window must show what the status bar shows. */
+	const IntervalTimer<TimerWindow> redraw_interval = {std::chrono::milliseconds(100), [this](auto) {
+		this->SyncLog();
 		this->SetDirty();
 	}};
 
 	CentralBankWindow(WindowDesc &desc) : Window(desc)
 	{
-		this->InitNested(CB_WINDOW_BANK);
+		this->CreateNestedTree();
+		this->vscroll = this->GetScrollbar(WID_CB_LOG_SCROLL);
+		this->FinishInitNested(CB_WINDOW_BANK);
 		this->UpdateSkipRow(true);
+		this->SyncLog();
+	}
+
+	/** Height of the title and the column heads at the top of the log, and of the note at the bottom (shared by the drawing and the scrollbar). */
+	static int LogHeadHeight() { return 2 * CbRowHeight() + ScaleGUITrad(11); }
+	static int LogFootHeight() { return CbRowHeight() + ScaleGUITrad(4); }
+
+	/** Tell the scrollbar how many lines the log has and how many fit now. Called when the window changes size, and on every redraw (the log grows by itself). */
+	void SyncLog()
+	{
+		const NWidgetBase *nw = this->GetWidget<NWidgetBase>(WID_CB_LOG);
+		const int avail = static_cast<int>(nw->current_y) - LogHeadHeight() - LogFootHeight();
+		this->vscroll->SetCapacity(static_cast<size_t>(std::max(1, avail / std::max(1, CbRowHeight()))));
+		this->vscroll->SetCount(Company::IsValidID(_local_company) ? _bank_log[_local_company.base()].size() : 0);
+	}
+
+	void OnResize() override
+	{
+		this->SyncLog();
 	}
 
 	/** The most that can be repaid from the company cash now. */
@@ -427,6 +450,7 @@ struct CentralBankWindow : Window {
 		/* The button is pushed in while the statement window is open. */
 		this->SetWidgetLoweredState(WID_CB_OPEN_STATEMENT, FindWindowById(WC_CENTRAL_BANK, CB_WINDOW_STATEMENT) != nullptr);
 		this->SetWidgetLoweredState(WID_CB_OPEN_POLICY, FindWindowById(WC_CENTRAL_BANK, CB_WINDOW_POLICY) != nullptr);
+		this->SyncLog();
 		this->DrawWidgets();
 	}
 
@@ -625,21 +649,27 @@ struct CentralBankWindow : Window {
 			DrawString(left, right, y + row_h, CbText("ยังไม่มีรายการ", "No bookings yet"), TC_GREY, SA_HOR_CENTER);
 		}
 
+		/* The lines that fit between the heads and the note, starting at the scrollbar position. The lines are the sum of the bookings of one kind of one day. */
+		const int note_y = r.bottom - LogFootHeight() + ScaleGUITrad(2);
+		const size_t first = this->vscroll->GetPosition();
 		int shown = 0;
-		for (const BankLogEntry &e : log) {
-			if (shown >= LOG_ROWS) break;
+		for (size_t i = first; i < log.size(); i++) {
+			if (y + row_h > note_y) break;
+			const BankLogEntry &e = log[i];
 			if (shown % 2 == 1) GfxFillRect(r.left + 1, y - 1, r.right - 1, y + row_h - 2, GREY_SCALE(3));
 
 			const TextColour colour = e.item == LedgerItem::BankInterest && e.amount < 0 ? TC_ORANGE : (e.amount >= 0 ? TC_GREEN : TC_RED);
 			DrawString(day_x, right, y, fmt::format("{} {}", CbText("วันที่", "Day"), e.day), TC_WHITE, SA_LEFT);
-			DrawString(name_x, right, y, LogName(e), TC_WHITE, SA_LEFT);
+			std::string name = LogName(e);
+			if (e.count > 1) name += fmt::format(" x{}", e.count); // many bookings of the day are one line
+			DrawString(name_x, right, y, name, TC_WHITE, SA_LEFT);
 			DrawString(left, right, y, (e.amount > 0 ? "+" : "") + GetString(STR_JUST_CURRENCY_LONG, e.amount), colour, SA_RIGHT);
 			y += row_h;
 			shown++;
 		}
 
 		/* The note at the bottom of the panel. */
-		DrawString(left, right, r.bottom - row_h - ScaleGUITrad(2), CbText("* รายการล่าสุด (เริ่มใหม่เมื่อโหลดเซฟ)", "* Latest bookings (empty after a load)"), TC_GREY, SA_LEFT);
+		DrawString(left, right, note_y, CbText("* ล่าสุด · ชนิดเดียวกันในวันเดียวกันรวมเป็นก้อนเดียว", "* Latest bookings. The same kind on the same day is one line."), TC_GREY, SA_LEFT);
 	}
 
 	void OnClick([[maybe_unused]] Point pt, WidgetID widget, [[maybe_unused]] int click_count) override
@@ -718,7 +748,7 @@ struct CentralBankStatementWindow : Window {
 	int offset = 0; ///< How many years back the statement is: 0 = this year and last year.
 
 	/** Redraw regularly: the numbers change all the time. */
-	const IntervalTimer<TimerWindow> redraw_interval = {std::chrono::milliseconds(500), [this](auto) {
+	const IntervalTimer<TimerWindow> redraw_interval = {std::chrono::milliseconds(100), [this](auto) {
 		this->SetDirty();
 	}};
 
@@ -1030,7 +1060,7 @@ static int DrawMonetaryPolicy(const Rect *r)
 /** The monetary policy window: its own window, so it can stay open next to the bank window. */
 struct CentralBankPolicyWindow : Window {
 	/** Redraw regularly: the numbers change all the time. */
-	const IntervalTimer<TimerWindow> redraw_interval = {std::chrono::milliseconds(500), [this](auto) {
+	const IntervalTimer<TimerWindow> redraw_interval = {std::chrono::milliseconds(100), [this](auto) {
 		this->SetDirty();
 	}};
 
@@ -1062,7 +1092,7 @@ struct CentralBankArchiveWindow : Window {
 	int selected = 0; ///< Chosen year: 0 = this year, 9 = nine years ago.
 
 	/** Redraw regularly: this year changes all the time. */
-	const IntervalTimer<TimerWindow> redraw_interval = {std::chrono::milliseconds(500), [this](auto) {
+	const IntervalTimer<TimerWindow> redraw_interval = {std::chrono::milliseconds(100), [this](auto) {
 		this->SetDirty();
 	}};
 
@@ -1143,11 +1173,15 @@ static constexpr std::initializer_list<NWidgetPart> _nested_central_bank_widgets
 		EndContainer(),
 		/* Right: the account log and the button of the statement window. */
 		NWidget(NWID_VERTICAL),
-			NWidget(WWT_PANEL, COLOUR_GREY, WID_CB_LOG), SetMinimalSize(300, 120), SetResize(1, 1), SetFill(1, 1),
+			NWidget(NWID_HORIZONTAL),
+				NWidget(WWT_PANEL, COLOUR_GREY, WID_CB_LOG), SetMinimalSize(300, 120), SetResize(1, 1), SetFill(1, 1), SetScrollbar(WID_CB_LOG_SCROLL),
+				EndContainer(),
+				NWidget(NWID_VSCROLLBAR, COLOUR_GREY, WID_CB_LOG_SCROLL),
 			EndContainer(),
 			NWidget(NWID_HORIZONTAL),
-				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_CB_OPEN_STATEMENT), SetMinimalSize(100, 14), SetFill(1, 0), SetStringTip(STR_CENTRAL_BANK_STATEMENT, STR_CENTRAL_BANK_TIP_STATEMENT),
-				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_CB_OPEN_POLICY), SetMinimalSize(100, 14), SetFill(1, 0), SetStringTip(STR_CENTRAL_BANK_POLICY, STR_CENTRAL_BANK_TIP_POLICY),
+				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_CB_OPEN_STATEMENT), SetMinimalSize(100, 14), SetResize(1, 0), SetFill(1, 0), SetStringTip(STR_CENTRAL_BANK_STATEMENT, STR_CENTRAL_BANK_TIP_STATEMENT),
+				NWidget(WWT_TEXTBTN, COLOUR_GREY, WID_CB_OPEN_POLICY), SetMinimalSize(100, 14), SetResize(1, 0), SetFill(1, 0), SetStringTip(STR_CENTRAL_BANK_POLICY, STR_CENTRAL_BANK_TIP_POLICY),
+				NWidget(WWT_RESIZEBOX, COLOUR_GREY),
 			EndContainer(),
 		EndContainer(),
 	EndContainer(),
@@ -1160,12 +1194,13 @@ static constexpr std::initializer_list<NWidgetPart> _nested_central_bank_stateme
 		NWidget(WWT_SHADEBOX, COLOUR_GREY),
 		NWidget(WWT_STICKYBOX, COLOUR_GREY),
 	EndContainer(),
-	NWidget(WWT_PANEL, COLOUR_GREY, WID_CBS_PANEL), SetMinimalSize(760, 120), SetFill(1, 1), SetResize(1, 0),
+	NWidget(WWT_PANEL, COLOUR_GREY, WID_CBS_PANEL), SetMinimalSize(760, 120), SetFill(1, 1), SetResize(1, 1),
 	EndContainer(),
 	NWidget(NWID_HORIZONTAL),
 		NWidget(WWT_PANEL, COLOUR_GREY), SetFill(1, 1), SetResize(1, 0),
 		EndContainer(),
 		NWidget(WWT_PUSHBTN, COLOUR_GREY, WID_CBS_OLDER), SetMinimalSize(190, 14),
+		NWidget(WWT_RESIZEBOX, COLOUR_GREY),
 	EndContainer(),
 };
 
@@ -1178,7 +1213,12 @@ static constexpr std::initializer_list<NWidgetPart> _nested_central_bank_policy_
 		NWidget(WWT_STICKYBOX, COLOUR_GREY),
 		NWidget(WWT_CLOSEBOX, COLOUR_GREY),
 	EndContainer(),
-	NWidget(WWT_PANEL, COLOUR_GREY, WID_CBP_PANEL), SetMinimalSize(380, 120), SetFill(1, 1), SetResize(1, 0),
+	NWidget(WWT_PANEL, COLOUR_GREY, WID_CBP_PANEL), SetMinimalSize(380, 120), SetFill(1, 1), SetResize(1, 1),
+	EndContainer(),
+	NWidget(NWID_HORIZONTAL),
+		NWidget(WWT_PANEL, COLOUR_GREY), SetFill(1, 0), SetResize(1, 0),
+		EndContainer(),
+		NWidget(WWT_RESIZEBOX, COLOUR_GREY),
 	EndContainer(),
 };
 
@@ -1194,6 +1234,11 @@ static constexpr std::initializer_list<NWidgetPart> _nested_central_bank_archive
 		EndContainer(),
 		NWidget(WWT_PANEL, COLOUR_GREY, WID_CBA_PANEL), SetMinimalSize(640, 120), SetFill(1, 1), SetResize(1, 1),
 		EndContainer(),
+	EndContainer(),
+	NWidget(NWID_HORIZONTAL),
+		NWidget(WWT_PANEL, COLOUR_GREY), SetFill(1, 0), SetResize(1, 0),
+		EndContainer(),
+		NWidget(WWT_RESIZEBOX, COLOUR_GREY),
 	EndContainer(),
 };
 
