@@ -813,6 +813,42 @@ def patch_vat(tree):
 
 
 GOLD_INDUSTRY_MARKER = "GOLD_INDUSTRY_PATCH"
+GOLD_CARGO_MARKER = "GOLD_CARGO_PATCH"
+
+
+def patch_gold_cargo(tree):
+    """The cargo Gold (GOLD) exists in EVERY climate (cargotype.cpp, SetupCargoForClimate). OpenTTD has it in Sub-arctic only, so the gold mine of the mod
+    produced Valuables in Temperate and Diamonds in Sub-tropical. In place, at one anchor: right before the line that disables the remaining cargo slots,
+    the default Gold spec is copied into the first free cargo slot when the climate has no Gold. Armoured trucks carry it (they carry by cargo class
+    Armoured, which Gold has). Nothing is written when the anchor is missing (the gold mine then falls back to Valuables / Diamonds, see gold_industry.cpp)."""
+    p = tree / "src" / "cargotype.cpp"
+    if not p.is_file():
+        print("WARNING: cargotype.cpp not found, the cargo Gold is not added to the climates")
+        return
+    t, crlf = _read_lf(p)
+    if GOLD_CARGO_MARKER in t:
+        print("cargotype.cpp: gold cargo hook already there")
+        return
+    anchor = "	/* Reset and disable remaining cargo types. */\n\tstd::fill(insert, std::end(CargoSpec::array), CargoSpec{});"
+    anchor = anchor.replace("\\n", "\n").replace("\\t", "\t")
+    if t.count(anchor) != 1:
+        print("WARNING: the 'Reset and disable remaining cargo types' lines of SetupCargoForClimate were not found exactly once in cargotype.cpp, the cargo Gold is not added to the climates")
+        return
+    code = (f"\t/* {GOLD_CARGO_MARKER}: the cargo Gold exists in every climate (the gold mine of the mod produces it). It takes the first free slot; the legacy\n"
+            "\t * label tables are not touched, so NewGRFs still see the original cargo of the slot. Bitnum 31 is not used by any default cargo. */\n"
+            "\tif (insert != std::end(CargoSpec::array) && std::ranges::find(CargoSpec::array, CargoLabel{'GOLD'}, &CargoSpec::label) == std::end(CargoSpec::array)) {\n"
+            "\t\tauto gold = std::ranges::find(_default_cargo, CargoLabel{'GOLD'}, &CargoSpec::label);\n"
+            "\t\tif (gold != std::end(_default_cargo)) {\n"
+            "\t\t\t*insert = *gold;\n"
+            "\t\t\tinsert->bitnum = 31;\n"
+            "\t\t\tSetBit(_cargo_mask, insert->Index());\n"
+            "\t\t\t++insert;\n"
+            "\t\t}\n"
+            "\t}\n\n")
+    t = t.replace(anchor, code + anchor)
+    _write_like(p, t, crlf)
+    print("cargotype.cpp: cargo Gold added to every climate")
+
 
 
 def patch_gold_industries(tree):
@@ -993,6 +1029,7 @@ def main(tree):
     patch_world_time(tree)
     patch_company_hourly(tree)
     patch_company_yearly(tree)
+    patch_gold_cargo(tree)
     patch_gold_industries(tree)
     patch_console_file(tree)
     for name, folder in FILES.items():
