@@ -47,6 +47,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "valuables.h": "src", "valuables.cpp": "src",
     "gold_panel.h": "src", "gold_panel.cpp": "src", "gold_buy_gui.cpp": "src",
     "town_finance_gui.h": "src", "town_finance_gui.cpp": "src",
+    "company_info_gui.h": "src", "company_info_gui.cpp": "src", "company_info_math.h": "src",
     "economy_news.h": "src", "economy_news.cpp": "src",
     "market_events.h": "src", "market_events.cpp": "src", "town_news.h": "src", "town_news.cpp": "src", "market_news_ai.h": "src", "market_news_gui.h": "src", "market_news_gui.cpp": "src", "cargo_market_gui.h": "src", "cargo_market_gui.cpp": "src",
     "game_calendar.h": "src", "game_calendar.cpp": "src",
@@ -72,12 +73,12 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_GOLD_BUY", "buy gold for the reserve"),
     ("CMD_GOLD_SELL", "sell gold of the reserve"),
 ]
-NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
+NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "company_info_gui.cpp", "company_info_gui.h", "company_info_math.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
                "RetailMath.h", "RetailMarketManager.h", "RetailMarketManager.cpp",
                "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]
 REPLACE_KEYS = {"STR_STOCK_TIP_TOOLBOX", "STR_STOCK_TIP_SUMMARY", "STR_STOCK_ORDER_INFO", "STR_STOCK_TIP_DEPOSIT", "STR_STOCK_TIP_WITHDRAW"}
-STRING_FILES = ["english_stock_strings.txt", "english_wallet_strings.txt", "english_round8_strings.txt", "english_timeframe_strings.txt", "english_central_bank_strings.txt", "english_gold_strings.txt", "english_town_finance_strings.txt", "english_valuables_strings.txt", "english_news_strings.txt"]
+STRING_FILES = ["english_stock_strings.txt", "english_wallet_strings.txt", "english_round8_strings.txt", "english_timeframe_strings.txt", "english_central_bank_strings.txt", "english_gold_strings.txt", "english_town_finance_strings.txt", "english_company_info_strings.txt", "english_valuables_strings.txt", "english_news_strings.txt"]
 ANCHORS = ["STR_STOCK_ERROR_NO_ORDER", "STR_STOCK_NEWS_ORDER_EXPIRED"]
 
 
@@ -917,9 +918,32 @@ def patch_town_gui(tree):
     print("town_gui.cpp, town_widget.h: Finances button added to the town window")
 
 
+COMPANY_INFO_MARKER = "COMPANY_INFO_PATCH"
+
+
+def patch_company_info(tree):
+    """ShowCompany() (company_gui.cpp) opens the company window of the mod (company_info_gui.cpp) instead of the original one. The original window
+    stays reachable: ShowOriginalCompanyWindow() sets _company_info_use_original, and then ShowCompany() builds the original window as before."""
+    rx = r"^void ShowCompany\(CompanyID company\)\s*\{\n"
+    p = find_definition(tree, rx)
+    if p is None:
+        sys.exit("ERROR: ShowCompany not found in any src/*.cpp (anchor of the company window patch)")
+    s, crlf = _read_lf(p)
+    if COMPANY_INFO_MARKER in s:
+        print(f"{p.name}: ShowCompany() already opens the company window of the mod")
+        return
+    m = re.search(rx, s, re.M)
+    add = ("\tif (!_company_info_use_original) { ShowCompanyInfoWindow(company); return; } // " + COMPANY_INFO_MARKER + "\n\n")
+    s = s[:m.end()] + add + s[m.end():]
+    s = ensure_include(s, '#include "company_info_gui.h"', ['#include "company_func.h"', '#include "stdafx.h"'])
+    _write_like(p, s, crlf)
+    print(f"{p.name}: ShowCompany() opens the company window of the mod")
+
+
 def main(tree):
     patch_graph_files(tree)
     patch_town_gui(tree)
+    patch_company_info(tree)
     patch_graph_window_name(tree)
     patch_income_graph_to_news(tree)
     patch_cargo_rates_to_prices(tree)
