@@ -273,13 +273,28 @@ inline int64_t IorbCashBase(int64_t unborrowed_cash)
 	return std::min(unborrowed_cash, limit);
 }
 
-/** Number of the meeting period that a game day belongs to: 8 per game year, so a meeting is held on the first day of each period. */
-inline int64_t PolicyMeetingIndex(int64_t day) { return day < 0 ? -1 : day * POLICY_MEETINGS_PER_YEAR / BANK_DAYS_PER_YEAR; }
-/** Game days until the next meeting (1 .. 46; the meeting is held on the first day of the next period). */
+/** Day of the year (1 = 1 January) of the first meeting of every year. The other meetings keep the normal 45 day schedule. */
+static constexpr int64_t POLICY_FIRST_MEETING_DAY = 12;
+static constexpr int64_t POLICY_MEETING_OFFSET = POLICY_FIRST_MEETING_DAY - 1;
+
+/** Number of the meeting period that a game day belongs to: 8 per game year. The first meeting of the year is held on POLICY_FIRST_MEETING_DAY, the others on the first day of their period. */
+inline int64_t PolicyMeetingIndex(int64_t day)
+{
+	if (day < 0) return -1;
+	const int64_t year = day / BANK_DAYS_PER_YEAR;
+	const int64_t d = day % BANK_DAYS_PER_YEAR;
+	if (d < POLICY_MEETING_OFFSET) return year * POLICY_MEETINGS_PER_YEAR - 1; // Still the last period of the year before.
+	return year * POLICY_MEETINGS_PER_YEAR + d * POLICY_MEETINGS_PER_YEAR / BANK_DAYS_PER_YEAR;
+}
+/** Game days until the next meeting. */
 inline int64_t PolicyDaysToNextMeeting(int64_t day)
 {
-	const int64_t next = PolicyMeetingIndex(day) + 1;
-	return std::max<int64_t>(1, (next * BANK_DAYS_PER_YEAR + POLICY_MEETINGS_PER_YEAR - 1) / POLICY_MEETINGS_PER_YEAR - day);
+	if (day < 0) return POLICY_DECISION_DAYS;
+	const int64_t d = day % BANK_DAYS_PER_YEAR;
+	if (d < POLICY_MEETING_OFFSET) return POLICY_MEETING_OFFSET - d;
+	const int64_t next = d * POLICY_MEETINGS_PER_YEAR / BANK_DAYS_PER_YEAR + 1;
+	if (next >= POLICY_MEETINGS_PER_YEAR) return BANK_DAYS_PER_YEAR + POLICY_MEETING_OFFSET - d; // The first meeting of next year.
+	return std::max<int64_t>(1, (next * BANK_DAYS_PER_YEAR + POLICY_MEETINGS_PER_YEAR - 1) / POLICY_MEETINGS_PER_YEAR - d);
 }
 
 /**

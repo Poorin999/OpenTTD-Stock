@@ -66,6 +66,19 @@ const CargoRule *FindCargoRule(const CargoSpec *cs)
 		{ CargoLabel{'MAIZ'}, MarketCargoGroup::Farm,   DEFAULT_ELASTICITY_PPM, cargomarket::LOCAL_WEIGHT_OTHER_PPM, false },
 		{ CargoLabel{'LVST'}, MarketCargoGroup::Farm,   DEFAULT_ELASTICITY_PPM, cargomarket::LOCAL_WEIGHT_OTHER_PPM, false },
 		{ CargoLabel{'FISH'}, MarketCargoGroup::Farm,   DEFAULT_ELASTICITY_PPM, cargomarket::LOCAL_WEIGHT_OTHER_PPM, false },
+		/* FIRS sub-tropical (desert) cargo, firs_desert_cargo.cpp */
+		{ CargoLabel{'CASS'}, MarketCargoGroup::Farm,   800'000,  cargomarket::LOCAL_WEIGHT_OTHER_PPM,    false },
+		{ CargoLabel{'COFF'}, MarketCargoGroup::Farm,   800'000,  cargomarket::LOCAL_WEIGHT_OTHER_PPM,    false },
+		{ CargoLabel{'NUTS'}, MarketCargoGroup::Farm,   800'000,  cargomarket::LOCAL_WEIGHT_OTHER_PPM,    false },
+		{ CargoLabel{'SGCN'}, MarketCargoGroup::Farm,   800'000,  cargomarket::LOCAL_WEIGHT_OTHER_PPM,    false },
+		{ CargoLabel{'SUGR'}, MarketCargoGroup::Farm,   800'000,  cargomarket::LOCAL_WEIGHT_CONSUMER_PPM, false },
+		{ CargoLabel{'COTN'}, MarketCargoGroup::Farm,   800'000,  cargomarket::LOCAL_WEIGHT_OTHER_PPM,    false },
+		{ CargoLabel{'CLAY'}, MarketCargoGroup::Build,  350'000,  cargomarket::LOCAL_WEIGHT_OTHER_PPM,    false },
+		{ CargoLabel{'FERT'}, MarketCargoGroup::Farm,   DEFAULT_ELASTICITY_PPM, cargomarket::LOCAL_WEIGHT_OTHER_PPM, false },
+		{ CargoLabel{'PETR'}, MarketCargoGroup::Oil,    350'000,  cargomarket::LOCAL_WEIGHT_OTHER_PPM,    false },
+		{ CargoLabel{'DIES'}, MarketCargoGroup::Oil,    350'000,  cargomarket::LOCAL_WEIGHT_OTHER_PPM,    false },
+		{ CargoLabel{'EOIL'}, MarketCargoGroup::Farm,   800'000,  cargomarket::LOCAL_WEIGHT_CONSUMER_PPM, false },
+		{ CargoLabel{'FMSP'}, MarketCargoGroup::None,   DEFAULT_ELASTICITY_PPM, cargomarket::LOCAL_WEIGHT_OTHER_PPM, false },
 	};
 	for (const CargoRule &r : rules) {
 		if (r.label == cs->label) return &r;
