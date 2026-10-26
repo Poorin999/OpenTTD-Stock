@@ -836,7 +836,8 @@ def patch_gold_cargo(tree):
         return
     code = (f"\t/* {GOLD_CARGO_MARKER}: the cargo Gold exists in every climate (the gold mine of the mod produces it). It takes the first free slot; the legacy\n"
             "\t * label tables are not touched, so NewGRFs still see the original cargo of the slot. Bitnum 31 is not used by any default cargo. */\n"
-            "\tif (insert != std::end(CargoSpec::array) && std::ranges::find(CargoSpec::array, CargoLabel{'GOLD'}, &CargoSpec::label) == std::end(CargoSpec::array)) {\n"
+            "\t/* Only the slots filled so far count: the slots after 'insert' still hold the cargo of the PREVIOUS climate and are cleared below. */\n"
+            "\tif (insert != std::end(CargoSpec::array) && std::ranges::find(std::begin(CargoSpec::array), insert, CargoLabel{'GOLD'}, &CargoSpec::label) == insert) {\n"
             "\t\tauto gold = std::ranges::find(_default_cargo, CargoLabel{'GOLD'}, &CargoSpec::label);\n"
             "\t\tif (gold != std::end(_default_cargo)) {\n"
             "\t\t\t*insert = *gold;\n"
@@ -874,7 +875,7 @@ def patch_firs_desert_cargo(tree):
             "\tif (_settings_game.game_creation.landscape == LandscapeType::Tropic) {\n"
             "\t\tsize_t firs_count = FirsDesertCargoCount();\n"
             "\t\tfor (size_t n = 0; n < firs_count && insert != std::end(CargoSpec::array); ++n) {\n"
-            "\t\t\tif (!MakeFirsDesertCargo(n, *insert, static_cast<uint8_t>(32 + n), std::begin(CargoSpec::array), std::end(CargoSpec::array))) continue;\n"
+            "\t\t\tif (!MakeFirsDesertCargo(n, *insert, static_cast<uint8_t>(32 + n), std::begin(CargoSpec::array), insert)) continue;\n"
             "\t\t\tSetBit(_cargo_mask, insert->Index());\n"
             "\t\t\t++insert;\n"
             "\t\t}\n"
