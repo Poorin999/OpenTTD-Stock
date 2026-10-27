@@ -1,6 +1,6 @@
 ##grflangid 0x01
 STR_GRF_NAME                                  :Desert Industries
-STR_GRF_DESCRIPTION                           :{ORANGE}Desert Industries{}{BLACK}Seven industries for Sub-tropical: sugar, nut and cotton chains that end in Food and Goods. Needs the cargos SGCN, NUTS, COTN, SUGR and EOIL from the mod.
+STR_GRF_DESCRIPTION                           :{ORANGE}Desert Industries{}{BLACK}Twenty-one industries for Sub-tropical: sugar, nut, cotton, fish, cassava, clay, coffee, fuel and farm supply chains. Needs the extra cargos of the mod (SGCN, NUTS, COTN, SUGR, EOIL, FISH, CASS, CLAY, COFF, PETR, DIES, FERT, FMSP).
 STR_NAME_SUGAR_PLANTATION              :Sugar Cane Plantation
 STR_NEW_SUGAR_PLANTATION               :New sugar cane plantation under construction
 STR_CLOSE_SUGAR_PLANTATION             :Sugar cane plantation is closing down
@@ -36,3 +36,73 @@ STR_NEW_BAKERY                         :New bakery under construction
 STR_CLOSE_BAKERY                       :Bakery is closing down
 STR_UP_BAKERY                          :Bakery increases production
 STR_DOWN_BAKERY                        :Bakery decreases production
+STR_NAME_FISHING_GROUNDS               :Fishing Grounds
+STR_NEW_FISHING_GROUNDS                :New fishing grounds are being set up
+STR_CLOSE_FISHING_GROUNDS              :Fishing grounds are closing down
+STR_UP_FISHING_GROUNDS                 :Fish catch is bigger this year
+STR_DOWN_FISHING_GROUNDS               :Fish catch is smaller this year
+STR_NAME_FISH_CANNERY                  :Fish Cannery
+STR_NEW_FISH_CANNERY                   :New fish cannery under construction
+STR_CLOSE_FISH_CANNERY                 :Fish cannery is closing down
+STR_UP_FISH_CANNERY                    :Fish cannery increases production
+STR_DOWN_FISH_CANNERY                  :Fish cannery decreases production
+STR_NAME_CASSAVA_FARM                  :Cassava Farm
+STR_NEW_CASSAVA_FARM                   :New cassava farm under construction
+STR_CLOSE_CASSAVA_FARM                 :Cassava farm is closing down
+STR_UP_CASSAVA_FARM                    :Cassava harvest is bigger this year
+STR_DOWN_CASSAVA_FARM                  :Cassava harvest is smaller this year
+STR_NAME_CASSAVA_MILL                  :Cassava Mill
+STR_NEW_CASSAVA_MILL                   :New cassava mill under construction
+STR_CLOSE_CASSAVA_MILL                 :Cassava mill is closing down
+STR_UP_CASSAVA_MILL                    :Cassava mill increases production
+STR_DOWN_CASSAVA_MILL                  :Cassava mill decreases production
+STR_NAME_CLAY_PIT                      :Clay Pit
+STR_NEW_CLAY_PIT                       :New clay pit is being dug
+STR_CLOSE_CLAY_PIT                     :Clay pit is closing down
+STR_UP_CLAY_PIT                        :Clay pit increases production
+STR_DOWN_CLAY_PIT                      :Clay pit decreases production
+STR_NAME_POTTERY_WORKS                 :Pottery Works
+STR_NEW_POTTERY_WORKS                  :New pottery works under construction
+STR_CLOSE_POTTERY_WORKS                :Pottery works is closing down
+STR_UP_POTTERY_WORKS                   :Pottery works increases production
+STR_DOWN_POTTERY_WORKS                 :Pottery works decreases production
+STR_NAME_COFFEE_PLANTATION             :Coffee Plantation
+STR_NEW_COFFEE_PLANTATION              :New coffee plantation under construction
+STR_CLOSE_COFFEE_PLANTATION            :Coffee plantation is closing down
+STR_UP_COFFEE_PLANTATION               :Coffee harvest is bigger this year
+STR_DOWN_COFFEE_PLANTATION             :Coffee harvest is smaller this year
+STR_NAME_COFFEE_ROASTERY               :Coffee Roastery
+STR_NEW_COFFEE_ROASTERY                :New coffee roastery under construction
+STR_CLOSE_COFFEE_ROASTERY              :Coffee roastery is closing down
+STR_UP_COFFEE_ROASTERY                 :Coffee roastery increases production
+STR_DOWN_COFFEE_ROASTERY               :Coffee roastery decreases production
+STR_NAME_PETROL_REFINERY               :Petrol Refinery
+STR_NEW_PETROL_REFINERY                :New petrol refinery under construction
+STR_CLOSE_PETROL_REFINERY              :Petrol refinery is closing down
+STR_UP_PETROL_REFINERY                 :Petrol refinery increases production
+STR_DOWN_PETROL_REFINERY               :Petrol refinery decreases production
+STR_NAME_DIESEL_DISTILLERY             :Diesel Distillery
+STR_NEW_DIESEL_DISTILLERY              :New diesel distillery under construction
+STR_CLOSE_DIESEL_DISTILLERY            :Diesel distillery is closing down
+STR_UP_DIESEL_DISTILLERY               :Diesel distillery increases production
+STR_DOWN_DIESEL_DISTILLERY             :Diesel distillery decreases production
+STR_NAME_FERTILISER_PLANT              :Fertiliser Plant
+STR_NEW_FERTILISER_PLANT               :New fertiliser plant under construction
+STR_CLOSE_FERTILISER_PLANT             :Fertiliser plant is closing down
+STR_UP_FERTILISER_PLANT                :Fertiliser plant increases production
+STR_DOWN_FERTILISER_PLANT              :Fertiliser plant decreases production
+STR_NAME_FARM_SUPPLY_WORKS             :Farm Supply Works
+STR_NEW_FARM_SUPPLY_WORKS              :New farm supply works under construction
+STR_CLOSE_FARM_SUPPLY_WORKS            :Farm supply works is closing down
+STR_UP_FARM_SUPPLY_WORKS               :Farm supply works increases production
+STR_DOWN_FARM_SUPPLY_WORKS             :Farm supply works decreases production
+STR_NAME_AGRO_DEPOT                    :Agro Depot
+STR_NEW_AGRO_DEPOT                     :New agro depot under construction
+STR_CLOSE_AGRO_DEPOT                   :Agro depot is closing down
+STR_UP_AGRO_DEPOT                      :Agro depot increases business
+STR_DOWN_AGRO_DEPOT                    :Agro depot decreases business
+STR_NAME_FUEL_DEPOT                    :Fuel Depot
+STR_NEW_FUEL_DEPOT                     :New fuel depot under construction
+STR_CLOSE_FUEL_DEPOT                   :Fuel depot is closing down
+STR_UP_FUEL_DEPOT                      :Fuel depot increases business
+STR_DOWN_FUEL_DEPOT                    :Fuel depot decreases business

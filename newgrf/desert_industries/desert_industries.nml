@@ -7,9 +7,9 @@ grf {
     min_compatible_version: 1;
 }
 
-/* The cargos are added to Sub-tropical by the mod (src/firs_desert_cargo.cpp); FOOD and GOOD are default cargos. */
+/* The cargos are added to Sub-tropical by the mod (src/firs_desert_cargo.cpp); FOOD, GOOD and OIL_ are default cargos. */
 cargotable {
-    SGCN, NUTS, COTN, SUGR, EOIL, FOOD, GOOD
+    SGCN, NUTS, COTN, SUGR, EOIL, FISH, CASS, CLAY, COFF, PETR, DIES, FERT, FMSP, OIL_, FOOD, GOOD
 }
 
 spriteset (ss_all, ZOOM_LEVEL_NORMAL, BIT_DEPTH_32BPP, "gfx/sheet.png") {
@@ -28,6 +28,22 @@ spriteset (ss_all, ZOOM_LEVEL_NORMAL, BIT_DEPTH_32BPP, "gfx/sheet.png") {
     [ 816,  36, 64, 75, -31, -44]   // 12 B_TEXTILE_B
     [ 884,  36, 64, 75, -31, -44]   // 13 B_BAKERY
     [ 952,  36, 64, 75, -31, -44]   // 14 B_YARD
+    [1020,   1, 64, 31, -31,   0]   // 15 G_CLAY
+    [1088,   1, 64, 31, -31,   0]   // 16 G_COFFEE
+    [1156,   1, 64, 31, -31,   0]   // 17 G_CASSAVA
+    [1224,  36, 64, 75, -31, -44]   // 18 B_PIER
+    [1292,  36, 64, 75, -31, -44]   // 19 B_BOATS
+    [1360,  36, 64, 75, -31, -44]   // 20 B_CANNERY
+    [1428,  36, 64, 75, -31, -44]   // 21 B_CASSMILL
+    [1496,  36, 64, 75, -31, -44]   // 22 B_CLAYPIT
+    [1564,  36, 64, 75, -31, -44]   // 23 B_KILN
+    [1632,  36, 64, 75, -31, -44]   // 24 B_ROAST
+    [1700,  36, 64, 75, -31, -44]   // 25 B_REFINERY
+    [1768,  36, 64, 75, -31, -44]   // 26 B_TANKS
+    [1836,  36, 64, 75, -31, -44]   // 27 B_FERT
+    [1904,  36, 64, 75, -31, -44]   // 28 B_SUPPLY
+    [1972,  36, 64, 75, -31, -44]   // 29 B_AGRO
+    [2040,  36, 64, 75, -31, -44]   // 30 B_FUELDEP
 }
 
 spritelayout lt_tile_cane_a {
@@ -195,6 +211,227 @@ item(FEAT_INDUSTRYTILES, tile_yard) {
     }
 }
 
+spritelayout lt_tile_pier {
+    ground { sprite: 4061; }   // the water sprite of the base game
+    building { sprite: ss_all(18); xextent: 16; yextent: 16; zextent: 20; }
+}
+item(FEAT_INDUSTRYTILES, tile_pier) {
+    property {
+        substitute: 0;   // the tile that supplies the defaults; the flag below makes the tile accept what the industry accepts
+        special_flags: bitmask(INDTILE_FLAG_ACCEPT_ALL);
+    }
+    graphics {
+        lt_tile_pier;
+    }
+}
+
+spritelayout lt_tile_boats {
+    ground { sprite: 4061; }   // the water sprite of the base game
+    building { sprite: ss_all(19); xextent: 16; yextent: 16; zextent: 20; }
+}
+item(FEAT_INDUSTRYTILES, tile_boats) {
+    property {
+        substitute: 0;   // the tile that supplies the defaults; the flag below makes the tile accept what the industry accepts
+        special_flags: bitmask(INDTILE_FLAG_ACCEPT_ALL);
+    }
+    graphics {
+        lt_tile_boats;
+    }
+}
+
+spritelayout lt_tile_cannery {
+    ground { sprite: ss_all(4); }
+    building { sprite: ss_all(20); xextent: 16; yextent: 16; zextent: 20; }
+}
+item(FEAT_INDUSTRYTILES, tile_cannery) {
+    property {
+        substitute: 0;   // the tile that supplies the defaults; the flag below makes the tile accept what the industry accepts
+        special_flags: bitmask(INDTILE_FLAG_ACCEPT_ALL);
+    }
+    graphics {
+        lt_tile_cannery;
+    }
+}
+
+spritelayout lt_tile_cassava {
+    ground { sprite: ss_all(17); }
+}
+item(FEAT_INDUSTRYTILES, tile_cassava) {
+    property {
+        substitute: 0;   // the tile that supplies the defaults; the flag below makes the tile accept what the industry accepts
+        special_flags: bitmask(INDTILE_FLAG_ACCEPT_ALL);
+    }
+    graphics {
+        lt_tile_cassava;
+    }
+}
+
+spritelayout lt_tile_cassmill {
+    ground { sprite: ss_all(4); }
+    building { sprite: ss_all(21); xextent: 16; yextent: 16; zextent: 20; }
+}
+item(FEAT_INDUSTRYTILES, tile_cassmill) {
+    property {
+        substitute: 0;   // the tile that supplies the defaults; the flag below makes the tile accept what the industry accepts
+        special_flags: bitmask(INDTILE_FLAG_ACCEPT_ALL);
+    }
+    graphics {
+        lt_tile_cassmill;
+    }
+}
+
+spritelayout lt_tile_clay {
+    ground { sprite: ss_all(15); }
+}
+item(FEAT_INDUSTRYTILES, tile_clay) {
+    property {
+        substitute: 0;   // the tile that supplies the defaults; the flag below makes the tile accept what the industry accepts
+        special_flags: bitmask(INDTILE_FLAG_ACCEPT_ALL);
+    }
+    graphics {
+        lt_tile_clay;
+    }
+}
+
+spritelayout lt_tile_claypit {
+    ground { sprite: ss_all(15); }
+    building { sprite: ss_all(22); xextent: 16; yextent: 16; zextent: 20; }
+}
+item(FEAT_INDUSTRYTILES, tile_claypit) {
+    property {
+        substitute: 0;   // the tile that supplies the defaults; the flag below makes the tile accept what the industry accepts
+        special_flags: bitmask(INDTILE_FLAG_ACCEPT_ALL);
+    }
+    graphics {
+        lt_tile_claypit;
+    }
+}
+
+spritelayout lt_tile_kiln {
+    ground { sprite: ss_all(4); }
+    building { sprite: ss_all(23); xextent: 16; yextent: 16; zextent: 20; }
+}
+item(FEAT_INDUSTRYTILES, tile_kiln) {
+    property {
+        substitute: 0;   // the tile that supplies the defaults; the flag below makes the tile accept what the industry accepts
+        special_flags: bitmask(INDTILE_FLAG_ACCEPT_ALL);
+    }
+    graphics {
+        lt_tile_kiln;
+    }
+}
+
+spritelayout lt_tile_coffee {
+    ground { sprite: ss_all(16); }
+}
+item(FEAT_INDUSTRYTILES, tile_coffee) {
+    property {
+        substitute: 0;   // the tile that supplies the defaults; the flag below makes the tile accept what the industry accepts
+        special_flags: bitmask(INDTILE_FLAG_ACCEPT_ALL);
+    }
+    graphics {
+        lt_tile_coffee;
+    }
+}
+
+spritelayout lt_tile_roast {
+    ground { sprite: ss_all(4); }
+    building { sprite: ss_all(24); xextent: 16; yextent: 16; zextent: 20; }
+}
+item(FEAT_INDUSTRYTILES, tile_roast) {
+    property {
+        substitute: 0;   // the tile that supplies the defaults; the flag below makes the tile accept what the industry accepts
+        special_flags: bitmask(INDTILE_FLAG_ACCEPT_ALL);
+    }
+    graphics {
+        lt_tile_roast;
+    }
+}
+
+spritelayout lt_tile_refinery {
+    ground { sprite: ss_all(4); }
+    building { sprite: ss_all(25); xextent: 16; yextent: 16; zextent: 20; }
+}
+item(FEAT_INDUSTRYTILES, tile_refinery) {
+    property {
+        substitute: 0;   // the tile that supplies the defaults; the flag below makes the tile accept what the industry accepts
+        special_flags: bitmask(INDTILE_FLAG_ACCEPT_ALL);
+    }
+    graphics {
+        lt_tile_refinery;
+    }
+}
+
+spritelayout lt_tile_tanks {
+    ground { sprite: ss_all(4); }
+    building { sprite: ss_all(26); xextent: 16; yextent: 16; zextent: 20; }
+}
+item(FEAT_INDUSTRYTILES, tile_tanks) {
+    property {
+        substitute: 0;   // the tile that supplies the defaults; the flag below makes the tile accept what the industry accepts
+        special_flags: bitmask(INDTILE_FLAG_ACCEPT_ALL);
+    }
+    graphics {
+        lt_tile_tanks;
+    }
+}
+
+spritelayout lt_tile_fert {
+    ground { sprite: ss_all(4); }
+    building { sprite: ss_all(27); xextent: 16; yextent: 16; zextent: 20; }
+}
+item(FEAT_INDUSTRYTILES, tile_fert) {
+    property {
+        substitute: 0;   // the tile that supplies the defaults; the flag below makes the tile accept what the industry accepts
+        special_flags: bitmask(INDTILE_FLAG_ACCEPT_ALL);
+    }
+    graphics {
+        lt_tile_fert;
+    }
+}
+
+spritelayout lt_tile_supply {
+    ground { sprite: ss_all(4); }
+    building { sprite: ss_all(28); xextent: 16; yextent: 16; zextent: 20; }
+}
+item(FEAT_INDUSTRYTILES, tile_supply) {
+    property {
+        substitute: 0;   // the tile that supplies the defaults; the flag below makes the tile accept what the industry accepts
+        special_flags: bitmask(INDTILE_FLAG_ACCEPT_ALL);
+    }
+    graphics {
+        lt_tile_supply;
+    }
+}
+
+spritelayout lt_tile_agro {
+    ground { sprite: ss_all(4); }
+    building { sprite: ss_all(29); xextent: 16; yextent: 16; zextent: 20; }
+}
+item(FEAT_INDUSTRYTILES, tile_agro) {
+    property {
+        substitute: 0;   // the tile that supplies the defaults; the flag below makes the tile accept what the industry accepts
+        special_flags: bitmask(INDTILE_FLAG_ACCEPT_ALL);
+    }
+    graphics {
+        lt_tile_agro;
+    }
+}
+
+spritelayout lt_tile_fueldep {
+    ground { sprite: ss_all(4); }
+    building { sprite: ss_all(30); xextent: 16; yextent: 16; zextent: 20; }
+}
+item(FEAT_INDUSTRYTILES, tile_fueldep) {
+    property {
+        substitute: 0;   // the tile that supplies the defaults; the flag below makes the tile accept what the industry accepts
+        special_flags: bitmask(INDTILE_FLAG_ACCEPT_ALL);
+    }
+    graphics {
+        lt_tile_fueldep;
+    }
+}
+
 tilelayout lay_sugar_plantation {
     0, 0: tile_cane_a;
     1, 0: tile_cane_b;
@@ -231,6 +468,74 @@ tilelayout lay_textile_mill {
 }
 tilelayout lay_bakery {
     0, 0: tile_bakery;
+    1, 0: tile_yard;
+}
+tilelayout lay_fishing_grounds {
+    0, 0: tile_pier;
+    1, 0: tile_boats;
+    0, 1: tile_boats;
+    1, 1: tile_boats;
+}
+tilelayout lay_fish_cannery {
+    0, 0: tile_cannery;
+    1, 0: tile_yard;
+}
+tilelayout lay_cassava_farm {
+    0, 0: tile_cassava;
+    1, 0: tile_cassava;
+    0, 1: tile_farm;
+    1, 1: tile_cassava;
+}
+tilelayout lay_cassava_mill {
+    0, 0: tile_cassmill;
+    1, 0: tile_yard;
+}
+tilelayout lay_clay_pit {
+    0, 0: tile_claypit;
+    1, 0: tile_clay;
+    0, 1: tile_clay;
+    1, 1: tile_claypit;
+}
+tilelayout lay_pottery_works {
+    0, 0: tile_kiln;
+    1, 0: tile_yard;
+}
+tilelayout lay_coffee_plantation {
+    0, 0: tile_coffee;
+    1, 0: tile_coffee;
+    0, 1: tile_farm;
+    1, 1: tile_coffee;
+}
+tilelayout lay_coffee_roastery {
+    0, 0: tile_roast;
+    1, 0: tile_yard;
+}
+tilelayout lay_petrol_refinery {
+    0, 0: tile_refinery;
+    1, 0: tile_tanks;
+    0, 1: tile_yard;
+    1, 1: tile_refinery;
+}
+tilelayout lay_diesel_distillery {
+    0, 0: tile_tanks;
+    1, 0: tile_refinery;
+    0, 1: tile_yard;
+}
+tilelayout lay_fertiliser_plant {
+    0, 0: tile_fert;
+    1, 0: tile_yard;
+    0, 1: tile_fert;
+}
+tilelayout lay_farm_supply_works {
+    0, 0: tile_supply;
+    1, 0: tile_yard;
+}
+tilelayout lay_agro_depot {
+    0, 0: tile_agro;
+    1, 0: tile_yard;
+}
+tilelayout lay_fuel_depot {
+    0, 0: tile_fueldep;
     1, 0: tile_yard;
 }
 
@@ -379,5 +684,301 @@ item(FEAT_INDUSTRIES, ind_bakery) {
         closure_msg: string(STR_CLOSE_BAKERY);
         prod_increase_msg: string(STR_UP_BAKERY);
         prod_decrease_msg: string(STR_DOWN_BAKERY);
+    }
+}
+
+item(FEAT_INDUSTRIES, ind_fishing_grounds) {
+    property {
+        substitute: INDUSTRYTYPE_FRUIT_PLANTATION;
+        name: string(STR_NAME_FISHING_GROUNDS);
+        layouts: [lay_fishing_grounds];
+        life_type: IND_LIFE_TYPE_ORGANIC;
+        cargo_types: [
+            produce_cargo("FISH", 8)
+        ];
+        map_colour: 0x9B;
+        prob_map_gen: 4;
+        prob_in_game: 3;
+        fund_cost_multiplier: 60;
+        spec_flags: bitmask(IND_FLAG_BUILT_ON_WATER);
+        new_ind_msg: string(STR_NEW_FISHING_GROUNDS);
+        closure_msg: string(STR_CLOSE_FISHING_GROUNDS);
+        prod_increase_msg: string(STR_UP_FISHING_GROUNDS);
+        prod_decrease_msg: string(STR_DOWN_FISHING_GROUNDS);
+    }
+}
+
+item(FEAT_INDUSTRIES, ind_fish_cannery) {
+    property {
+        substitute: INDUSTRYTYPE_TROPICAL_FACTORY;
+        name: string(STR_NAME_FISH_CANNERY);
+        layouts: [lay_fish_cannery];
+        life_type: IND_LIFE_TYPE_PROCESSING;
+        cargo_types: [
+            accept_cargo("FISH", produce_cargo("FOOD", 1))
+        ];
+        map_colour: 0x95;
+        prob_map_gen: 4;
+        prob_in_game: 3;
+        fund_cost_multiplier: 60;
+        spec_flags: 0;
+        new_ind_msg: string(STR_NEW_FISH_CANNERY);
+        closure_msg: string(STR_CLOSE_FISH_CANNERY);
+        prod_increase_msg: string(STR_UP_FISH_CANNERY);
+        prod_decrease_msg: string(STR_DOWN_FISH_CANNERY);
+    }
+}
+
+item(FEAT_INDUSTRIES, ind_cassava_farm) {
+    property {
+        substitute: INDUSTRYTYPE_FRUIT_PLANTATION;
+        name: string(STR_NAME_CASSAVA_FARM);
+        layouts: [lay_cassava_farm];
+        life_type: IND_LIFE_TYPE_ORGANIC;
+        cargo_types: [
+            produce_cargo("CASS", 9)
+        ];
+        map_colour: 0x70;
+        prob_map_gen: 5;
+        prob_in_game: 4;
+        fund_cost_multiplier: 55;
+        spec_flags: 0;
+        new_ind_msg: string(STR_NEW_CASSAVA_FARM);
+        closure_msg: string(STR_CLOSE_CASSAVA_FARM);
+        prod_increase_msg: string(STR_UP_CASSAVA_FARM);
+        prod_decrease_msg: string(STR_DOWN_CASSAVA_FARM);
+    }
+}
+
+item(FEAT_INDUSTRIES, ind_cassava_mill) {
+    property {
+        substitute: INDUSTRYTYPE_TROPICAL_FACTORY;
+        name: string(STR_NAME_CASSAVA_MILL);
+        layouts: [lay_cassava_mill];
+        life_type: IND_LIFE_TYPE_PROCESSING;
+        cargo_types: [
+            accept_cargo("CASS", produce_cargo("FOOD", 1))
+        ];
+        map_colour: 0x1C;
+        prob_map_gen: 4;
+        prob_in_game: 3;
+        fund_cost_multiplier: 60;
+        spec_flags: 0;
+        new_ind_msg: string(STR_NEW_CASSAVA_MILL);
+        closure_msg: string(STR_CLOSE_CASSAVA_MILL);
+        prod_increase_msg: string(STR_UP_CASSAVA_MILL);
+        prod_decrease_msg: string(STR_DOWN_CASSAVA_MILL);
+    }
+}
+
+item(FEAT_INDUSTRIES, ind_clay_pit) {
+    property {
+        substitute: INDUSTRYTYPE_FRUIT_PLANTATION;
+        name: string(STR_NAME_CLAY_PIT);
+        layouts: [lay_clay_pit];
+        life_type: IND_LIFE_TYPE_EXTRACTIVE;
+        cargo_types: [
+            produce_cargo("CLAY", 9)
+        ];
+        map_colour: 0xBF;
+        prob_map_gen: 4;
+        prob_in_game: 3;
+        fund_cost_multiplier: 60;
+        spec_flags: 0;
+        new_ind_msg: string(STR_NEW_CLAY_PIT);
+        closure_msg: string(STR_CLOSE_CLAY_PIT);
+        prod_increase_msg: string(STR_UP_CLAY_PIT);
+        prod_decrease_msg: string(STR_DOWN_CLAY_PIT);
+    }
+}
+
+item(FEAT_INDUSTRIES, ind_pottery_works) {
+    property {
+        substitute: INDUSTRYTYPE_TROPICAL_FACTORY;
+        name: string(STR_NAME_POTTERY_WORKS);
+        layouts: [lay_pottery_works];
+        life_type: IND_LIFE_TYPE_PROCESSING;
+        cargo_types: [
+            accept_cargo("CLAY", produce_cargo("GOOD", 1))
+        ];
+        map_colour: 0xC2;
+        prob_map_gen: 4;
+        prob_in_game: 3;
+        fund_cost_multiplier: 65;
+        spec_flags: 0;
+        new_ind_msg: string(STR_NEW_POTTERY_WORKS);
+        closure_msg: string(STR_CLOSE_POTTERY_WORKS);
+        prod_increase_msg: string(STR_UP_POTTERY_WORKS);
+        prod_decrease_msg: string(STR_DOWN_POTTERY_WORKS);
+    }
+}
+
+item(FEAT_INDUSTRIES, ind_coffee_plantation) {
+    property {
+        substitute: INDUSTRYTYPE_FRUIT_PLANTATION;
+        name: string(STR_NAME_COFFEE_PLANTATION);
+        layouts: [lay_coffee_plantation];
+        life_type: IND_LIFE_TYPE_ORGANIC;
+        cargo_types: [
+            produce_cargo("COFF", 8)
+        ];
+        map_colour: 0x6D;
+        prob_map_gen: 5;
+        prob_in_game: 4;
+        fund_cost_multiplier: 55;
+        spec_flags: 0;
+        new_ind_msg: string(STR_NEW_COFFEE_PLANTATION);
+        closure_msg: string(STR_CLOSE_COFFEE_PLANTATION);
+        prod_increase_msg: string(STR_UP_COFFEE_PLANTATION);
+        prod_decrease_msg: string(STR_DOWN_COFFEE_PLANTATION);
+    }
+}
+
+item(FEAT_INDUSTRIES, ind_coffee_roastery) {
+    property {
+        substitute: INDUSTRYTYPE_TROPICAL_FACTORY;
+        name: string(STR_NAME_COFFEE_ROASTERY);
+        layouts: [lay_coffee_roastery];
+        life_type: IND_LIFE_TYPE_PROCESSING;
+        cargo_types: [
+            accept_cargo("COFF", produce_cargo("FOOD", 1))
+        ];
+        map_colour: 0x7E;
+        prob_map_gen: 4;
+        prob_in_game: 3;
+        fund_cost_multiplier: 60;
+        spec_flags: 0;
+        new_ind_msg: string(STR_NEW_COFFEE_ROASTERY);
+        closure_msg: string(STR_CLOSE_COFFEE_ROASTERY);
+        prod_increase_msg: string(STR_UP_COFFEE_ROASTERY);
+        prod_decrease_msg: string(STR_DOWN_COFFEE_ROASTERY);
+    }
+}
+
+item(FEAT_INDUSTRIES, ind_petrol_refinery) {
+    property {
+        substitute: INDUSTRYTYPE_TROPICAL_FACTORY;
+        name: string(STR_NAME_PETROL_REFINERY);
+        layouts: [lay_petrol_refinery];
+        life_type: IND_LIFE_TYPE_PROCESSING;
+        cargo_types: [
+            accept_cargo("OIL_", produce_cargo("PETR", 1))
+        ];
+        map_colour: 0x0E;
+        prob_map_gen: 4;
+        prob_in_game: 3;
+        fund_cost_multiplier: 80;
+        spec_flags: 0;
+        new_ind_msg: string(STR_NEW_PETROL_REFINERY);
+        closure_msg: string(STR_CLOSE_PETROL_REFINERY);
+        prod_increase_msg: string(STR_UP_PETROL_REFINERY);
+        prod_decrease_msg: string(STR_DOWN_PETROL_REFINERY);
+    }
+}
+
+item(FEAT_INDUSTRIES, ind_diesel_distillery) {
+    property {
+        substitute: INDUSTRYTYPE_TROPICAL_FACTORY;
+        name: string(STR_NAME_DIESEL_DISTILLERY);
+        layouts: [lay_diesel_distillery];
+        life_type: IND_LIFE_TYPE_PROCESSING;
+        cargo_types: [
+            accept_cargo("OIL_", produce_cargo("DIES", 1))
+        ];
+        map_colour: 0x10;
+        prob_map_gen: 4;
+        prob_in_game: 3;
+        fund_cost_multiplier: 80;
+        spec_flags: 0;
+        new_ind_msg: string(STR_NEW_DIESEL_DISTILLERY);
+        closure_msg: string(STR_CLOSE_DIESEL_DISTILLERY);
+        prod_increase_msg: string(STR_UP_DIESEL_DISTILLERY);
+        prod_decrease_msg: string(STR_DOWN_DIESEL_DISTILLERY);
+    }
+}
+
+item(FEAT_INDUSTRIES, ind_fertiliser_plant) {
+    property {
+        substitute: INDUSTRYTYPE_TROPICAL_FACTORY;
+        name: string(STR_NAME_FERTILISER_PLANT);
+        layouts: [lay_fertiliser_plant];
+        life_type: IND_LIFE_TYPE_PROCESSING;
+        cargo_types: [
+            accept_cargo("PETR", produce_cargo("FERT", 1))
+        ];
+        map_colour: 0x5C;
+        prob_map_gen: 4;
+        prob_in_game: 3;
+        fund_cost_multiplier: 70;
+        spec_flags: 0;
+        new_ind_msg: string(STR_NEW_FERTILISER_PLANT);
+        closure_msg: string(STR_CLOSE_FERTILISER_PLANT);
+        prod_increase_msg: string(STR_UP_FERTILISER_PLANT);
+        prod_decrease_msg: string(STR_DOWN_FERTILISER_PLANT);
+    }
+}
+
+item(FEAT_INDUSTRIES, ind_farm_supply_works) {
+    property {
+        substitute: INDUSTRYTYPE_TROPICAL_FACTORY;
+        name: string(STR_NAME_FARM_SUPPLY_WORKS);
+        layouts: [lay_farm_supply_works];
+        life_type: IND_LIFE_TYPE_PROCESSING;
+        cargo_types: [
+            accept_cargo("GOOD", produce_cargo("FMSP", 1))
+        ];
+        map_colour: 0x3E;
+        prob_map_gen: 4;
+        prob_in_game: 3;
+        fund_cost_multiplier: 65;
+        spec_flags: 0;
+        new_ind_msg: string(STR_NEW_FARM_SUPPLY_WORKS);
+        closure_msg: string(STR_CLOSE_FARM_SUPPLY_WORKS);
+        prod_increase_msg: string(STR_UP_FARM_SUPPLY_WORKS);
+        prod_decrease_msg: string(STR_DOWN_FARM_SUPPLY_WORKS);
+    }
+}
+
+item(FEAT_INDUSTRIES, ind_agro_depot) {
+    property {
+        substitute: INDUSTRYTYPE_TROPICAL_FACTORY;
+        name: string(STR_NAME_AGRO_DEPOT);
+        layouts: [lay_agro_depot];
+        life_type: IND_LIFE_TYPE_BLACKHOLE;
+        cargo_types: [
+            accept_cargo("FERT"),
+            accept_cargo("FMSP")
+        ];
+        map_colour: 0x66;
+        prob_map_gen: 4;
+        prob_in_game: 3;
+        fund_cost_multiplier: 60;
+        spec_flags: bitmask(IND_FLAG_BUILT_NEAR_TOWN);
+        new_ind_msg: string(STR_NEW_AGRO_DEPOT);
+        closure_msg: string(STR_CLOSE_AGRO_DEPOT);
+        prod_increase_msg: string(STR_UP_AGRO_DEPOT);
+        prod_decrease_msg: string(STR_DOWN_AGRO_DEPOT);
+    }
+}
+
+item(FEAT_INDUSTRIES, ind_fuel_depot) {
+    property {
+        substitute: INDUSTRYTYPE_TROPICAL_FACTORY;
+        name: string(STR_NAME_FUEL_DEPOT);
+        layouts: [lay_fuel_depot];
+        life_type: IND_LIFE_TYPE_BLACKHOLE;
+        cargo_types: [
+            accept_cargo("PETR"),
+            accept_cargo("DIES")
+        ];
+        map_colour: 0x12;
+        prob_map_gen: 4;
+        prob_in_game: 3;
+        fund_cost_multiplier: 60;
+        spec_flags: bitmask(IND_FLAG_BUILT_NEAR_TOWN);
+        new_ind_msg: string(STR_NEW_FUEL_DEPOT);
+        closure_msg: string(STR_CLOSE_FUEL_DEPOT);
+        prod_increase_msg: string(STR_UP_FUEL_DEPOT);
+        prod_decrease_msg: string(STR_DOWN_FUEL_DEPOT);
     }
 }
