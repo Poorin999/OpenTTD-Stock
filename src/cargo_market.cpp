@@ -240,7 +240,22 @@ void CargoMarket::UpdateDaily()
 		cargomarket::UpdateFreight(this->cargo[i], fleet_growth, IsPeopleCargo(cs) ? cargomarket::BACKLOG_WEIGHT_PEOPLE_PPM : cargomarket::BACKLOG_WEIGHT_PPM);
 	}
 
+	/* History for the cargo prices window: the price that the window shows (price x freight rate), once per day. Gold cargo has no price here (0). */
+	const size_t slot = static_cast<size_t>(this->history_days % HISTORY_DAYS);
+	for (size_t i = 0; i < this->cargo.size(); i++) {
+		const cargomarket::CargoState &c = this->cargo[i];
+		this->history[i][slot] = static_cast<int32_t>(std::clamp<int64_t>(c.price_ppm * c.freight_ppm / cargomarket::PPM, 0, 2'000'000'000));
+	}
+	this->history_days++;
+
 	PublishRealCargoNews(minute);
+}
+
+int64_t CargoMarket::HistoryPpm(size_t cargo_index, uint32_t days_ago) const
+{
+	if (cargo_index >= this->history.size() || days_ago >= this->HistoryAvailable()) return 0;
+	const uint32_t newest = this->history_days - 1;
+	return this->history[cargo_index][static_cast<size_t>((newest - days_ago) % HISTORY_DAYS)];
 }
 
 void CargoMarketOnDelivery(CargoType cargo_type, uint count)

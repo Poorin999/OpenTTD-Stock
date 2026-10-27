@@ -153,6 +153,19 @@ jobs:
         cp -r openttd/bin/ai openttd/bin/game out/ 2>/dev/null || true
         cp openttd/build/lang/*.lng out/lang/ 2>/dev/null || true
 
+    # The NewGRF "Desert Industries" (7 industries for Sub-tropical, mod/newgrf/desert_industries). A failure here does not fail the build of the game:
+    # the game works without it, the NewGRF is just missing from the zip (see the log of this step).
+    - name: Build the NewGRF (Desert Industries)
+      shell: bash
+      continue-on-error: true
+      run: |
+        python -m pip install nml pillow
+        cd mod/newgrf/desert_industries
+        python make_desert_industries.py
+        nmlc --grf desert_industries.grf desert_industries.nml || python -m nml.main --grf desert_industries.grf desert_industries.nml
+        mkdir -p ../../../out/newgrf
+        cp desert_industries.grf ../../../out/newgrf/
+
     - name: Upload
       uses: actions/upload-artifact@v4
       with:

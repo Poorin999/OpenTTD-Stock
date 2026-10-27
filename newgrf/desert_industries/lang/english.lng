@@ -1,0 +1,38 @@
+##grflangid 0x01
+STR_GRF_NAME                                  :Desert Industries
+STR_GRF_DESCRIPTION                           :{ORANGE}Desert Industries{}{BLACK}Seven industries for Sub-tropical: sugar, nut and cotton chains that end in Food and Goods. Needs the cargos SGCN, NUTS, COTN, SUGR and EOIL from the mod.
+STR_NAME_SUGAR_PLANTATION              :Sugar Cane Plantation
+STR_NEW_SUGAR_PLANTATION               :New sugar cane plantation under construction
+STR_CLOSE_SUGAR_PLANTATION             :Sugar cane plantation is closing down
+STR_UP_SUGAR_PLANTATION                :Sugar cane harvest is bigger this year
+STR_DOWN_SUGAR_PLANTATION              :Sugar cane harvest is smaller this year
+STR_NAME_NUT_GROVE                     :Nut Grove
+STR_NEW_NUT_GROVE                      :New nut grove is being planted
+STR_CLOSE_NUT_GROVE                    :Nut grove is closing down
+STR_UP_NUT_GROVE                       :Nut harvest is bigger this year
+STR_DOWN_NUT_GROVE                     :Nut harvest is smaller this year
+STR_NAME_COTTON_PLANTATION             :Cotton Plantation
+STR_NEW_COTTON_PLANTATION              :New cotton plantation under construction
+STR_CLOSE_COTTON_PLANTATION            :Cotton plantation is closing down
+STR_UP_COTTON_PLANTATION               :Cotton harvest is bigger this year
+STR_DOWN_COTTON_PLANTATION             :Cotton harvest is smaller this year
+STR_NAME_SUGAR_MILL                    :Sugar Mill
+STR_NEW_SUGAR_MILL                     :New sugar mill under construction
+STR_CLOSE_SUGAR_MILL                   :Sugar mill is closing down
+STR_UP_SUGAR_MILL                      :Sugar mill increases production
+STR_DOWN_SUGAR_MILL                    :Sugar mill decreases production
+STR_NAME_OIL_PRESS                     :Oil Press
+STR_NEW_OIL_PRESS                      :New oil press under construction
+STR_CLOSE_OIL_PRESS                    :Oil press is closing down
+STR_UP_OIL_PRESS                       :Oil press increases production
+STR_DOWN_OIL_PRESS                     :Oil press decreases production
+STR_NAME_TEXTILE_MILL                  :Textile Mill
+STR_NEW_TEXTILE_MILL                   :New textile mill under construction
+STR_CLOSE_TEXTILE_MILL                 :Textile mill is closing down
+STR_UP_TEXTILE_MILL                    :Textile mill increases production
+STR_DOWN_TEXTILE_MILL                  :Textile mill decreases production
+STR_NAME_BAKERY                        :Bakery
+STR_NEW_BAKERY                         :New bakery under construction
+STR_CLOSE_BAKERY                       :Bakery is closing down
+STR_UP_BAKERY                          :Bakery increases production
+STR_DOWN_BAKERY                        :Bakery decreases production

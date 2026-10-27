@@ -48,6 +48,14 @@ enum CentralBankWidgets : WidgetID {
 	WID_MN_OIL,             ///< Button of the market news window: opens the oil market window.
 	WID_OM_CAPTION,         ///< Caption of the oil market window.
 	WID_OM_PANEL,           ///< Panel of the oil market window: oil price, stock, fuel cost and the latest oil news.
+	WID_CP_HEADER,          ///< Header of the cargo prices window: title and subtitle.
+	WID_CP_TAB_OVERVIEW,    ///< Tab of the cargo prices window: market overview.
+	WID_CP_TAB_GRAPH,       ///< Tab of the cargo prices window: price graph of one cargo.
+	WID_CP_TAB_HISTORY,     ///< Tab of the cargo prices window: price history of one cargo.
+	WID_CP_FILTER,          ///< Dropdown of the cargo prices window: which cargo to show.
+	WID_CP_PERIOD,          ///< Dropdown of the cargo prices window: the period of the change and the trend.
+	WID_CP_FOOT,            ///< Footnotes of the cargo prices window.
+	WID_CP_CLOSE,           ///< Button of the cargo prices window: close the window.
 };
 
 #endif /* WIDGETS_CENTRAL_BANK_WIDGET_H */

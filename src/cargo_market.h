@@ -23,15 +23,32 @@
 #include "economy_type.h"
 #include "station_type.h"
 #include "town_type.h"
+#include <algorithm>
 #include <array>
+#include <cstdint>
 
 /** The state of the cargo prices: one entry per cargo type of OpenTTD. Saved in the 'STCK' chunk (SRK_CARGO_MARKET). */
 struct CargoMarket {
 	std::array<cargomarket::CargoState, NUM_CARGO> cargo{};
 	cargomarket::FleetState fleet{}; ///< The vehicles of all companies (fast and long average), for the freight rate. Saved (SRK_FLEET).
 
-	void Reset() { this->cargo.fill({}); this->fleet = {}; }
+	/** The price shown in the cargo prices window (price x freight rate), one value per game day, newest last in ring order. Not saved: a load starts the history again. */
+	static constexpr size_t HISTORY_DAYS = 366;
+	std::array<std::array<int32_t, HISTORY_DAYS>, NUM_CARGO> history{};
+	uint32_t history_days = 0; ///< Number of days recorded so far (the ring holds the last HISTORY_DAYS).
+
+	void Reset()
+	{
+		this->cargo.fill({});
+		this->fleet = {};
+		for (auto &h : this->history) h.fill(0);
+		this->history_days = 0;
+	}
 	void UpdateDaily();
+	/** Number of days of history that can be read (0 .. HISTORY_DAYS). */
+	uint32_t HistoryAvailable() const { return std::min<uint32_t>(this->history_days, static_cast<uint32_t>(HISTORY_DAYS)); }
+	/** The shown price (ppm, 1.0 = normal pay) of a cargo this many days ago (0 = the latest day). Returns 0 when there is no such day. */
+	int64_t HistoryPpm(size_t cargo_index, uint32_t days_ago) const;
 	/** The price of the cargo from supply and demand (step 1), without the freight rate. */
 	int64_t GetPricePpm(CargoType cargo_type) const;
 	/** The freight rate of the cargo (step 3): the price of the transport service from the backlog at the stations and the size of the fleet, 70% .. 150%. */

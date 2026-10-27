@@ -1,6 +1,14 @@
 STR_PAYROLL_NEWS_CAPTION                                        :ข่าวเศรษฐกิจ (TRANSPORT PAYROLLS)
 STR_MARKET_NEWS_CAPTION                                         :Market News
-STR_CARGO_PRICES_CAPTION                                      :Cargo Prices
+STR_CARGO_PRICES_CAPTION                                      :Cargo Prices — ราคาสินค้า
+STR_CARGO_PRICES_TAB_OVERVIEW                                 :{BLACK}ภาพรวมตลาด
+STR_CARGO_PRICES_TAB_GRAPH                                    :{BLACK}กราฟราคา
+STR_CARGO_PRICES_TAB_HISTORY                                  :{BLACK}ประวัติราคา
+STR_CARGO_PRICES_DROPDOWN                                     :{BLACK}{RAW_STRING}
+STR_CARGO_PRICES_TIP_FILTER                                   :{BLACK}Choose which cargo to show
+STR_CARGO_PRICES_TIP_PERIOD                                   :{BLACK}Choose the period of the change and the trend
+STR_CARGO_PRICES_CLOSE                                        :{BLACK}ปิดหน้าต่าง
+STR_CARGO_PRICES_TIP_CLOSE                                    :{BLACK}Close this window
 STR_MARKET_NEWS_CARGO_BUTTON                                    :Cargo Prices
 STR_MARKET_NEWS_CARGO_TIP                                       :{BLACK}Show what each cargo pays now, and which towns pay most
 STR_OIL_MARKET_CAPTION                                          :Oil Market
