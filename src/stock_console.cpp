@@ -182,9 +182,9 @@ static bool ConGoldFactors(std::span<std::string_view> argv)
 	auto pct = [](int64_t ppm) { return fmt::format("{}.{:02}%", ppm / 10000, (ppm < 0 ? -ppm : ppm) % 10000 / 100); };
 	auto money = [](int64_t cents) { return fmt::format("{}.{:02}", cents / 100, (cents < 0 ? -cents : cents) % 100); };
 	IConsolePrint(CC_DEFAULT, "inflation {}  cash {}  demand {}  scarcity {}  safe haven {}", pct(f.inflation_ppm), pct(f.cash_ppm), pct(f.demand_ppm), pct(f.scarcity_ppm), pct(f.haven_ppm));
-	IConsolePrint(CC_DEFAULT, "slow waves (bull/bear) {}  chance move of today {} ppm", pct(f.cycle_ppm), f.noise_ppm);
+	IConsolePrint(CC_DEFAULT, "slow waves (bull/bear) {} (not part of the price when PRICE_USES_CYCLE is false)  chance move of today {} ppm (0: the price has its own random step every 2 minutes)", pct(f.cycle_ppm), f.noise_ppm);
 	IConsolePrint(CC_DEFAULT, "anchor (base x inflation) {}  target before limit {}  target {}", money(f.anchor_cents), money(f.raw_cents), money(f.target_cents));
-	IConsolePrint(CC_DEFAULT, "price now {}  price at midnight {}  pressure {} ppm  market stock {} oz  history days {}", money(_gold_reserve.GetPriceCents()), money(_gold_reserve.GetDayStartCents()), _gold_reserve.pressure_ppm, _gold_reserve.market_stock_oz, _gold_reserve.history_cents.size());
+	IConsolePrint(CC_DEFAULT, "price now {}  price at midnight {}  pressure {} ppm (news) + trade impact {} ppm  market stock {} oz  history days {}", money(_gold_reserve.GetPriceCents()), money(_gold_reserve.GetDayStartCents()), _gold_reserve.pressure_ppm, _gold_reserve.impact_ppm, _gold_reserve.market_stock_oz, _gold_reserve.history_cents.size());
 	IConsolePrint(CC_DEFAULT, "diamond stock {} carats  diamond scarcity {}", _valuables.diamond_stock_carats, pct(_valuables.DiamondScarcityPpm()));
 	IConsolePrint(CC_DEFAULT, "oil stock {} barrels  oil scarcity {}  oil price index {}  fuel pass {}%", _valuables.oil_stock_barrels, pct(_valuables.OilScarcityPpm()), pct(OilPriceIndexPpm()), ValuablesManager::OIL_FUEL_PASS_PERCENT);
 	return true;

@@ -610,7 +610,7 @@ int main()
 			CHECK(st.body.find("33,000,000") != std::string::npos && st.body.find("102.6%") != std::string::npos); // 33,000,000 / 32,151,000
 			CHECK(st.headline.find('{') == std::string::npos && st.body.find('{') == std::string::npos && st.analysis.find('{') == std::string::npos);
 			CHECK(st.analysis.find("123,456") != std::string::npos && st.analysis.find("-4.00%") != std::string::npos);
-			CHECK(st.analysis.find("ทันที") != std::string::npos);                                                              // the shock is told (MARKET_GOLD_REAL_SHOCK)
+			CHECK(st.analysis.find("ทันที") != std::string::npos);                                                              // the fall at once is told
 			const MarketStory so = ComposeMarketStory(old, "");                                                                   // the old random story is untouched
 			CHECK(so.headline.find("123,456") == std::string::npos && so.headline.find('{') == std::string::npos);
 		}

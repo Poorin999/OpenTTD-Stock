@@ -106,7 +106,7 @@ static void SettleCarries(int64_t net_bought_cz)
 	const int64_t per_ppm = TOWN_CITIZEN_DEPTH_OUNCES * citizengold::CZ_PER_OZ / GoldReserveManager::PPM; // cz for 1 ppm
 	const int64_t ppm = pc / std::max<int64_t>(1, per_ppm);
 	pc -= ppm * std::max<int64_t>(1, per_ppm);
-	_gold_reserve.pressure_ppm = std::clamp<int64_t>(_gold_reserve.pressure_ppm + ppm, -GoldReserveManager::PRESSURE_MAX_PPM, GoldReserveManager::PRESSURE_MAX_PPM);
+	_gold_reserve.AddTradeImpact(ppm);
 }
 
 /* The citizens use the rules of the terminal (citizen_terminal.h repeats them so that it can be tested alone): they must stay equal. */
@@ -290,7 +290,7 @@ static void TownsHourly(const GameTimeSnapshot &now)
 	m.avg7_cents = HistoryAverage(7, 3);
 	m.avg30_cents = HistoryAverage(30, TOWN_GOLD_MIN_HISTORY_DAYS);
 	m.prev_close_cents = _gold_reserve.GetDayStartCents();
-	m.pressure_ppm = _gold_reserve.pressure_ppm;
+	m.pressure_ppm = _gold_reserve.GetDemandPressurePpm();
 	const int64_t floor_oz = GoldReserveManager::MARKET_STOCK_START * TOWN_STOCK_FLOOR_PERCENT / 100;
 	m.stock_cz = std::max<int64_t>(0, _gold_reserve.market_stock_oz - floor_oz) * citizengold::CZ_PER_OZ;
 

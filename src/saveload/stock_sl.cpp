@@ -68,7 +68,7 @@ enum StockRecordKind : uint8_t {
 	SRK_TOWN_NEWS = 38, ///< What the daily town news scan remembers about a town: ym = index of the town, v1 = population at the start of the window, v2 = game day of that snapshot, v3 = number of population marks reached.
 	SRK_TOWN_POS = 37, ///< Open terminal position of a citizen group: a = group (citizengold::Style), b = symbol | 0x80 when long, ym = index of the town, v1 = volume, v2 = entry price, v3 = stop loss, v4 = take profit.
 	SRK_BANK_LOG = 41,  ///< Line of the account log of the bank window: a = company, b = line (LedgerItem), ym = game day of the year, v1 = amount (sum of the bookings), v2 = ledger year, v3 = number of bookings. Written newest first.
-	SRK_GOLD_NEWS = 40, ///< State of the real gold news: ym = ounces that the mines delivered since the last news (mine_news_oz), v1 = shock of today in 1/100 money units (day_shift_cents).
+	SRK_GOLD_NEWS = 40, ///< State of the real gold news: ym = ounces that the mines delivered since the last news (mine_news_oz), v1 = shock of today in 1/100 money units (day_shift_cents, always 0 now), v2 = the level of the economy at the last price step in 1/100 money units (last_level_cents, 0 = unknown), v3 = cash in circulation averaged over about 7 game days (cash_avg, 0 = unknown), v4 = price impact of the trades in ppm (impact_ppm).
 	SRK_TOWN_BOOK = 36, ///< One group of citizens of a town: a = group (citizengold::Style), ym = index of the town, v1 = gold in hundredths of an ounce, v2 = what it cost, v3 = cash, v4 = profit of closed sales, v5 = wins | losses << 24 | cooldown << 48.
 };
 
@@ -438,6 +438,9 @@ struct STCKChunkHandler : ChunkHandler {
 			n.kind = SRK_GOLD_NEWS;
 			n.ym = static_cast<int32_t>(std::clamp<int64_t>(_gold_reserve.mine_news_oz, 0, 1'000'000'000));
 			n.v1 = _gold_reserve.day_shift_cents;
+			n.v2 = _gold_reserve.last_level_cents;
+			n.v3 = _gold_reserve.cash_avg;
+			n.v4 = _gold_reserve.impact_ppm;
 			write(n);
 		}
 		/* The daily prices of the gold chart, five to a record. */
@@ -900,6 +903,9 @@ struct STCKChunkHandler : ChunkHandler {
 				case SRK_GOLD_NEWS:
 					_gold_reserve.mine_news_oz = std::clamp<int64_t>(r.ym, 0, 1'000'000'000);
 					_gold_reserve.day_shift_cents = r.v1;
+					_gold_reserve.last_level_cents = std::max<int64_t>(r.v2, 0);
+					_gold_reserve.cash_avg = std::max<int64_t>(r.v3, 0);
+					_gold_reserve.impact_ppm = std::clamp<int64_t>(r.v4, -GoldReserveManager::PRESSURE_MAX_PPM, GoldReserveManager::PRESSURE_MAX_PPM);
 					break;
 
 				case SRK_GOLD_HISTORY: {

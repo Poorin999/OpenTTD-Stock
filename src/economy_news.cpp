@@ -151,7 +151,7 @@ static void DrawPayrollNews(const Rect &r)
 	const int64_t day = static_cast<int64_t>(GameTimeManager::Get().GetSnapshot().total_minutes / GameTimeManager::MINUTES_PER_DAY);
 	row(PnText("รายงานครั้งต่อไปใน", "Next report in"), fmt::format("{} {}", PayrollNews::DaysToNext(day), PnText("วัน", "days")));
 	row(PnText("การจ้างงานเฉลี่ยงวดนี้ (ถึงตอนนี้)", "Employment this period so far"), fmt::format("{} {}", _payroll_news.RunningAvgX100() * PAYROLL_JOBS_PER_VEHICLE / 100, PnText("ตำแหน่ง", "jobs")), TC_GREY);
-	const int64_t pressure = _gold_reserve.pressure_ppm;
+	const int64_t pressure = _gold_reserve.GetDemandPressurePpm();
 	row(PnText("แรงกดดันราคาทองตอนนี้", "Gold demand pressure now"), PnPpm(pressure), pressure < 0 ? TC_RED : TC_GREEN);
 	y += ScaleGUITrad(6);
 

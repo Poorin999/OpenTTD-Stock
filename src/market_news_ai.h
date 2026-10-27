@@ -452,7 +452,7 @@ inline MarketStory ComposeMarketStory(const MarketEvent &e, const std::string &c
 	s.impact = MarketImpactText(e.severity);
 
 	std::string a = MarketFactLine(e);
-	if (MarketIsRealGoldNews(e) && MARKET_GOLD_REAL_SHOCK && e.gold_ppm < 0) {
+	if (MarketIsRealGoldNews(e) && e.gold_ppm < 0) { // The price falls at once (the level moves with the pressure and the price follows it), whatever MARKET_GOLD_REAL_SHOCK says.
 		if (!a.empty()) a += "  ";
 		a += "ราคาทองสะดุดลงทันที " + MarketPpmText(e.gold_ppm) + " แล้วค่อยๆ ฟื้นเมื่อแรงกดดันจางลง";
 	}

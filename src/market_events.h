@@ -81,7 +81,7 @@ static constexpr int64_t MARKET_PEACE_MIN_GAP_DAYS = 4;       ///< At least this
  * fact_ppm > 0; an old random one (fact_ppm == 0) keeps the old table and the old texts.
  */
 static constexpr bool MARKET_GOLD_REAL_NEWS = true;            ///< false: no news is made from the real gold market (the old random draw is not used either while MARKET_ONLY_WAR_IS_RANDOM is true).
-static constexpr bool MARKET_GOLD_REAL_SHOCK = true;           ///< true: such news also moves the live price at once (a gap down, GoldReserveManager::ApplyShock); false: only the goal moves and the price glides there (5% of the way per game day).
+static constexpr bool MARKET_GOLD_REAL_SHOCK = false;          ///< false (since 2026-10-28, the price is a random walk): the news pushes the demand pressure, which moves the level, and the live price follows the level at once (UpdateGlide), so no extra shock is needed. true would count the same news twice (GoldReserveManager::ApplyShock).
 static constexpr int64_t MARKET_GOLD_STOCK_START_OZ = 32'151'000; ///< Start stock of the gold market (= GoldReserveManager::MARKET_STOCK_START, a static_assert in market_events.cpp keeps them equal).
 static constexpr int64_t MARKET_GOLD_NEWS_GAP_DAYS = 3;        ///< The same kind of real gold news is not made again within this many game days.
 static constexpr int64_t MARKET_GOLD_NEWS_MIN_PPM = 15'000;    ///< The smallest real gold news pushes gold down by 1.5% (the biggest by MARKET_EVENT_GOLD_MAX_PPM = 8%).

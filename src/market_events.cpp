@@ -200,7 +200,7 @@ static bool RealGoldNewsForce(MarketEventKind kind, MarketEvent &out)
 	_gold_reserve.bank_reserve_oz -= ounces;
 	_gold_reserve.market_stock_oz += ounces;
 	_gold_reserve.pressure_ppm = std::max<int64_t>(-GoldReserveManager::PRESSURE_MAX_PPM,
-			_gold_reserve.pressure_ppm - ounces * GoldReserveManager::PPM / GoldReserveManager::DEPTH_OUNCES);
+			_gold_reserve.pressure_ppm - ounces * GoldReserveManager::PPM / GoldReserveManager::DEPTH_OUNCES); // A bank sale made as NEWS: stays in the news pressure.
 	const uint32_t first_id = _market_events.next_id;
 	PublishBankGoldSaleNews(ounces, before, backing, true);
 	if (_market_events.next_id == first_id) return false; // Nothing was made (cannot happen with 50% of the gold).

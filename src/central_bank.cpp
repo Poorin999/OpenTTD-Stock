@@ -205,8 +205,7 @@ void CentralBank::TradeGold(int64_t day)
 		}
 		_gold_reserve.bank_reserve_oz += ounces;
 		_gold_reserve.market_stock_oz -= ounces;
-		_gold_reserve.pressure_ppm = std::min<int64_t>(GoldReserveManager::PRESSURE_MAX_PPM,
-				_gold_reserve.pressure_ppm + ounces * GoldReserveManager::PPM / GoldReserveManager::DEPTH_OUNCES);
+		_gold_reserve.AddTradeImpact(ounces * GoldReserveManager::PPM / GoldReserveManager::DEPTH_OUNCES);
 	} else if (backing > BANK_GOLD_SELL_ABOVE_BP || (backing > BANK_OMO_MIN_BACKING_BP && BankOpenMarketWanted(this->policy))) {
 		/* Normal sale (backing above its upper limit), or an open market operation (price or inflation far above the anchor): in that case the bank only sells down to BANK_OMO_MIN_BACKING_BP. */
 		const int64_t sell_limit_bp = backing > BANK_GOLD_SELL_ABOVE_BP ? BANK_GOLD_SELL_ABOVE_BP : BANK_OMO_MIN_BACKING_BP;
@@ -229,8 +228,7 @@ void CentralBank::TradeGold(int64_t day)
 		const int64_t reserve_before = _gold_reserve.bank_reserve_oz; // For the news: how much of its own gold the bank sold.
 		_gold_reserve.bank_reserve_oz -= ounces;
 		_gold_reserve.market_stock_oz += ounces;
-		_gold_reserve.pressure_ppm = std::max<int64_t>(-GoldReserveManager::PRESSURE_MAX_PPM,
-				_gold_reserve.pressure_ppm - ounces * GoldReserveManager::PPM / GoldReserveManager::DEPTH_OUNCES);
+		_gold_reserve.AddTradeImpact(-(ounces * GoldReserveManager::PPM / GoldReserveManager::DEPTH_OUNCES));
 		PublishBankGoldSaleNews(ounces, reserve_before, backing); // Real news with the real numbers (the reserve is above its level); the price jumps down at once.
 		ounces = -ounces;
 	} else {
@@ -739,8 +737,7 @@ static int64_t BankSellGoldForDebt(CompanyID company, int64_t need)
 	if (cost > 0) _gold_reserve.holdings_cost[company.base()] -= std::min(cost, cost / held * ounces + (cost % held) * ounces / held);
 	_gold_reserve.holdings_oz[company.base()] -= ounces;
 	_gold_reserve.market_stock_oz += ounces;
-	_gold_reserve.pressure_ppm = std::max<int64_t>(-GoldReserveManager::PRESSURE_MAX_PPM,
-			_gold_reserve.pressure_ppm - ounces * GoldReserveManager::PPM / GoldReserveManager::DEPTH_OUNCES);
+	_gold_reserve.AddTradeImpact(-(ounces * GoldReserveManager::PPM / GoldReserveManager::DEPTH_OUNCES));
 	if (proceeds > applied) {
 		Company *c = Company::GetIfValid(company);
 		if (c != nullptr) c->money += Money(proceeds - applied);

@@ -135,7 +135,12 @@ static bool ProducesLabel(const IndustrySpec &spec, uint32_t label)
 	[&](const auto &s) {
 		if constexpr (requires { s.produced_cargo_label.begin(); }) {
 			for (const auto &l : s.produced_cargo_label) {
-				if (l == CargoLabel{label}) found = true;
+				if constexpr (std::is_same_v<std::remove_cvref_t<decltype(l)>, CargoLabel>) {
+					if (l == CargoLabel{label}) found = true;
+				} else { // OpenTTD 15: a std::variant<CargoLabel, MixedCargoType>.
+					const CargoLabel *cl = std::get_if<CargoLabel>(&l);
+					if (cl != nullptr && *cl == CargoLabel{label}) found = true;
+				}
 			}
 		}
 	}(spec);
