@@ -43,7 +43,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "tax.h": "src", "tax.cpp": "src",
     "cargo_market.h": "src", "cargo_market.cpp": "src", "CargoMarketMath.h": "src",
     "town_treasury.h": "src", "town_treasury.cpp": "src", "citizen_gold.h": "src", "citizen_terminal.h": "src", "gold_market_math.h": "src", "oil_market_math.h": "src", "oil_market_gui.h": "src", "oil_market_gui.cpp": "src",
-    "gold_reserve.h": "src", "gold_reserve.cpp": "src", "gold_industry.cpp": "src", "firs_desert_cargo.cpp": "src", "english_firs_strings.txt": "src",
+    "gold_reserve.h": "src", "gold_reserve.cpp": "src", "gold_industry.cpp": "src", "firs_desert_cargo.cpp": "src", "english_firs_strings.txt": "src", "desert_industries.cpp": "src", "english_desert_industries_strings.txt": "src",
     "valuables.h": "src", "valuables.cpp": "src",
     "gold_panel.h": "src", "gold_panel.cpp": "src", "gold_buy_gui.cpp": "src",
     "town_finance_gui.h": "src", "town_finance_gui.cpp": "src",
@@ -73,12 +73,12 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_GOLD_BUY", "buy gold for the reserve"),
     ("CMD_GOLD_SELL", "sell gold of the reserve"),
 ]
-NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "oil_market_math.h", "oil_market_gui.cpp", "oil_market_gui.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "firs_desert_cargo.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "company_info_gui.cpp", "company_info_gui.h", "company_info_math.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
+NEW_SOURCES = ["wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "oil_market_math.h", "oil_market_gui.cpp", "oil_market_gui.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "firs_desert_cargo.cpp", "desert_industries.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "company_info_gui.cpp", "company_info_gui.h", "company_info_math.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
                "RetailMath.h", "RetailMarketManager.h", "RetailMarketManager.cpp",
                "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]
 REPLACE_KEYS = {"STR_STOCK_TIP_TOOLBOX", "STR_STOCK_TIP_SUMMARY", "STR_STOCK_ORDER_INFO", "STR_STOCK_TIP_DEPOSIT", "STR_STOCK_TIP_WITHDRAW"}
-STRING_FILES = ["english_stock_strings.txt", "english_wallet_strings.txt", "english_round8_strings.txt", "english_timeframe_strings.txt", "english_central_bank_strings.txt", "english_gold_strings.txt", "english_firs_strings.txt", "english_town_finance_strings.txt", "english_company_info_strings.txt", "english_valuables_strings.txt", "english_news_strings.txt"]
+STRING_FILES = ["english_stock_strings.txt", "english_wallet_strings.txt", "english_round8_strings.txt", "english_timeframe_strings.txt", "english_central_bank_strings.txt", "english_gold_strings.txt", "english_firs_strings.txt", "english_desert_industries_strings.txt", "english_town_finance_strings.txt", "english_company_info_strings.txt", "english_valuables_strings.txt", "english_news_strings.txt"]
 ANCHORS = ["STR_STOCK_ERROR_NO_ORDER", "STR_STOCK_NEWS_ORDER_EXPIRED"]
 
 
@@ -913,6 +913,32 @@ def patch_gold_industries(tree):
     print("industry_cmd.cpp: gold industries hook added")
 
 
+DESERT_INDUSTRY_MARKER = "DESERT_INDUSTRY_PATCH"
+
+
+def patch_desert_industries(tree):
+    """The industries of the Sub-tropical (desert) economy, built into the game (desert_industries.cpp): one declaration before ResetIndustries() and one
+    call at the END of it, in industry_cmd.cpp (in place, at an anchor). It must run AFTER patch_gold_industries, so that the call comes after
+    ApplyGoldIndustries(). Nothing is written when the anchor is missing."""
+    p = tree / "src" / "industry_cmd.cpp"
+    if not p.is_file():
+        sys.exit(f"ERROR: {p} not found in the OpenTTD tree")
+    t, crlf = _read_lf(p)
+    if DESERT_INDUSTRY_MARKER in t:
+        print("industry_cmd.cpp: desert industries hook already there")
+        return
+    m = re.search(r"^void ResetIndustries\(\)\n\{\n", t, re.M)
+    if not m:
+        sys.exit("ERROR: void ResetIndustries() not found in industry_cmd.cpp (anchor of the desert industries patch)")
+    end = t.find("\n}\n", m.end())
+    if end < 0:
+        sys.exit("ERROR: end of ResetIndustries() not found (desert industries patch)")
+    t = t[:end + 1] + f"\tApplyDesertIndustries(); /* {DESERT_INDUSTRY_MARKER} */\n" + t[end + 1:]
+    t = t[:m.start()] + f"void ApplyDesertIndustries(); /* {DESERT_INDUSTRY_MARKER}: desert_industries.cpp */\n\n" + t[m.start():]
+    _write_like(p, t, crlf)
+    print("industry_cmd.cpp: desert industries hook added")
+
+
 COMPANY_YEAR_MARKER = "GAME_COMPANY_YEAR_PATCH"
 
 
@@ -1072,6 +1098,7 @@ def main(tree):
     patch_gold_cargo(tree)
     patch_firs_desert_cargo(tree)
     patch_gold_industries(tree)
+    patch_desert_industries(tree)
     patch_console_file(tree)
     for name, folder in FILES.items():
         src = find(name, folder)

@@ -22,7 +22,7 @@
  * (OpenTTD has no separate desert climate: the desert is a terrain of Sub-tropical). Only cargo whose label is NOT in the climate yet is added, so
  * nothing is duplicated. A new cargo is a COPY of an existing cargo of the climate (the "base": same sprite, same town effect) with its own label,
  * colour, weight, payment, transit days, classes and names. The labels are the FIRS labels, so a FIRS industry GRF that is loaded later finds them.
- * No industry is added here: these cargos only exist (price, refit by class, cargo payment list) until a NewGRF produces them.
+ * No industry is added here: desert_industries.cpp adds the industries that produce and accept these cargos.
  */
 
 namespace {
