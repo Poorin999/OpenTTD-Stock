@@ -5,6 +5,12 @@ on:
   push:
     branches: [main, master]
 
+# vcpkg pushes the packages it builds to a NuGet binary cache (GitHub Packages) with the workflow token.
+# Without "packages: write" that push throws (the long NuGet stack trace at the end of the log) and the vcpkg install is reported as failed.
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   windows:
     # windows-latest uses a newer MSVC toolchain than the legacy breakpad port supports.
@@ -63,18 +69,81 @@ jobs:
       with:
         arch: x64
 
+    # ccache keeps the compiled objects between runs. The 900 files of OpenTTD itself do not change, so a later run compiles only the files of the mod
+    # that changed (minutes instead of about 14). If ccache can not cache a compile it just runs the compiler, so this can not break the build.
+    - name: Setup ccache
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: windows-2022-openttd-15.3
+        max-size: 1G
+
+    # Source archives that vcpkg downloaded are kept between runs, so one good download is enough for all later builds.
+    - name: Cache vcpkg downloads
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/vcpkg/downloads
+        key: vcpkg-downloads-${{ runner.os }}-${{ hashFiles('openttd/vcpkg.json') }}
+        restore-keys: |
+          vcpkg-downloads-${{ runner.os }}-
+
     - name: Build
       shell: bash
       working-directory: openttd
+      env:
+        # Build the dependencies without the NuGet binary cache: slower, but a failing push can no longer fail the build.
+        VCPKG_BINARY_SOURCES: clear
       run: |
         mkdir build
         cd build
-        cmake .. \
-          -GNinja \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DVCPKG_TARGET_TRIPLET=x64-windows-static \
-          -DCMAKE_TOOLCHAIN_FILE="${{ steps.vcpkg.outputs.vcpkg-cmake }}"
-        cmake --build .
+        # The configure step runs "vcpkg install", which downloads the sources of the libraries from other servers (for example
+        # gitlab.xiph.org for libogg). Those servers sometimes answer 502; the download then fails although nothing is wrong
+        # with the code. So the configure step is tried again a few times, and what was already downloaded is kept.
+        configured=0
+        for attempt in 1 2 3 4 5; do
+          if cmake .. \
+            -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_POLICY_DEFAULT_CMP0141=NEW \
+            -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded \
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static \
+            -DCMAKE_TOOLCHAIN_FILE="${{ steps.vcpkg.outputs.vcpkg-cmake }}"; then
+            configured=1
+            break
+          fi
+          echo "::warning::cmake configure failed (attempt $attempt of 5), trying again in 90 s"
+          sleep 90
+        done
+        [ "$configured" -eq 1 ] || exit 1
+        # "-k 0" = keep going after a failed file, so ONE run shows the errors of ALL files (not only the first one). The whole output is also saved
+        # to build.log for the summary step below. (bash runs with pipefail, so a failed build still fails the step.)
+        cmake --build . -- -k 0 2>&1 | tee ../build.log
+
+    # Only when the build failed: every distinct compiler / linker error in one list at the top of the run page (the "Summary" tab).
+    - name: Summary of build errors (on failure)
+      if: failure()
+      shell: bash
+      run: |
+        if [ -f openttd/build.log ]; then
+          {
+            echo '### Build errors (each distinct line once)'
+            echo '```'
+            grep -E "error (C|LNK|D)[0-9]+|: error:|fatal error" openttd/build.log | sed 's/^[0-9]*: *//' | sort -u | head -150
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    # Only when the build failed: the real vcpkg error is in these logs, not in the NuGet noise at the end of the console log.
+    - name: Upload vcpkg logs (on failure)
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: vcpkg-logs
+        path: |
+          openttd/build/vcpkg-manifest-install.log
+          D:/a/_temp/vcpkg/buildtrees/**/*.log
+        if-no-files-found: ignore
 
     - name: Collect files
       shell: bash
@@ -82,7 +151,23 @@ jobs:
         mkdir -p out/lang
         cp openttd/build/openttd.exe out/
         cp -r openttd/bin/ai openttd/bin/game out/ 2>/dev/null || true
+        # The transport AI of the mod (StockHoge): in the zip it is out/ai/StockHoge, so it shows up in AI Settings of the game.
+        mkdir -p out/ai
+        cp -r mod/ai/StockHoge out/ai/
         cp openttd/build/lang/*.lng out/lang/ 2>/dev/null || true
+
+    # The NewGRF "Desert Industries" (21 industries for Sub-tropical, mod/newgrf/desert_industries). A failure here does not fail the build of the game:
+    # the game works without it, the NewGRF is just missing from the zip (see the log of this step).
+    - name: Build the NewGRF (Desert Industries)
+      shell: bash
+      continue-on-error: true
+      run: |
+        python -m pip install nml pillow
+        cd mod/newgrf/desert_industries
+        python make_desert_industries.py
+        nmlc --grf desert_industries.grf desert_industries.nml || python -m nml.main --grf desert_industries.grf desert_industries.nml
+        mkdir -p ../../../out/newgrf
+        cp desert_industries.grf ../../../out/newgrf/
 
     - name: Upload
       uses: actions/upload-artifact@v4
