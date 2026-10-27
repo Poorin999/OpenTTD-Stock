@@ -197,14 +197,14 @@ struct CargoPricesWindow : Window {
 			if (!row.gold) {
 				const cargomarket::CargoState &c = _cargo_market.cargo[i];
 				row.shown_ppm = c.price_ppm * c.freight_ppm / cargomarket::PPM;
-				if (row.shown_ppm > 0) row.base = row.current * cargomarket::PPM / row.shown_ppm;
+				if (row.shown_ppm > 0) row.base = row.current * cargomarket::PPM / Money(row.shown_ppm);
 				if (avail >= 2 && row.shown_ppm > 0) {
 					row.back = std::min<uint32_t>(PERIOD_DAYS[this->period], avail - 1);
 					const int64_t old = _cargo_market.HistoryPpm(i, row.back);
 					if (old > 0) {
 						row.has_change = true;
 						row.change_x10 = (row.shown_ppm - old) * 1000 / old;
-						row.diff = row.current - row.current * old / row.shown_ppm;
+						row.diff = row.current - row.current * old / Money(row.shown_ppm);
 					}
 				}
 			}
@@ -674,7 +674,7 @@ struct CargoPricesWindow : Window {
 			if (((d / step) & 1) == 1) GfxFillRect(left + 1, y, right - 1, y + row_h - 1, GREY_SCALE(1));
 			DrawString(left + 8, c1, y + 1, d == 0 ? std::string("ตอนนี้") : fmt::format("{} วันก่อน", d), d == 0 ? TC_WHITE : TC_GREY, SA_LEFT);
 			DrawString(c1, c2 - 6, y + 1, IndexText(ppm), PriceColour(ppm), SA_RIGHT);
-			DrawString(c2, c3 - 6, y + 1, GetString(STR_JUST_CURRENCY_LONG, cur->base * ppm / cargomarket::PPM), TC_GREY, SA_RIGHT);
+			DrawString(c2, c3 - 6, y + 1, GetString(STR_JUST_CURRENCY_LONG, cur->base * ppm / Money(cargomarket::PPM)), TC_GREY, SA_RIGHT);
 			if (before > 0 && d + step < avail) {
 				const int64_t x10 = (ppm - before) * 1000 / before;
 				DrawString(c3, right - 8, y + 1, ChangeText(x10), ChangeColour(true, x10), SA_RIGHT);
