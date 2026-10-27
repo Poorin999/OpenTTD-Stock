@@ -1,0 +1,44 @@
+name: Build Desert Industries NewGRF
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - 'newgrf/desert_industries/**'
+      - '.github/workflows/build-newgrf.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  newgrf:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install NML compiler
+      run: pip install nml pillow
+
+    # Uncomment to redraw gfx/sheet.png, the .nml and the .lng from the script before compiling.
+    # - name: Regenerate sources
+    #   working-directory: newgrf/desert_industries
+    #   run: python3 make_desert_industries.py
+
+    - name: Compile NewGRF
+      working-directory: newgrf/desert_industries
+      run: nmlc --grf desert_industries.grf desert_industries.nml
+
+    - name: Upload desert_industries.grf
+      uses: actions/upload-artifact@v4
+      with:
+        name: desert_industries-grf
+        path: newgrf/desert_industries/desert_industries.grf
+        if-no-files-found: error
