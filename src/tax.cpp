@@ -24,6 +24,8 @@
 #include "tile_map.h"
 #include "town.h"
 #include "vehicle_base.h"
+#include "zone_market.h"
+#include <vector>
 
 #include "safeguards.h"
 
@@ -108,6 +110,19 @@ static const GameTimeSubscription _tax_daily(GameTimeEvent::Day, [](const GameTi
 {
 	if (_game_mode != GM_NORMAL) return;
 
+	/* The capitals of the zones, to say in which zone a tile or a vehicle is (the tax of the zone is shown in the zones window). */
+	std::vector<zonemath::Pt> zone_caps;
+	for (int i = 0; i < _zone_market.count; i++) {
+		const TileIndex cap = _zone_market.zones[i].capital;
+		zone_caps.push_back({static_cast<int64_t>(TileX(cap)), static_cast<int64_t>(TileY(cap))});
+	}
+	auto zone_of = [&zone_caps](TileIndex tile) -> int {
+		if (zone_caps.empty()) return -1;
+		return zonemath::ZoneOf({static_cast<int64_t>(TileX(tile)), static_cast<int64_t>(TileY(tile))}, zone_caps);
+	};
+	std::array<int64_t, zonemath::MAX_ZONES> land_zone{};      // Land weight per zone.
+	std::array<int64_t, zonemath::MAX_ZONES> transport_zone{}; // Transport tax (before the price index) per zone.
+
 	/* Land: the weight of all tiles of every company in one pass over the map. */
 	std::array<int64_t, MAX_COMPANIES> land{};
 	for (const auto tile : Map::Iterate()) {
@@ -117,7 +132,10 @@ static const GameTimeSubscription _tax_daily(GameTimeEvent::Day, [](const GameTi
 		}
 		const Owner owner = GetTileOwner(tile);
 		if (!Company::IsValidID(owner)) continue;
-		land[owner.base()] += LandWeight(tile);
+		const int64_t weight = LandWeight(tile);
+		land[owner.base()] += weight;
+		const int zone = zone_of(static_cast<TileIndex>(tile));
+		if (zone >= 0 && zone < zonemath::MAX_ZONES) land_zone[zone] += weight;
 	}
 
 	/* Vehicles: every primary vehicle that is not stopped in a depot. */
@@ -134,11 +152,18 @@ static const GameTimeSubscription _tax_daily(GameTimeEvent::Day, [](const GameTi
 			default: break;
 		}
 		transport[v->owner.base()] += rate;
+		const int vzone = zone_of(v->tile);
+		if (vzone >= 0 && vzone < zonemath::MAX_ZONES) transport_zone[vzone] += rate;
 		fuel_base[v->owner.base()] += fuel;
 	}
 
 	/* Fuel: only while the fuel index is above its plain price. The index is read from the news log at this game minute. */
 	const int64_t fuel_index = FuelIndexWithOilPpm(_market_events.FuelIndexPpm(static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes()))); // News index changed by the oil market (valuables.cpp).
+
+	for (int z = 0; z < _zone_market.count && z < zonemath::MAX_ZONES; z++) {
+		_zone_market.zones[z].land_tax += ScaleByPriceIndex(land_zone[z] * TAX_LAND_PER_UNIT_DAY / 100);
+		_zone_market.zones[z].transport_tax += ScaleByPriceIndex(transport_zone[z]);
+	}
 
 	for (const Company *c : Company::Iterate()) {
 		const size_t i = c->index.base();

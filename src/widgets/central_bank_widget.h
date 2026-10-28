@@ -61,6 +61,8 @@ enum CentralBankWidgets : WidgetID {
 	WID_HG_CAPTION,         ///< Caption of the headquarters gate window.
 	WID_HG_PANEL,           ///< Panel of the headquarters gate window.
 	WID_ZM_PANEL,           ///< Panel of the zones map window: the map in coloured zones, the borders as lines and the legend.
+	WID_ZT_CAPTION,         ///< Caption of the zone tax window.
+	WID_ZT_PANEL,           ///< Panel of the zone tax window: the taxes collected in one zone and the tax rates.
 };
 
 #endif /* WIDGETS_CENTRAL_BANK_WIDGET_H */

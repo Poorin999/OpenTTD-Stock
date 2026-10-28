@@ -114,6 +114,7 @@ void ZoneFeeOnDelivery(CompanyID owner, int64_t income, StationID source, Statio
 	if (!Station::IsValidID(source) || !Station::IsValidID(dest)) return;
 	const int from = _zone_market.ZoneOfTile(Station::Get(source)->xy);
 	const int to = _zone_market.ZoneOfTile(Station::Get(dest)->xy);
+	if (to >= 0 && to < _zone_market.count) _zone_market.zones[to].vat += income * TAX_VAT_PERCENT / 100; // The VAT of this delivery, counted for the zone of the destination.
 	const int64_t fee_ppm = _zone_market.FeePpmBetween(from, to);
 	if (fee_ppm <= 0) return;
 	const int64_t fee = zonemath::FeeAmount(income, fee_ppm);

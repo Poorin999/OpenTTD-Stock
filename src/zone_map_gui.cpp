@@ -8,8 +8,10 @@
 #include "stdafx.h"
 #include "zone_map_gui.h"
 #include "zone_market.h"
+#include "tax.h"
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <string>
 #include <vector>
 #include "window_func.h"
@@ -33,8 +35,9 @@
 
 #include "safeguards.h"
 
-/** Window number inside the class WC_CENTRAL_BANK (0 bank, 1 statement, 2 past statements, 3 buy gold, 4 policy, 5 payroll news, 6 market news, 7 cargo prices, 8 oil market, 9 zones map). */
+/** Window number inside the class WC_CENTRAL_BANK (0 bank, 1 statement, 2 past statements, 3 buy gold, 4 policy, 5 payroll news, 6 market news, 7 cargo prices, 8 oil market, 9 zones map, 10 headquarters gate, 11 zone taxes). */
 static constexpr int ZM_WINDOW_NUMBER = 9;
+static constexpr int ZT_WINDOW_NUMBER = 11; ///< The zone tax window (opened by a click on a capital).
 
 static constexpr int ZM_CELLS = 96;       ///< The map is drawn as ZM_CELLS x ZM_CELLS cells.
 static constexpr int ZM_LEGEND_WIDTH = 250; ///< Width of the legend next to the map, in unscaled pixels.
@@ -152,7 +155,7 @@ struct ZoneMapWindow : Window {
 			for (int i = 0; i < _zone_market.count; i++) {
 				const int x = a.left + static_cast<int>(caps[i].x * a.side / Map::SizeX());
 				const int y = a.top + static_cast<int>(caps[i].y * a.side / Map::SizeY());
-				GfxFillRect(x - half - 1, y - half - 1, x + half + 1, y + half + 1, GetColourGradient(COLOUR_GREY, SHADE_BLACK));
+				GfxFillRect(x - half - 1, y - half - 1, x + half + 1, y + half + 1, GetColourGradient(COLOUR_GREY, SHADE_DARKEST));
 				GfxFillRect(x - half, y - half, x + half, y + half, GetColourGradient(COLOUR_YELLOW, SHADE_LIGHT));
 				DrawString(x + half + 3, a.left + a.side, y - row_h / 2, fmt::format("{}", i + 1), TC_WHITE, SA_LEFT);
 			}
@@ -202,7 +205,9 @@ struct ZoneMapWindow : Window {
 		y += ScaleGUITrad(4);
 		DrawString(lx, rx, y, "เส้นขาว = เส้นแบ่งโซน ส่งสินค้าข้ามเส้นเสียค่าแลกเปลี่ยน", TC_GREY, SA_LEFT, false, FS_SMALL);
 		y += row_h;
-		DrawString(lx, rx, y, "คลิกบนแผนที่เพื่อเลื่อนหน้าจอเกมไปที่นั่น", TC_GREY, SA_LEFT, false, FS_SMALL);
+		DrawString(lx, rx, y, "คลิกช่องเหลืองของเมืองหลวง = ดูภาษีของโซนนั้น", TC_YELLOW, SA_LEFT, false, FS_SMALL);
+		y += row_h;
+		DrawString(lx, rx, y, "คลิกที่อื่นบนแผนที่เพื่อเลื่อนหน้าจอเกมไปที่นั่น", TC_GREY, SA_LEFT, false, FS_SMALL);
 	}
 
 	void OnClick(Point pt, WidgetID widget, [[maybe_unused]] int click_count) override
@@ -214,6 +219,17 @@ struct ZoneMapWindow : Window {
 		const int rx = pt.x - a.left;
 		const int ry = pt.y - a.top;
 		if (rx < 0 || ry < 0 || rx >= a.side || ry >= a.side) return;
+		/* A click on the square of a capital opens the taxes of that zone. */
+		const int hit = ScaleGUITrad(3) + ScaleGUITrad(4);
+		const std::vector<zonemath::Pt> caps = Capitals();
+		for (int i = 0; i < _zone_market.count; i++) {
+			const int cx = static_cast<int>(caps[i].x * a.side / Map::SizeX());
+			const int cy = static_cast<int>(caps[i].y * a.side / Map::SizeY());
+			if (std::abs(rx - cx) <= hit && std::abs(ry - cy) <= hit) {
+				ShowZoneTaxWindow(i);
+				return;
+			}
+		}
 		const int tx = static_cast<int>(static_cast<int64_t>(rx) * Map::SizeX() / a.side);
 		const int ty = static_cast<int>(static_cast<int64_t>(ry) * Map::SizeY() / a.side);
 		ScrollMainWindowToTile(TileXY(tx, ty));
@@ -242,4 +258,117 @@ void ShowZoneMapWindow()
 {
 	if (BringWindowToFrontById(WC_CENTRAL_BANK, ZM_WINDOW_NUMBER) != nullptr) return;
 	new ZoneMapWindow(_zone_map_desc);
+}
+
+/** The zone tax window: what was collected in one zone, and the tax rates. */
+struct ZoneTaxWindow : Window {
+	int zone = 0; ///< The zone that is shown (0 .. count - 1).
+
+	/** Redraw regularly: the taxes grow every game day. */
+	const IntervalTimer<TimerWindow> redraw_interval = {std::chrono::milliseconds(1000), [this](auto) {
+		this->SetDirty();
+	}};
+
+	ZoneTaxWindow(WindowDesc &desc, int zone_number) : Window(desc), zone(zone_number)
+	{
+		this->InitNested(ZT_WINDOW_NUMBER);
+	}
+
+	void OnInvalidateData([[maybe_unused]] int data = 0, [[maybe_unused]] bool gui_scope = true) override
+	{
+		this->SetDirty();
+	}
+
+	static std::string MoneyText(int64_t amount)
+	{
+		return GetString(STR_JUST_CURRENCY_LONG, amount);
+	}
+
+	void DrawWidget(const Rect &r, WidgetID widget) const override
+	{
+		if (widget != WID_ZT_PANEL) return;
+
+		const int pad = ScaleGUITrad(8);
+		const int row_h = GetCharacterHeight(FS_NORMAL) + ScaleGUITrad(3);
+		const int left = r.left + pad;
+		const int right = r.right - pad;
+		int y = r.top + pad;
+
+		/* Draw one line when it fits above the bottom of the panel (rule 4 of ROADMAP.md section 3). */
+		auto line = [&](const std::string &text, auto colour, int small = 0) {
+			if (y + row_h > r.bottom) return;
+			DrawString(left, right, y, text, colour, SA_LEFT, false, small != 0 ? FS_SMALL : FS_NORMAL);
+			y += row_h;
+		};
+
+		if (this->zone < 0 || this->zone >= _zone_market.count) {
+			line("ไม่มีโซนนี้ (โซนยังไม่ถูกสร้าง)", TC_GREY);
+			return;
+		}
+		const ZoneState &z = _zone_market.zones[this->zone];
+		const Town *capital = nullptr;
+		for (const Town *t : Town::Iterate()) {
+			if (t->xy == z.capital) { capital = t; break; }
+		}
+
+		/* The head: which zone. */
+		line(fmt::format("โซน {}  เมืองหลวง {}  ({})", this->zone + 1, capital != nullptr ? GetString(STR_TOWN_NAME, capital->index) : std::string("-"), ZoneCurrencyName(this->zone)), TC_LIGHT_BLUE);
+		line(fmt::format("อัตราแลกเปลี่ยน {}.{:03}   ผู้คนในโซน {}", z.rate_ppm / 1'000'000, (z.rate_ppm % 1'000'000) / 1'000, z.population), TC_GREY);
+		y += ScaleGUITrad(6);
+
+		/* What was collected in this zone since the start of the game. */
+		int64_t all_zones = 0;
+		for (int i = 0; i < _zone_market.count; i++) {
+			const ZoneState &o = _zone_market.zones[i];
+			all_zones += o.land_tax + o.transport_tax + o.vat + o.fees;
+		}
+		const int64_t total = z.land_tax + z.transport_tax + z.vat + z.fees;
+		line("ภาษีที่เก็บได้ในโซนนี้ (สะสมตั้งแต่เริ่มเกม)", TC_YELLOW);
+		line(fmt::format("  ภาษีที่ดิน (ที่ดินในโซน):  {}", MoneyText(z.land_tax)), TC_WHITE);
+		line(fmt::format("  ภาษีขนส่ง (ยานพาหนะที่อยู่ในโซน):  {}", MoneyText(z.transport_tax)), TC_WHITE);
+		line(fmt::format("  VAT (ส่งสินค้าเข้าโซนนี้):  {}", MoneyText(z.vat)), TC_WHITE);
+		line(fmt::format("  ค่าธรรมเนียมแลกเปลี่ยน (ส่งข้ามเส้นเข้าโซนนี้):  {}", MoneyText(z.fees)), TC_WHITE);
+		line(fmt::format("  รวม:  {}   ({}% ของทุกโซน)", MoneyText(total), all_zones > 0 ? total * 100 / all_zones : 0), TC_LIGHT_BLUE);
+		y += ScaleGUITrad(6);
+
+		/* The rates: the same in every zone. */
+		line("อัตราภาษี (เท่ากันทุกโซน)", TC_YELLOW);
+		line(fmt::format("  ที่ดิน: {} ต่อหน่วยต่อวัน (ตึกใหญ่ใกล้เมืองใหญ่แพงสุด +500%)", TAX_LAND_PER_UNIT_DAY), TC_GREY);
+		line(fmt::format("  ขนส่งต่อวัน: รถไฟ {}  รถบรรทุก {}  เรือ {}  เครื่องบิน {}", TAX_TRAIN_DAY, TAX_ROADVEH_DAY, TAX_SHIP_DAY, TAX_AIRCRAFT_DAY), TC_GREY);
+		line(fmt::format("  VAT {}% ของรายได้ส่งสินค้า   กำไรจากการเทรด {}%   เงินปันผล {}%", TAX_VAT_PERCENT, TAX_CAPITAL_GAINS_PERCENT, TAX_DIVIDEND_PERCENT), TC_GREY);
+		line(fmt::format("  ภาษีรายได้ต่อไตรมาส: {}% ถึง {}, {}% ถึง {}, เหนือนั้น {}%", TAX_INCOME_QUARTER_PERCENT, TAX_INCOME_BRACKET1, TAX_INCOME_PERCENT_2, TAX_INCOME_BRACKET2, TAX_INCOME_PERCENT_3), TC_GREY);
+		y += ScaleGUITrad(6);
+		line("ภาษีทั้งหมดไปที่ธนาคารกลาง (ภาษีรายได้ กำไรเทรด ปันผลคิดที่บริษัท ไม่แยกโซน)", TC_GREY, 1);
+		line("ภาษีที่ดินและขนส่งนับทุกวันจากตำแหน่งจริงบนแผนที่ VAT นับจากรายได้ของแต่ละเที่ยว", TC_GREY, 1);
+	}
+};
+
+static constexpr std::initializer_list<NWidgetPart> _nested_zone_tax_widgets = {
+	NWidget(NWID_HORIZONTAL),
+		NWidget(WWT_CLOSEBOX, COLOUR_GREY),
+		NWidget(WWT_CAPTION, COLOUR_GREY, WID_ZT_CAPTION), SetStringTip(STR_ZONE_TAX_CAPTION, STR_TOOLTIP_WINDOW_TITLE_DRAG_THIS),
+		NWidget(WWT_SHADEBOX, COLOUR_GREY),
+		NWidget(WWT_STICKYBOX, COLOUR_GREY),
+	EndContainer(),
+	NWidget(WWT_PANEL, COLOUR_GREY, WID_ZT_PANEL), SetMinimalSize(560, 300), SetFill(1, 1),
+	EndContainer(),
+};
+
+static WindowDesc _zone_tax_desc(
+	WDP_AUTO, "zone_tax", 0, 0,
+	WC_CENTRAL_BANK, WC_NONE,
+	{},
+	_nested_zone_tax_widgets
+);
+
+void ShowZoneTaxWindow(int zone)
+{
+	Window *w = FindWindowById(WC_CENTRAL_BANK, ZT_WINDOW_NUMBER);
+	if (w != nullptr) {
+		static_cast<ZoneTaxWindow *>(w)->zone = zone;
+		w->SetDirty();
+		BringWindowToFrontById(WC_CENTRAL_BANK, ZT_WINDOW_NUMBER);
+		return;
+	}
+	new ZoneTaxWindow(_zone_tax_desc, zone);
 }

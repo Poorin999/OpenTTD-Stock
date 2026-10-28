@@ -69,6 +69,7 @@ enum StockRecordKind : uint8_t {
 	SRK_TOWN_NEWS = 38, ///< What the daily town news scan remembers about a town: ym = index of the town, v1 = population at the start of the window, v2 = game day of that snapshot, v3 = number of population marks reached.
 	SRK_TOWN_POS = 37, ///< Open terminal position of a citizen group: a = group (citizengold::Style), b = symbol | 0x80 when long, ym = index of the town, v1 = volume, v2 = entry price, v3 = stop loss, v4 = take profit.
 	SRK_BANK_LOG = 41,  ///< Line of the account log of the bank window: a = company, b = line (LedgerItem), ym = game day of the year, v1 = amount (sum of the bookings), v2 = ledger year, v3 = number of bookings. Written newest first.
+	SRK_ZONE_TAX = 43, ///< Tax collected in a money zone: a = zone number, v1 = land tax, v2 = transport tax, v3 = VAT of deliveries into the zone (money units). Written for every zone, after SRK_ZONE.
 	SRK_ZONE = 42,    ///< Money zone: a = zone number, v1 = capital tile, v2 = exchange rate in ppm, v3 = exchange fees earned (money units). Written for every zone, in order.
 	SRK_GOLD_NEWS = 40, ///< State of the real gold news: ym = ounces that the mines delivered since the last news (mine_news_oz), v1 = shock of today in 1/100 money units (day_shift_cents, always 0 now), v2 = the level of the economy at the last price step in 1/100 money units (last_level_cents, 0 = unknown), v3 = cash in circulation averaged over about 7 game days (cash_avg, 0 = unknown), v4 = price impact of the trades in ppm (impact_ppm).
 	SRK_TOWN_BOOK = 36, ///< One group of citizens of a town: a = group (citizengold::Style), ym = index of the town, v1 = gold in hundredths of an ounce, v2 = what it cost, v3 = cash, v4 = profit of closed sales, v5 = wins | losses << 24 | cooldown << 48.
@@ -300,6 +301,16 @@ struct STCKChunkHandler : ChunkHandler {
 			r.v1 = static_cast<int64_t>(_zone_market.zones[i].capital.base());
 			r.v2 = _zone_market.zones[i].rate_ppm;
 			r.v3 = _zone_market.zones[i].fees;
+			write(r);
+		}
+
+		for (int i = 0; i < _zone_market.count; i++) {
+			StockRecord r;
+			r.kind = SRK_ZONE_TAX;
+			r.a = static_cast<size_t>(i);
+			r.v1 = _zone_market.zones[i].land_tax;
+			r.v2 = _zone_market.zones[i].transport_tax;
+			r.v3 = _zone_market.zones[i].vat;
 			write(r);
 		}
 
@@ -779,6 +790,15 @@ struct STCKChunkHandler : ChunkHandler {
 						z.rate_ppm = std::clamp<int64_t>(r.v2, zonemath::RATE_MIN_PPM, zonemath::RATE_MAX_PPM);
 						z.fees = std::max<int64_t>(r.v3, 0);
 						_zone_market.count = std::max<int>(_zone_market.count, static_cast<int>(r.a) + 1);
+					}
+					break;
+
+				case SRK_ZONE_TAX:
+					if (r.a < static_cast<size_t>(zonemath::MAX_ZONES)) {
+						ZoneState &z = _zone_market.zones[r.a];
+						z.land_tax = std::max<int64_t>(r.v1, 0);
+						z.transport_tax = std::max<int64_t>(r.v2, 0);
+						z.vat = std::max<int64_t>(r.v3, 0);
 					}
 					break;
 

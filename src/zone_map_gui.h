@@ -11,4 +11,7 @@
 /** Open (or bring to the front) the zones window. */
 void ShowZoneMapWindow();
 
+/** Open (or bring to the front) the window with the taxes of one zone (0 .. count - 1). Opened by a click on a capital in the zones window. */
+void ShowZoneTaxWindow(int zone);
+
 #endif /* ZONE_MAP_GUI_H */

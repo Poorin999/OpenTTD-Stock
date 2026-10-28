@@ -18,3 +18,4 @@ STR_ZONE_MAP_CAPTION                                            :Zones Map
 STR_MARKET_NEWS_ZONES_BUTTON                                    :Zones
 STR_MARKET_NEWS_ZONES_TIP                                       :{BLACK}Show the map divided into the money zones, coloured, with the borders as lines
 STR_HQ_GATE_CAPTION                                             :Place your Headquarters
+STR_ZONE_TAX_CAPTION                                            :Zone Taxes

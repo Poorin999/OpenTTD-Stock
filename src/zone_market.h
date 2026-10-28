@@ -21,6 +21,9 @@ struct ZoneState {
 	int64_t rate_ppm = zonemath::PPM; ///< Value of one unit of the zone currency in base units, in ppm. Saved (SRK_ZONE v2).
 	int64_t fees = 0;                 ///< Exchange fees paid for deliveries INTO this zone, in money units. Saved (SRK_ZONE v3).
 	int64_t population = 0;           ///< People living in the zone at the last day (not saved, made again every day).
+	int64_t land_tax = 0;             ///< Land tax paid for the tiles inside the zone, all companies together (saved, SRK_ZONE_TAX).
+	int64_t transport_tax = 0;        ///< Transport tax paid for the vehicles that stood inside the zone at the daily count (saved, SRK_ZONE_TAX).
+	int64_t vat = 0;                  ///< VAT of the deliveries whose destination station is inside the zone, counted from the income of each delivery (saved, SRK_ZONE_TAX).
 };
 
 struct ZoneMarket {
