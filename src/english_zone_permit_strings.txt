@@ -4,3 +4,9 @@ STR_ZONE_PERMIT_ERROR_CAPTION                                   :{WHITE}Can't bu
 STR_ZONE_PERMIT_ERROR_BAD_ZONE                                  :{WHITE}This zone doesn't exist
 STR_ZONE_PERMIT_ERROR_NO_HQ                                     :{WHITE}Build your headquarters first
 STR_ZONE_PERMIT_ERROR_HOME                                      :{WHITE}You build freely in the zone of your headquarters, no permit needed
+
+# Strings of the banknote exchange of the money zones (CMD_ZONE_EXCHANGE, console zone_buy / zone_sell).
+STR_ZONE_EXCHANGE_ERROR                                         :{WHITE}Can't exchange banknotes...
+STR_ZONE_EXCHANGE_ERROR_BAD_ZONE                                :{WHITE}This zone doesn't exist
+STR_ZONE_EXCHANGE_ERROR_NO_CASH                                 :{WHITE}Not enough unborrowed cash
+STR_ZONE_EXCHANGE_ERROR_NO_NOTES                                :{WHITE}You don't hold that many banknotes

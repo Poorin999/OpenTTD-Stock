@@ -26,6 +26,7 @@
 #include "cargo_market.h"
 #include "zone_market.h"
 #include "zone_permit.h"
+#include "zone_permit_math.h"
 #include "command_func.h"
 #include "company_func.h"
 #include "zone_map_gui.h"

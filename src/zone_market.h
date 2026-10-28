@@ -25,12 +25,15 @@ struct ZoneState {
 	int64_t transport_tax = 0;        ///< Transport tax paid for the vehicles that stood inside the zone at the daily count (saved, SRK_ZONE_TAX).
 	int64_t vat = 0;                  ///< VAT of the deliveries whose destination station is inside the zone, counted from the income of each delivery (saved, SRK_ZONE_TAX).
 	int64_t company_tax = 0;          ///< Income tax, capital gains tax and dividend tax of the companies whose headquarters stand in this zone (saved, SRK_ZONE_TAX).
+	int64_t inflation_ppm = zonemath::INFL_START_PPM; ///< Yearly inflation of the zone in ppm. Saved (SRK_ZONE v4, +1,000,000).
+	int64_t policy_ppm = zonemath::POLICY_START_PPM;  ///< Yearly policy rate of the zone central bank in ppm: what banknotes of the zone earn. Saved (SRK_ZONE v5, +1).
 	int64_t tax_percent = 100;        ///< The tax level of the zone in percent of the base rates of tax.h (100 = the base rate). Saved (SRK_ZONE_TAX, v5 = percent + 1).
 };
 
 struct ZoneMarket {
 	std::array<ZoneState, zonemath::MAX_ZONES> zones{};
 	int count = 0; ///< Number of zones, 0 = not set up yet (the first game day makes them).
+	std::array<std::array<int64_t, zonemath::MAX_ZONES>, MAX_COMPANIES> holdings{}; ///< Banknotes (units of the zone currency) that a company holds, per zone. Saved (SRK_ZONE_HOLD).
 
 	void Reset();
 	bool MakeZones();          ///< Choose the capitals from the towns of the map when there are no zones yet. True when zones exist afterwards.
@@ -51,6 +54,9 @@ int64_t ZoneTaxPercentOfCompany(CompanyID company);
 
 /** Count a tax of a company (income, capital gains, dividend) for the zone of its headquarters, for the zone tax window. */
 void ZoneCountCompanyTax(CompanyID company, int64_t amount);
+
+/** A terminal trade of banknotes of a zone moves the real rate of the zone (called by StockMarket::ApplyImpact). */
+void ZoneRateTrade(int zone, bool buy, uint32_t volume);
 
 /** The names of the currencies of the zones (English; the console prints the capital next to it). */
 const char *ZoneCurrencyName(int zone);

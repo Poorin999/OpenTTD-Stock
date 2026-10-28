@@ -69,6 +69,23 @@ int main()
 		CHECK(FeeAmount(4'000'000'000'000'000'000LL, FEE_MAX_PPM) == 480'000'000'000'000'000LL); // no overflow
 		CHECK(FeeAmount(123'456, 12'345) == 123'456LL * 12'345 / PPM);
 	}
+	/* Step C: inflation, policy rate, banknotes. */
+	{
+		int64_t infl = 500'000, pol = 0;
+		for (int64_t d = 0; d < 3000; d++) {
+			infl = NextInflation(7, 2, d, infl); pol = NextPolicy(pol, infl);
+			CHECK(infl >= INFL_MIN_PPM && infl <= INFL_MAX_PPM && pol >= POLICY_MIN_PPM && pol <= POLICY_MAX_PPM);
+		}
+		CHECK(infl < 100'000);                                        // pulled back to about 2%
+		CHECK(NextInflation(7, 2, 9, 30'000) == NextInflation(7, 2, 9, 30'000));
+		CHECK(DailyInterest(365'000'000, 36'500) == 36'500 * 365'000'000LL / PPM / 365 && DailyInterest(0, 1000) == 0 && DailyInterest(5, 0) == 0);
+		CHECK(NotesForMoney(1'000'000, 2'000'000) == 500'000 && MoneyForNotes(500'000, 2'000'000) == 1'000'000);
+		CHECK(AfterSpread(1'000'000) == 997'000 && AfterSpread(-1) == 0);
+		const int64_t notes = AfterSpread(NotesForMoney(1'000'000, 1'250'000)), back = AfterSpread(MoneyForNotes(notes, 1'250'000));
+		CHECK(back < 1'000'000 && back > 990'000);                    // a round trip costs about 0.6%
+		CHECK(RateAfterTrade(PPM, true, 10) > PPM && RateAfterTrade(PPM, false, 10) < PPM && RateAfterTrade(PPM, true, 1'000'000'000) == PPM + PPM / 50);
+		CHECK(RateAfterTrade(RATE_MAX_PPM, true, 1000) == RATE_MAX_PPM);
+	}
 	std::printf("%d checks, %d failed\n", g_checks, g_fail);
 	return g_fail == 0 ? 0 : 1;
 }

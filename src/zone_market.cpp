@@ -13,11 +13,15 @@
 #include "map_func.h"
 #include "company_base.h"
 #include "company_func.h"
+#include "central_bank.h"
+#include "command_func.h"
 #include "settings_type.h"
 #include "game_time/game_time_manager.h"
 #include "openttd.h"
 #include "timer/timer.h"
 #include "timer/timer_game_tick.h"
+#include "table/strings.h"
+
 #include "safeguards.h"
 
 ZoneMarket _zone_market;
@@ -45,6 +49,7 @@ static zonemath::Pt PointOf(TileIndex tile)
 void ZoneMarket::Reset()
 {
 	this->zones.fill({});
+	for (auto &row : this->holdings) row.fill(0);
 	this->count = 0;
 }
 
@@ -128,7 +133,53 @@ void ZoneMarket::UpdateDaily()
 	for (int i = 0; i < this->count; i++) {
 		const int64_t level = zonemath::LevelPpm(this->zones[i].population, total, this->count);
 		this->zones[i].rate_ppm = zonemath::NextRate(ZoneSeed(), i, day, this->zones[i].rate_ppm, level);
+		this->zones[i].inflation_ppm = zonemath::NextInflation(ZoneSeed(), i, day, this->zones[i].inflation_ppm);
+		this->zones[i].policy_ppm = zonemath::NextPolicy(this->zones[i].policy_ppm, this->zones[i].inflation_ppm);
 	}
+
+	/* Banknotes earn the policy rate of their zone every game day. */
+	for (auto &row : this->holdings) {
+		for (int i = 0; i < this->count; i++) row[i] += zonemath::DailyInterest(row[i], this->zones[i].policy_ppm);
+	}
+}
+
+void ZoneRateTrade(int zone, bool buy, uint32_t volume)
+{
+	if (zone < 0 || zone >= _zone_market.count) return;
+	int64_t &rate = _zone_market.zones[zone].rate_ppm;
+	rate = zonemath::RateAfterTrade(rate, buy, volume);
+}
+
+/**
+ * Exchange cash for banknotes of a zone, or banknotes back for cash (spread EXCHANGE_SPREAD_PPM). Paid from unborrowed cash only.
+ * @param flags Type of operation.
+ * @param zone Number of the zone, 0 based.
+ * @param sell False: buy banknotes with `amount` money. True: sell `amount` banknotes.
+ * @param amount Money (buy) or banknotes (sell).
+ * @return The cost (a sell gives a negative cost = income), or an error.
+ */
+CommandCost CmdZoneExchange(DoCommandFlags flags, uint8_t zone, bool sell, Money amount)
+{
+	if (!Company::IsValidID(_current_company)) return CMD_ERROR;
+	if (_zone_market.count <= 0 || zone >= _zone_market.count) return CommandCost(STR_ZONE_EXCHANGE_ERROR_BAD_ZONE);
+	const int64_t value = static_cast<int64_t>(amount);
+	if (value <= 0) return CMD_ERROR;
+	const int64_t rate = _zone_market.zones[zone].rate_ppm;
+	int64_t &held = _zone_market.holdings[_current_company.base()][zone];
+
+	if (!sell) {
+		if (GetUnborrowedLiquidCash(_current_company) < value) return CommandCost(STR_ZONE_EXCHANGE_ERROR_NO_CASH);
+		const int64_t notes = zonemath::AfterSpread(zonemath::NotesForMoney(value, rate));
+		if (notes <= 0) return CMD_ERROR;
+		if (flags.Test(DoCommandFlag::Execute)) held += notes;
+		return CommandCost(EXPENSES_OTHER, Money(value));
+	}
+
+	if (value > held) return CommandCost(STR_ZONE_EXCHANGE_ERROR_NO_NOTES);
+	const int64_t gross = zonemath::MoneyForNotes(value, rate);
+	const int64_t cash = zonemath::AfterSpread(gross);
+	if (flags.Test(DoCommandFlag::Execute)) held -= value;
+	return CommandCost(EXPENSES_OTHER, -Money(cash));
 }
 
 void ZoneFeeOnDelivery(CompanyID owner, int64_t income, StationID source, StationID dest)

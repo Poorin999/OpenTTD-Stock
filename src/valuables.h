@@ -35,6 +35,13 @@ static constexpr size_t STOCK_FIRST_VALUABLE = MAX_COMPANIES;
 /** Number of symbols of the terminal: the companies, then the valuables. Arrays of the market have this size. */
 static constexpr size_t STOCK_SYMBOLS = MAX_COMPANIES + VALUABLE_COUNT;
 
+/**
+ * Banknote symbols: a valuable index that stands for the banknotes of a money zone (see zone_market.h). The valuables list has no banknote entries yet,
+ * so these say "no" for every index; when ZoneN banknote entries are added to ValuableId, change ONLY these two functions.
+ */
+constexpr bool IsCurrencyValuable([[maybe_unused]] size_t valuable_index) { return false; }
+constexpr int CurrencyValuableZone([[maybe_unused]] size_t valuable_index) { return -1; }
+
 /** Whether a symbol number is a valuable (the number is not checked against anything else). */
 inline bool IsValuableSymbol(size_t symbol)
 {

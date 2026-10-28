@@ -39,6 +39,22 @@ static constexpr int64_t FEE_BASE_PPM = 10'000;         ///< A delivery across a
 static constexpr int64_t FEE_RATE_DIV = 4;              ///< ... plus a quarter of the relative difference of the two rates ...
 static constexpr int64_t FEE_MAX_PPM = 120'000;         ///< ... and never more than 12%.
 
+/* Step C: every zone has its own central bank numbers: a yearly inflation, a yearly policy rate (what banknotes of the zone earn), and companies can hold banknotes. */
+static constexpr int64_t INFL_MIN_PPM = -20'000;        ///< Yearly inflation of a zone stays between -2% ...
+static constexpr int64_t INFL_MAX_PPM = 300'000;        ///< ... and +30%.
+static constexpr int64_t INFL_START_PPM = 20'000;       ///< A new zone starts with 2% a year.
+static constexpr int64_t INFL_SIGMA_PPM = 1'500;        ///< Chance move of the yearly inflation in one game day: 0.15% (one standard deviation).
+static constexpr int64_t INFL_REVERT_PPM_PER_DAY = 10'000; ///< Every game day 1% of the gap to INFL_START_PPM is closed.
+static constexpr int64_t POLICY_MIN_PPM = 0;            ///< The yearly policy rate of a zone stays between 0 ...
+static constexpr int64_t POLICY_MAX_PPM = 350'000;      ///< ... and 35%.
+static constexpr int64_t POLICY_START_PPM = 30'000;     ///< A new zone starts with 3% a year.
+static constexpr int64_t POLICY_OVER_INFL_PPM = 10'000; ///< The bank aims for the inflation + 1.0%.
+static constexpr int64_t POLICY_REVERT_PPM_PER_DAY = 20'000; ///< Every game day 2% of the gap to the aim is closed.
+static constexpr int64_t DAYS_PER_YEAR = 365;           ///< Banknotes earn the policy rate / this every game day.
+static constexpr int64_t EXCHANGE_SPREAD_PPM = 3'000;   ///< Buying or selling banknotes costs 0.3%.
+static constexpr int64_t TRADE_STEP_PPM_PER_UNIT = 100; ///< A terminal trade of banknotes moves the rate by this much per unit of volume ...
+static constexpr int64_t TRADE_STEP_MAX_PPM = 20'000;   ///< ... but never more than 2% in one trade.
+
 struct Pt {
 	int64_t x = 0;
 	int64_t y = 0;
@@ -120,6 +136,58 @@ inline int64_t FeeAmount(int64_t income, int64_t fee_ppm)
 {
 	if (income <= 0 || fee_ppm <= 0) return 0;
 	return income / PPM * fee_ppm + income % PPM * fee_ppm / PPM;
+}
+
+/** One game day of the yearly inflation of a zone: a chance move, then the pull to INFL_START_PPM. */
+inline int64_t NextInflation(uint64_t seed, int zone, int64_t day, int64_t infl)
+{
+	const int64_t g = goldmath::Gauss(goldmath::Hash(seed, static_cast<uint64_t>(day), 0x1F10 + static_cast<uint64_t>(zone)));
+	int64_t v = infl + g * INFL_SIGMA_PPM / PPM;
+	v += (INFL_START_PPM - v) * INFL_REVERT_PPM_PER_DAY / PPM;
+	return std::clamp<int64_t>(v, INFL_MIN_PPM, INFL_MAX_PPM);
+}
+
+/** One game day of the yearly policy rate of a zone: it moves towards the inflation + POLICY_OVER_INFL_PPM. */
+inline int64_t NextPolicy(int64_t policy, int64_t infl)
+{
+	const int64_t aim = std::clamp<int64_t>(infl + POLICY_OVER_INFL_PPM, POLICY_MIN_PPM, POLICY_MAX_PPM);
+	return std::clamp<int64_t>(policy + (aim - policy) * POLICY_REVERT_PPM_PER_DAY / PPM, POLICY_MIN_PPM, POLICY_MAX_PPM);
+}
+
+/** What banknotes earn in one game day: notes x policy / DAYS_PER_YEAR, without overflow. */
+inline int64_t DailyInterest(int64_t notes, int64_t policy_ppm)
+{
+	if (notes <= 0 || policy_ppm <= 0) return 0;
+	return (notes / PPM * policy_ppm + notes % PPM * policy_ppm / PPM) / DAYS_PER_YEAR;
+}
+
+/** Banknotes (units of the zone currency) that `money` buys at a rate (value of one note in money, in ppm), before the spread. */
+inline int64_t NotesForMoney(int64_t money, int64_t rate_ppm)
+{
+	if (money <= 0 || rate_ppm <= 0) return 0;
+	return money / rate_ppm * PPM + money % rate_ppm * PPM / rate_ppm;
+}
+
+/** Money that `notes` are worth at a rate, before the spread. */
+inline int64_t MoneyForNotes(int64_t notes, int64_t rate_ppm)
+{
+	if (notes <= 0 || rate_ppm <= 0) return 0;
+	return notes / PPM * rate_ppm + notes % PPM * rate_ppm / PPM;
+}
+
+/** An amount after the exchange spread of banknotes (EXCHANGE_SPREAD_PPM) is taken off. */
+inline int64_t AfterSpread(int64_t x)
+{
+	if (x <= 0) return 0;
+	return x / PPM * (PPM - EXCHANGE_SPREAD_PPM) + x % PPM * (PPM - EXCHANGE_SPREAD_PPM) / PPM;
+}
+
+/** The rate after a terminal trade of banknotes: a buy pushes it up, a sell down. */
+inline int64_t RateAfterTrade(int64_t rate_ppm, bool buy, int64_t volume)
+{
+	const int64_t step = std::min<int64_t>(TRADE_STEP_MAX_PPM, std::max<int64_t>(volume, 0) * TRADE_STEP_PPM_PER_UNIT);
+	const int64_t move = rate_ppm / PPM * step + rate_ppm % PPM * step / PPM;
+	return std::clamp<int64_t>(buy ? rate_ppm + move : rate_ppm - move, RATE_MIN_PPM, RATE_MAX_PPM);
 }
 
 } // namespace zonemath
