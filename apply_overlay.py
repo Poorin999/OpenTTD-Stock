@@ -1296,7 +1296,7 @@ def patch_industry_tile_draw(tree):
     transparent_expr = f"IsTransparencySet({transp.group(1)})" if transp else "false"
     hide = f" && !IsInvisibilitySet({invis.group(1)})" if invis else ""
     lines += ["\t\t\tDrawGroundSprite(own_ground, PAL_NONE);",
-              f"\t\t\tif (own_building != 0{hide}) AddSortableSpriteToDraw(own_building, PAL_NONE, ti->x, ti->y, 16, 16, 60, ti->z, {transparent_expr});",
+              f"\t\t\tif (own_building != 0{hide}) AddSortableSpriteToDraw(own_building, PAL_NONE, ti->x, ti->y, ti->z, SpriteBounds{{{{}}, {{16, 16, 60}}, {{}}}}, {transparent_expr});",
               "\t\t\treturn;", "\t\t}", "\t}"]
     block = "\n".join(lines) + "\n"
     pos = fm.end() + max(gm.end(), im.end())

@@ -23,6 +23,10 @@ enum class ValuableId : uint8_t {
 	Platinum,  ///< XPT: follows gold with its own cycle and drift (1 unit = 1 ounce).
 	Diamond,   ///< XDI: only loosely linked to gold, the most volatile (1 unit = 1 carat).
 	Oil,       ///< XTI: crude oil, NOT linked to gold; it has a stock of its own (oil wells add to it) and sets the fuel cost of vehicles (1 unit = 1 barrel).
+	Zone1,     ///< Banknotes of money zone 1: the price is the real exchange rate of the zone (zone_market.h), a long / short on it is a bet on the rate.
+	Zone2,     ///< Banknotes of money zone 2.
+	Zone3,     ///< Banknotes of money zone 3.
+	Zone4,     ///< Banknotes of money zone 4.
 	End,       ///< End marker.
 };
 
@@ -35,12 +39,9 @@ static constexpr size_t STOCK_FIRST_VALUABLE = MAX_COMPANIES;
 /** Number of symbols of the terminal: the companies, then the valuables. Arrays of the market have this size. */
 static constexpr size_t STOCK_SYMBOLS = MAX_COMPANIES + VALUABLE_COUNT;
 
-/**
- * Banknote symbols: a valuable index that stands for the banknotes of a money zone (see zone_market.h). The valuables list has no banknote entries yet,
- * so these say "no" for every index; when ZoneN banknote entries are added to ValuableId, change ONLY these two functions.
- */
-constexpr bool IsCurrencyValuable([[maybe_unused]] size_t valuable_index) { return false; }
-constexpr int CurrencyValuableZone([[maybe_unused]] size_t valuable_index) { return -1; }
+/** Banknote symbols: a valuable index (symbol - STOCK_FIRST_VALUABLE) that stands for the banknotes of a money zone (see zone_market.h). */
+constexpr bool IsCurrencyValuable(size_t valuable_index) { return valuable_index >= static_cast<size_t>(ValuableId::Zone1) && valuable_index < VALUABLE_COUNT; }
+constexpr int CurrencyValuableZone(size_t valuable_index) { return static_cast<int>(valuable_index) - static_cast<int>(ValuableId::Zone1); }
 
 /** Whether a symbol number is a valuable (the number is not checked against anything else). */
 inline bool IsValuableSymbol(size_t symbol)

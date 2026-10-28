@@ -12,6 +12,7 @@
 #include "stock_base.h"
 #include "gold_reserve.h"
 #include "market_events.h"
+#include "zone_market.h"
 #include "settings_type.h"
 #include "game_time/game_time_manager.h"
 #include "timer/timer.h"
@@ -31,6 +32,11 @@ static constexpr ValuableInfo _valuable_info[VALUABLE_COUNT] = {
 	{"XPT", "Platinum", "1 oz",    1000,   800'000, 10,  3'000, 15,   80'000,  450,   180'000,     9'000, 3'000},
 	{"XDI", "Diamonds", "1 carat",  600,   350'000,  5,  6'000, 10,  120'000,  700,   250'000,    10'000, 2'000},
 	{"XTI", "Oil",      "1 barrel",  60,         0, 10,  2'000, 15,  150'000,  420,   200'000,    12'000, 3'000},
+	/* Banknotes: price = anchor x the real rate of the zone, so no gold link, cycle, drift or noise of their own (no random number is drawn for them). */
+	{"ZN1", "Banknotes", "100 notes", 100,       0, 10,  3'000, 10,        0,    1,          0,         0,     0},
+	{"ZN2", "Banknotes", "100 notes", 100,       0, 10,  3'000, 10,        0,    1,          0,         0,     0},
+	{"ZN3", "Banknotes", "100 notes", 100,       0, 10,  3'000, 10,        0,    1,          0,         0,     0},
+	{"ZN4", "Banknotes", "100 notes", 100,       0, 10,  3'000, 10,        0,    1,          0,         0,     0},
 };
 
 const ValuableInfo &ValuablesManager::Info(size_t index)
@@ -204,6 +210,14 @@ static int64_t SmoothWave(int64_t t_now, int64_t phase, int64_t period)
 int64_t ValuablesManager::GetBaseFixed(size_t index) const
 {
 	if (index >= VALUABLE_COUNT) return 0;
+
+	/* Banknotes: the price is the real rate of the zone; 0 while the zones do not exist yet. */
+	if (IsCurrencyValuable(index)) {
+		const int zone = CurrencyValuableZone(index);
+		if (zone >= _zone_market.count) return 0;
+		return std::max<int64_t>(STOCK_MIN_PRICE * STOCK_PRICE_SCALE, Info(index).anchor * STOCK_PRICE_SCALE * _zone_market.zones[zone].rate_ppm / PPM);
+	}
+
 	const int64_t gold = _gold_reserve.GetPriceCents();
 	if (gold <= 0) return 0;
 	const ValuableInfo &info = Info(index);

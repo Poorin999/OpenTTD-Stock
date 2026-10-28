@@ -10,6 +10,7 @@
 #include "stdafx.h"
 #include "custom_industry_gfx.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
@@ -5225,7 +5226,7 @@ bool GetCustomIndustryPicture(uint32_t sprite, CustomIndustryPicture &out)
 	const int n = static_cast<int>(rel / CUSTOM_INDUSTRY_PARTS);
 	const int part = static_cast<int>(rel % CUSTOM_INDUSTRY_PARTS);
 	Decode(n);
-	std::memset(_piece, 0, sizeof(_piece));
+	std::fill(std::begin(_piece), std::end(_piece), static_cast<uint8_t>(0));
 	out.rgb = PICTURES[n].palette;
 	out.pixels = _piece;
 	if (part < 4) {
