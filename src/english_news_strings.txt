@@ -14,3 +14,7 @@ STR_MARKET_NEWS_CARGO_TIP                                       :{BLACK}Show wha
 STR_OIL_MARKET_CAPTION                                          :Oil Market
 STR_MARKET_NEWS_OIL_BUTTON                                      :Oil Market
 STR_MARKET_NEWS_OIL_TIP                                         :{BLACK}Show the oil price, the oil stock, what fuel costs the vehicles and the latest oil news
+STR_ZONE_MAP_CAPTION                                            :Zones Map
+STR_MARKET_NEWS_ZONES_BUTTON                                    :Zones
+STR_MARKET_NEWS_ZONES_TIP                                       :{BLACK}Show the map divided into the money zones, coloured, with the borders as lines
+STR_HQ_GATE_CAPTION                                             :Place your Headquarters

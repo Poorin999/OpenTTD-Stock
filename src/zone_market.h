@@ -28,6 +28,8 @@ struct ZoneMarket {
 	int count = 0; ///< Number of zones, 0 = not set up yet (the first game day makes them).
 
 	void Reset();
+	bool MakeZones();          ///< Choose the capitals from the towns of the map when there are no zones yet. True when zones exist afterwards.
+	void RefreshPopulation();  ///< The people of every zone (and the total), made again.
 	void UpdateDaily();
 	int ZoneOfTile(TileIndex tile) const;
 	int64_t FeePpmBetween(int from, int to) const;

@@ -25,6 +25,7 @@
 #include "market_events.h"
 #include "cargo_market.h"
 #include "zone_market.h"
+#include "zone_map_gui.h"
 #include "town.h"
 #include "gold_reserve.h"
 #include "town_treasury.h"
@@ -118,7 +119,22 @@ static bool ConStockSkip(std::span<std::string_view> argv)
 	return true;
 }
 
-/** Print the price of every cargo: what a unit pays now against the normal pay, and the deliveries behind it. Read only, works always. */
+/** Open the zones window: the map in coloured zones with the borders as lines. */
+static bool ConZonesMap(std::span<std::string_view> argv)
+{
+	if (!argv.empty() && argv.size() >= 2 && argv[1] == "?") {
+		IConsolePrint(CC_HELP, "Open the zones window: the map divided into the money zones, one colour per zone, the borders as lines. A click on the map scrolls the main view there.");
+		return true;
+	}
+	if (_network_dedicated) {
+		IConsolePrint(CC_ERROR, "There is no window on a dedicated server.");
+		return true;
+	}
+	ShowZoneMapWindow();
+	return true;
+}
+
+/** Print the money zones: capital, currency, rate, people and fees. Read only, works always. */
 static bool ConZones(std::span<std::string_view> argv)
 {
 	if (!argv.empty() && argv.size() >= 2 && argv[1] == "?") {
@@ -275,6 +291,7 @@ void RegisterStockConsoleCommands()
 	IConsole::CmdRegister("stock_event", ConStockEvent);
 	IConsole::CmdRegister("cargo_prices", ConCargoPrices);
 	IConsole::CmdRegister("zones", ConZones);
+	IConsole::CmdRegister("zones_map", ConZonesMap);
 	IConsole::CmdRegister("gold_factors", ConGoldFactors);
 	IConsole::CmdRegister("citizen_gold", ConCitizenGold);
 }

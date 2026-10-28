@@ -14,6 +14,9 @@
 #include "company_base.h"
 #include "settings_type.h"
 #include "game_time/game_time_manager.h"
+#include "openttd.h"
+#include "timer/timer.h"
+#include "timer/timer_game_tick.h"
 #include "safeguards.h"
 
 ZoneMarket _zone_market;
@@ -55,38 +58,49 @@ int64_t ZoneMarket::FeePpmBetween(int from, int to) const
 	return zonemath::FeePpm(this->zones[from].rate_ppm, this->zones[to].rate_ppm);
 }
 
-void ZoneMarket::UpdateDaily()
+bool ZoneMarket::MakeZones()
 {
-	if (this->count == 0) {
-		/* The first game day: the zones are made from the towns of the map. */
-		std::vector<zonemath::Pt> pts;
-		std::vector<int64_t> pop;
-		std::vector<TileIndex> tiles;
-		for (const Town *t : Town::Iterate()) {
-			pts.push_back(PointOf(t->xy));
-			pop.push_back(t->cache.population);
-			tiles.push_back(t->xy);
-		}
-		const std::vector<int> caps = zonemath::PickCapitals(pts, pop, zonemath::WANT_ZONES);
-		if (caps.size() < 2) return; // One zone is no zone: nothing to charge. Try again on a later day (towns may grow).
-		for (size_t i = 0; i < caps.size(); i++) {
-			this->zones[i] = {};
-			this->zones[i].capital = tiles[caps[i]];
-		}
-		this->count = static_cast<int>(caps.size());
+	if (this->count > 0) return true;
+	/* The zones are made from the towns of the map. */
+	std::vector<zonemath::Pt> pts;
+	std::vector<int64_t> pop;
+	std::vector<TileIndex> tiles;
+	for (const Town *t : Town::Iterate()) {
+		pts.push_back(PointOf(t->xy));
+		pop.push_back(t->cache.population);
+		tiles.push_back(t->xy);
 	}
+	const std::vector<int> caps = zonemath::PickCapitals(pts, pop, zonemath::WANT_ZONES);
+	if (caps.size() < 2) return false; // One zone is no zone: nothing to charge. Try again later (towns may grow).
+	for (size_t i = 0; i < caps.size(); i++) {
+		this->zones[i] = {};
+		this->zones[i].capital = tiles[caps[i]];
+	}
+	this->count = static_cast<int>(caps.size());
+	this->RefreshPopulation();
+	return true;
+}
 
-	/* The people of every zone, the level of every rate, one step of every rate. */
+void ZoneMarket::RefreshPopulation()
+{
 	std::vector<zonemath::Pt> caps;
 	for (int i = 0; i < this->count; i++) caps.push_back(PointOf(this->zones[i].capital));
 	for (int i = 0; i < this->count; i++) this->zones[i].population = 0;
-	int64_t total = 0;
 	for (const Town *t : Town::Iterate()) {
 		const int z = zonemath::ZoneOf(PointOf(t->xy), caps);
-		if (z < 0) continue;
-		this->zones[z].population += t->cache.population;
-		total += t->cache.population;
+		if (z >= 0) this->zones[z].population += t->cache.population;
 	}
+}
+
+void ZoneMarket::UpdateDaily()
+{
+	/* Normally the zones exist long before the first game day (see the tick timer below); this is only the safety net. */
+	if (!this->MakeZones()) return;
+
+	/* The people of every zone, the level of every rate, one step of every rate. */
+	this->RefreshPopulation();
+	int64_t total = 0;
+	for (int i = 0; i < this->count; i++) total += this->zones[i].population;
 	const int64_t day = static_cast<int64_t>(GameTimeManager::Get().GetSnapshot().total_minutes / GameTimeManager::MINUTES_PER_DAY);
 	for (int i = 0; i < this->count; i++) {
 		const int64_t level = zonemath::LevelPpm(this->zones[i].population, total, this->count);
@@ -107,5 +121,12 @@ void ZoneFeeOnDelivery(CompanyID owner, int64_t income, StationID source, Statio
 	ChargeZoneFee(owner, fee);
 	_zone_market.zones[to].fees += fee;
 }
+
+/** Make the zones as soon as the game runs (a new game, or an old savegame that has none), not on the first game day: every 8 ticks while there are none. */
+static const IntervalTimer<TimerGameTick> _zone_market_make({TimerGameTick::Priority::NONE, 8}, [](auto)
+{
+	if (_game_mode != GM_NORMAL || _zone_market.count > 0) return;
+	_zone_market.MakeZones();
+});
 
 static const GameTimeSubscription _zone_market_daily(GameTimeEvent::Day, [](const GameTimeSnapshot &) { _zone_market.UpdateDaily(); }, 26);

@@ -56,6 +56,11 @@ enum CentralBankWidgets : WidgetID {
 	WID_CP_PERIOD,          ///< Dropdown of the cargo prices window: the period of the change and the trend.
 	WID_CP_FOOT,            ///< Footnotes of the cargo prices window.
 	WID_CP_CLOSE,           ///< Button of the cargo prices window: close the window.
+	WID_MN_ZONES,           ///< Button of the market news window: opens the zones map window.
+	WID_ZM_CAPTION,         ///< Caption of the zones map window.
+	WID_HG_CAPTION,         ///< Caption of the headquarters gate window.
+	WID_HG_PANEL,           ///< Panel of the headquarters gate window.
+	WID_ZM_PANEL,           ///< Panel of the zones map window: the map in coloured zones, the borders as lines and the legend.
 };
 
 #endif /* WIDGETS_CENTRAL_BANK_WIDGET_H */
