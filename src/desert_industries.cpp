@@ -13,6 +13,7 @@
 #include "settings_type.h"
 #include "landscape_type.h"
 #include "debug.h"
+#include "custom_industry_gfx.h"
 
 #include "table/strings.h"
 
@@ -40,6 +41,11 @@
  * rubber, copper ore and wood. A tile copy accepts "what its industry accepts" (special flag AcceptsAllCargo) and is drawn like the original tile
  * (grf_prop.subst_id), so it looks the same. The copies use the LAST tile slots (the animation of the original tile is lost).
  * Raw industries accept nothing and keep the original tiles.
+ *
+ * OWN PICTURES (custom_industry_gfx.cpp, make_industry_sprites.py): every desert industry is a 2 x 2 tile building with its own picture. All 21 use the
+ * SAME four tile specs ("position 0 .. 3", copies of a base tile with the flag AcceptsAllCargo, so a station asks them and gets what the industry
+ * accepts); which picture a tile draws is decided at draw time from the tile position and the TYPE of the industry (DesertIndustryTilePictures, called from
+ * DrawTile_Industry, hooked by patch_industry_tile_draw in apply_overlay.py). Industry n of the table has the type NUM_INDUSTRYTYPES - 1 - n.
  *
  * The Fishing Grounds of the NewGRF stood on water. The Sub-tropical graphics have no sea industry (the oil rig sprites belong to Temperate), so the
  * fish line starts with a FISH FARM on land (it takes the look of a plantation).
@@ -190,6 +196,9 @@ static const IndustrySpec *FindSource(DesertSource source)
 	return found;
 }
 
+/** The first of the four own tile specs ("position 0 .. 3"), 0 = none (then the processors keep the old copied tiles). */
+static int _own_tile_first = 0;
+
 /** State of one run: which original tile was copied to which new tile. */
 struct TileState {
 	std::map<uint8_t, uint8_t> map;
@@ -285,7 +294,25 @@ static void ApplyEntry(IndustrySpec &dst, const DesertIndustry &e, TileState &st
 			if constexpr (requires { s.production_rate[0] = e.rate; }) s.production_rate[0] = e.rate;
 		}
 		if constexpr (HasTileGfx<std::remove_reference_t<decltype(s)>>) {
-			if (accepts) {
+			if (_own_tile_first != 0) {
+				/* The own picture: one layout of 2 x 2 tiles (position p stands at x = p % 2, y = p / 2). */
+				if (!s.layouts.empty() && !s.layouts.front().empty()) {
+					using Layout = std::remove_cvref_t<decltype(s.layouts.front())>;
+					const auto proto = s.layouts.front().front();
+					Layout layout;
+					for (int p = 0; p < 4; p++) {
+						auto tile = proto;
+						if constexpr (requires { tile.ti.x = 0; tile.ti.y = 0; }) {
+							tile.ti.x = p % 2;
+							tile.ti.y = p / 2;
+						}
+						tile.gfx = static_cast<uint8_t>(_own_tile_first + p);
+						layout.push_back(tile);
+					}
+					s.layouts.clear();
+					s.layouts.push_back(layout);
+				}
+			} else if (accepts) {
 				for (auto &layout : s.layouts) {
 					for (auto &tile : layout) tile.gfx = CloneTile(static_cast<uint8_t>(tile.gfx), st);
 				}
@@ -294,7 +321,40 @@ static void ApplyEntry(IndustrySpec &dst, const DesertIndustry &e, TileState &st
 	}(dst);
 }
 
+/** The gfx number of the first tile of the layout of an industry spec, -1 when there is none. */
+static int FirstTileGfx(const IndustrySpec &spec)
+{
+	int found = -1;
+	[&](const auto &s) {
+		if constexpr (HasTileGfx<std::remove_reference_t<decltype(s)>>) {
+			if (!s.layouts.empty() && !s.layouts.front().empty()) found = static_cast<int>(s.layouts.front().front().gfx);
+		}
+	}(spec);
+	return found;
+}
+
 } // namespace
+
+/**
+ * The pictures of one tile of a desert industry (called by DrawTile_Industry, see patch_industry_tile_draw).
+ * @param gfx Tile number (IndustryGfx) of the tile.
+ * @param industry_type Type of the industry that the tile belongs to.
+ * @param stage Construction stage 0 .. 3 (3 = finished).
+ * @param ground Sprite of the ground piece.
+ * @param building Sprite of the building piece (only on the front tile, only when the industry is finished), else 0.
+ * @return True when this is an own tile (the caller draws these sprites instead of the old picture).
+ */
+bool DesertIndustryTilePictures(uint8_t gfx, uint8_t industry_type, uint8_t stage, uint32_t &ground, uint32_t &building)
+{
+	if (_own_tile_first == 0 || gfx < _own_tile_first || gfx >= _own_tile_first + 4) return false;
+	if (industry_type >= NUM_INDUSTRYTYPES) return false;
+	const uint32_t n = static_cast<uint32_t>(NUM_INDUSTRYTYPES) - 1 - industry_type;
+	if (n >= CUSTOM_INDUSTRY_COUNT) return false;
+	const uint32_t position = static_cast<uint32_t>(gfx - _own_tile_first);
+	ground = CustomIndustrySprite(n, position);
+	building = (position == 3 && stage >= 3) ? CustomIndustrySprite(n, 4) : 0;
+	return true;
+}
 
 /** Called at the end of ResetIndustries(). */
 void ApplyDesertIndustries()
@@ -302,6 +362,21 @@ void ApplyDesertIndustries()
 	if (_settings_game.game_creation.landscape != LandscapeType::Tropic) return;
 
 	TileState st;
+	_own_tile_first = 0;
+	/* The four own tile specs: copies of a tile of the first processor that exists, accepting what their industry accepts. */
+	if (const IndustrySpec *proto_source = FindSource(DesertSource::Factory); proto_source != nullptr) {
+		const int original = FirstTileGfx(*proto_source);
+		if (original >= 0 && original < static_cast<int>(NEW_INDUSTRYTILEOFFSET) && st.next - 3 >= static_cast<int>(NEW_INDUSTRYTILEOFFSET)) {
+			const int first = st.next - 3;
+			for (int p = 0; p < 4; p++) {
+				_industry_tile_specs[first + p] = _industry_tile_specs[original];
+				MakeAcceptAllTile(_industry_tile_specs[first + p], static_cast<uint8_t>(original), st);
+			}
+			st.next -= 4;
+			_own_tile_first = first;
+		}
+	}
+	if (_own_tile_first == 0) Debug(misc, 0, "Desert industries: no free tile slots, the own pictures are not used");
 	int placed = 0;
 	const size_t count = std::size(_desert_industries);
 	for (size_t n = 0; n < count; n++) {

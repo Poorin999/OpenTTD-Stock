@@ -43,7 +43,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "tax.h": "src", "tax.cpp": "src", "zone_market.h": "src", "zone_market.cpp": "src", "zone_market_math.h": "src", "zone_map_gui.h": "src", "zone_borders.h": "src", "zone_borders.cpp": "src", "hq_gate.h": "src", "hq_gate.cpp": "src", "zone_permit.h": "src", "zone_permit.cpp": "src", "zone_permit_math.h": "src", "zone_map_gui.cpp": "src",
     "cargo_market.h": "src", "cargo_market.cpp": "src", "CargoMarketMath.h": "src",
     "town_treasury.h": "src", "town_treasury.cpp": "src", "citizen_gold.h": "src", "citizen_terminal.h": "src", "gold_market_math.h": "src", "oil_market_math.h": "src", "oil_market_gui.h": "src", "oil_market_gui.cpp": "src",
-    "gold_reserve.h": "src", "gold_reserve.cpp": "src", "gold_industry.cpp": "src", "firs_desert_cargo.cpp": "src", "custom_cargo_icons.cpp": "src", "custom_cargo_icons.h": "src", "english_firs_strings.txt": "src", "desert_industries.cpp": "src", "english_desert_industries_strings.txt": "src",
+    "gold_reserve.h": "src", "gold_reserve.cpp": "src", "gold_industry.cpp": "src", "firs_desert_cargo.cpp": "src", "custom_cargo_icons.cpp": "src", "custom_cargo_icons.h": "src", "custom_industry_gfx.cpp": "src", "custom_industry_gfx.h": "src", "english_firs_strings.txt": "src", "desert_industries.cpp": "src", "english_desert_industries_strings.txt": "src",
     "valuables.h": "src", "valuables.cpp": "src",
     "gold_panel.h": "src", "gold_panel.cpp": "src", "gold_buy_gui.cpp": "src",
     "town_finance_gui.h": "src", "town_finance_gui.cpp": "src",
@@ -75,7 +75,7 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_ZONE_EXCHANGE", "exchange cash for banknotes of a money zone, or back"),
     ("CMD_ZONE_PERMIT", "buy a building permit for a foreign money zone"),
 ]
-NEW_SOURCES = ["zone_borders.cpp", "zone_borders.h", "hq_gate.cpp", "hq_gate.h", "zone_permit.cpp", "zone_permit.h", "zone_map_gui.cpp", "zone_map_gui.h", "zone_market.cpp", "zone_market.h", "zone_market_math.h", "wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "oil_market_math.h", "oil_market_gui.cpp", "oil_market_gui.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "firs_desert_cargo.cpp", "custom_cargo_icons.cpp", "custom_cargo_icons.h", "desert_industries.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "company_info_gui.cpp", "company_info_gui.h", "company_info_math.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
+NEW_SOURCES = ["zone_borders.cpp", "zone_borders.h", "hq_gate.cpp", "hq_gate.h", "zone_permit.cpp", "zone_permit.h", "zone_map_gui.cpp", "zone_map_gui.h", "zone_market.cpp", "zone_market.h", "zone_market_math.h", "wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "oil_market_math.h", "oil_market_gui.cpp", "oil_market_gui.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "firs_desert_cargo.cpp", "custom_cargo_icons.cpp", "custom_cargo_icons.h", "custom_industry_gfx.cpp", "custom_industry_gfx.h", "desert_industries.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "company_info_gui.cpp", "company_info_gui.h", "company_info_math.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
                "RetailMath.h", "RetailMarketManager.h", "RetailMarketManager.cpp",
                "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]
@@ -1149,6 +1149,165 @@ def patch_desert_industries(tree):
     print("industry_cmd.cpp: desert industries hook added")
 
 
+CUSTOM_INDUSTRY_GFX_MARKER = "CUSTOM_INDUSTRY_GFX_PATCH"
+
+
+def patch_custom_industry_gfx(tree):
+    """The own pictures of the desert industries (custom_industry_gfx.cpp) as sprites: like the cargo icons (patch_custom_icons) spritecache.cpp builds the
+    sprite numbers 0xF10000 and up from the data of the mod, in true colour (RGB + alpha) for the 32bpp blitters and in grey numbers for the 8bpp blitter.
+    It must run AFTER patch_custom_icons (it uses the same anchors). Nothing is written when an anchor is missing."""
+    p = tree / "src" / "spritecache.cpp"
+    if not p.is_file():
+        print("WARNING: spritecache.cpp not found, the own industry pictures are not added")
+        return
+    t, crlf = _read_lf(p)
+    if CUSTOM_INDUSTRY_GFX_MARKER in t:
+        print("spritecache.cpp: own industry pictures already there")
+        return
+    if CUSTOM_ICON_MARKER not in t:
+        print("WARNING: the own cargo icons are not in spritecache.cpp (patch_custom_icons did not run), the own industry pictures are not added")
+        return
+    m = f"/* {CUSTOM_INDUSTRY_GFX_MARKER} */"
+    inc_anchor = '#include "custom_cargo_icons.h" /* ' + CUSTOM_ICON_MARKER + " */\n"
+    exist_anchor = "bool SpriteExists(SpriteID id)\n{\n"
+    reset_anchor = "void GfxInitSpriteMem()\n{\n"
+    clear_anchor = "void GfxClearSpriteCache()\n{\n"
+    raw_anchor = "void *GetRawSprite(SpriteID sprite, SpriteType type, SpriteAllocator *allocator, SpriteEncoder *encoder)\n{\n"
+    for a in (inc_anchor, exist_anchor, reset_anchor, clear_anchor, raw_anchor):
+        if t.count(a) != 1:
+            print(f"WARNING: anchor not found exactly once in spritecache.cpp ({a.strip()[:50]}), the own industry pictures are not added")
+            return
+    build = f"""{m}
+/** The own industry pictures of the mod once they are encoded for the blitter (cleared with the sprite cache). */
+static std::map<SpriteID, std::unique_ptr<std::byte[]>> _custom_industry_cache;
+
+/** Build the encoded sprite of a piece of an own industry picture. True colour for the 32bpp blitters, grey palette numbers for the 8bpp blitter. */
+static void *BuildCustomIndustry(const CustomIndustryPicture &pic, SpriteAllocator &allocator, SpriteEncoder *encoder)
+{{
+	if (encoder == nullptr) encoder = BlitterFactory::GetCurrentBlitter();
+	const bool palette_only = BlitterFactory::GetCurrentBlitter()->GetScreenDepth() == 8;
+
+	SpriteLoader::SpriteCollection sprite;
+	SpriteLoader::Sprite &root = sprite[ZoomLevel::Min];
+	root.width = static_cast<uint16_t>(pic.width);
+	root.height = static_cast<uint16_t>(pic.height);
+	root.x_offs = static_cast<int16_t>(pic.x_offs);
+	root.y_offs = static_cast<int16_t>(pic.y_offs);
+	if (palette_only) {{
+		root.colours = {{SpriteComponent::Palette}};
+	}} else {{
+		root.colours = {{SpriteComponent::RGB, SpriteComponent::Alpha}};
+	}}
+	root.AllocateData(ZoomLevel::Min, static_cast<size_t>(pic.width) * pic.height);
+	for (size_t i = 0; i < static_cast<size_t>(pic.width) * pic.height; i++) {{
+		const uint8_t v = pic.pixels[i];
+		root.data[i].a = v != 0 ? 0xFF : 0x00;
+		if (v == 0) continue;
+		root.data[i].r = pic.rgb[3 * v];
+		root.data[i].g = pic.rgb[3 * v + 1];
+		root.data[i].b = pic.rgb[3 * v + 2];
+		if (palette_only) {{
+			const int lum = (pic.rgb[3 * v] * 3 + pic.rgb[3 * v + 1] * 6 + pic.rgb[3 * v + 2]) / 10; // 0 .. 255
+			root.data[i].m = static_cast<uint8_t>(1 + lum * 14 / 255);                                   // 1 .. 15: the grey numbers of the palette
+		}}
+	}}
+
+	ZoomLevels avail;
+	avail.Set(ZoomLevel::Min);
+	if (!ResizeSprites(sprite, avail, encoder)) return nullptr;
+	return encoder->Encode(SpriteType::Normal, sprite, allocator);
+}}
+
+"""
+    t = t.replace(inc_anchor, inc_anchor + '#include "custom_industry_gfx.h" ' + m + "\n", 1)
+    t = t.replace(exist_anchor, exist_anchor + f"\tif (IsCustomIndustrySprite(id)) return false; {m}\n", 1)
+    t = t.replace(reset_anchor, reset_anchor + f"\t_custom_industry_cache.clear(); {m}\n", 1)
+    t = t.replace(clear_anchor, clear_anchor + f"\t_custom_industry_cache.clear(); {m}\n", 1)
+    hook = f"""\t/* {CUSTOM_INDUSTRY_GFX_MARKER}: an own industry picture of the mod. */
+	if (IsCustomIndustrySprite(sprite) && type == SpriteType::Normal) {{
+		CustomIndustryPicture pic;
+		if (GetCustomIndustryPicture(sprite, pic)) {{
+			if (allocator != nullptr || encoder != nullptr) {{
+				UniquePtrSpriteAllocator own_allocator;
+				SpriteAllocator &use = allocator != nullptr ? *allocator : own_allocator;
+				void *data = BuildCustomIndustry(pic, use, encoder);
+				if (data != nullptr) return data;
+			}} else {{
+				auto it = _custom_industry_cache.find(sprite);
+				if (it == _custom_industry_cache.end()) {{
+					UniquePtrSpriteAllocator cache_allocator;
+					if (BuildCustomIndustry(pic, cache_allocator, nullptr) != nullptr) it = _custom_industry_cache.emplace(sprite, std::move(cache_allocator.data)).first;
+				}}
+				if (it != _custom_industry_cache.end()) return static_cast<void *>(it->second.get());
+			}}
+		}}
+		sprite = SPR_IMG_QUERY; // Something went wrong: the red question mark, like for every missing sprite.
+	}}
+
+"""
+    t = t.replace(raw_anchor, raw_anchor + hook, 1)
+    # BuildCustomIndustry goes right after the block of BuildCustomIcon (before the HandleInvalidSpriteRequest comment, like the icons).
+    rm = re.search(r"^/\*\*\n \* Handles the case when a sprite of different type", t, re.M)
+    if not rm:
+        print("WARNING: HandleInvalidSpriteRequest comment not found in spritecache.cpp, the own industry pictures are not added")
+        return
+    t = t[:rm.start()] + build + t[rm.start():]
+    _write_like(p, t, crlf)
+    print("spritecache.cpp: own industry pictures added")
+
+
+INDUSTRY_TILE_DRAW_MARKER = "INDUSTRY_TILE_DRAW_PATCH"
+
+
+def patch_industry_tile_draw(tree):
+    """Draws the own tiles of the desert industries (desert_industries.cpp, DesertIndustryTilePictures) in DrawTile_Industry() of industry_cmd.cpp:
+    right after the lines that make `gfx` and `ind`, one block that draws the ground piece (and the building piece on the front tile) and returns.
+    The names that the block needs (flat slope, foundation, transparency) are READ from the function itself, so they fit the OpenTTD version that is built.
+    Nothing is written when the function is not found."""
+    p = tree / "src" / "industry_cmd.cpp"
+    if not p.is_file():
+        print("WARNING: industry_cmd.cpp not found, the own industry pictures are not drawn")
+        return
+    t, crlf = _read_lf(p)
+    if INDUSTRY_TILE_DRAW_MARKER in t:
+        print("industry_cmd.cpp: own industry tile drawing already there")
+        return
+    fm = re.search(r"^static void DrawTile_Industry\(TileInfo \*ti\)\n\{\n", t, re.M)
+    if not fm:
+        print("WARNING: DrawTile_Industry() not found in industry_cmd.cpp, the own industry pictures are not drawn")
+        return
+    end = t.find("\n}\n", fm.end())
+    body = t[fm.end():end]
+    gm = re.search(r"^\tIndustryGfx gfx = GetIndustryGfx\(ti->tile\);\n", body, re.M)
+    im = re.search(r"^\tIndustry \*ind = Industry::GetByTile\(ti->tile\);\n", body, re.M)
+    if not gm or not im:
+        print("WARNING: the lines 'IndustryGfx gfx = ...' and 'Industry *ind = ...' were not found in DrawTile_Industry(), the own industry pictures are not drawn")
+        return
+    flat = re.search(r"ti->tileh != ([A-Za-z_:]+)\)", body)
+    found = re.search(r"DrawFoundation\(ti, ([A-Za-z_:]+)\)", body)
+    transp = re.search(r"IsTransparencySet\(([A-Za-z_:]+)\)", body)
+    invis = re.search(r"IsInvisibilitySet\(([A-Za-z_:]+)\)", body)
+    flat_tok = flat.group(1) if flat else "SLOPE_FLAT"
+    lines = [f"\t{{ /* {INDUSTRY_TILE_DRAW_MARKER} */",
+             "\t\tuint32_t own_ground = 0, own_building = 0;",
+             "\t\tif (DesertIndustryTilePictures(gfx, ind->type, GetIndustryConstructionStage(ti->tile), own_ground, own_building)) {"]
+    if found:
+        lines.append(f"\t\t\tif (ti->tileh != {flat_tok}) DrawFoundation(ti, {found.group(1)});")
+    transparent_expr = f"IsTransparencySet({transp.group(1)})" if transp else "false"
+    hide = f" && !IsInvisibilitySet({invis.group(1)})" if invis else ""
+    lines += ["\t\t\tDrawGroundSprite(own_ground, PAL_NONE);",
+              f"\t\t\tif (own_building != 0{hide}) AddSortableSpriteToDraw(own_building, PAL_NONE, ti->x, ti->y, 16, 16, 60, ti->z, {transparent_expr});",
+              "\t\t\treturn;", "\t\t}", "\t}"]
+    block = "\n".join(lines) + "\n"
+    pos = fm.end() + max(gm.end(), im.end())
+    t = t[:pos] + block + t[pos:]
+    t = t[:fm.start()] + f"bool DesertIndustryTilePictures(uint8_t gfx, uint8_t industry_type, uint8_t stage, uint32_t &ground, uint32_t &building); /* {INDUSTRY_TILE_DRAW_MARKER}: desert_industries.cpp */\n\n" + t[fm.start():]
+    if not found:
+        print("WARNING: DrawFoundation() not found in DrawTile_Industry(): the own pictures are drawn on flat tiles only (a tile on a slope shows the old picture)")
+    _write_like(p, t, crlf)
+    print("industry_cmd.cpp: own industry tile drawing added")
+
+
 COMPANY_YEAR_MARKER = "GAME_COMPANY_YEAR_PATCH"
 
 
@@ -1312,8 +1471,10 @@ def main(tree):
     patch_gold_cargo(tree)
     patch_firs_desert_cargo(tree)
     patch_custom_icons(tree)
+    patch_custom_industry_gfx(tree)
     patch_gold_industries(tree)
     patch_desert_industries(tree)
+    patch_industry_tile_draw(tree)
     patch_console_file(tree)
     for name, folder in FILES.items():
         src = find(name, folder)
