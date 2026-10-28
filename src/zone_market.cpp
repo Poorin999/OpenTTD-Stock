@@ -12,6 +12,7 @@
 #include "town.h"
 #include "map_func.h"
 #include "company_base.h"
+#include "company_func.h"
 #include "settings_type.h"
 #include "game_time/game_time_manager.h"
 #include "openttd.h"
@@ -23,6 +24,9 @@ ZoneMarket _zone_market;
 
 static const char *const ZONE_CURRENCY_NAMES[zonemath::MAX_ZONES] = {"THB", "USD", "CNY", "RUB"};
 static const char *const ZONE_CURRENCY_SYMBOLS[zonemath::MAX_ZONES] = {"THB", "USD", "CNY", "RUB"};
+
+/** The tax level of each zone at the start of a new game, in percent of the base rates (tax.h). Change here and build again; the console command zone_tax changes it in a running game. */
+static constexpr int64_t ZONE_TAX_DEFAULT_PERCENT[zonemath::MAX_ZONES] = {100, 80, 120, 140};
 
 const char *ZoneCurrencyName(int zone) { return zone >= 0 && zone < zonemath::MAX_ZONES ? ZONE_CURRENCY_NAMES[zone] : ""; }
 const char *ZoneCurrencySymbol(int zone) { return zone >= 0 && zone < zonemath::MAX_ZONES ? ZONE_CURRENCY_SYMBOLS[zone] : ""; }
@@ -52,6 +56,24 @@ int ZoneMarket::ZoneOfTile(TileIndex tile) const
 	return zonemath::ZoneOf(PointOf(tile), caps);
 }
 
+int ZoneMarket::ZoneOfCompany(CompanyID company) const
+{
+	if (!Company::IsValidID(company)) return -1;
+	return this->ZoneOfTile(Company::Get(company)->location_of_HQ);
+}
+
+int64_t ZoneTaxPercentOfCompany(CompanyID company)
+{
+	const int z = _zone_market.ZoneOfCompany(company);
+	return z >= 0 && z < _zone_market.count ? _zone_market.zones[z].tax_percent : 100;
+}
+
+void ZoneCountCompanyTax(CompanyID company, int64_t amount)
+{
+	const int z = _zone_market.ZoneOfCompany(company);
+	if (z >= 0 && z < _zone_market.count && amount > 0) _zone_market.zones[z].company_tax += amount;
+}
+
 int64_t ZoneMarket::FeePpmBetween(int from, int to) const
 {
 	if (from < 0 || to < 0 || from == to || from >= this->count || to >= this->count) return 0;
@@ -75,6 +97,7 @@ bool ZoneMarket::MakeZones()
 	for (size_t i = 0; i < caps.size(); i++) {
 		this->zones[i] = {};
 		this->zones[i].capital = tiles[caps[i]];
+		this->zones[i].tax_percent = ZONE_TAX_DEFAULT_PERCENT[i];
 	}
 	this->count = static_cast<int>(caps.size());
 	this->RefreshPopulation();
@@ -114,12 +137,12 @@ void ZoneFeeOnDelivery(CompanyID owner, int64_t income, StationID source, Statio
 	if (!Station::IsValidID(source) || !Station::IsValidID(dest)) return;
 	const int from = _zone_market.ZoneOfTile(Station::Get(source)->xy);
 	const int to = _zone_market.ZoneOfTile(Station::Get(dest)->xy);
-	if (to >= 0 && to < _zone_market.count) _zone_market.zones[to].vat += income * TAX_VAT_PERCENT / 100; // The VAT of this delivery, counted for the zone of the destination.
+	if (to >= 0 && to < _zone_market.count) _zone_market.zones[to].vat += ChargeVatPercent(owner, income, _zone_market.zones[to].tax_percent, to); // The VAT of this delivery at the tax level of the zone of the destination.
 	const int64_t fee_ppm = _zone_market.FeePpmBetween(from, to);
 	if (fee_ppm <= 0) return;
 	const int64_t fee = zonemath::FeeAmount(income, fee_ppm);
 	if (fee <= 0) return;
-	ChargeZoneFee(owner, fee);
+	ChargeZoneFee(owner, fee, to);
 	_zone_market.zones[to].fees += fee;
 }
 

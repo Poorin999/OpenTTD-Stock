@@ -14,6 +14,7 @@
 #include "settings_type.h"
 #include "tax.h"
 #include "central_bank.h"
+#include "zone_market.h"
 #include "game_time/game_time_manager.h"
 #include "command_func.h"
 #include "company_base.h"
@@ -46,7 +47,7 @@ void GoldReserveManager::Reset()
 {
 	this->price_cents = 0;
 	this->baseline_supply = 0;
-	this->bank_reserve_oz = 0;
+	for (CentralBank &b : _banks) b.reserve_oz = 0; // The gold of the banks is part of the reserve.
 	this->market_stock_oz = 0;
 	this->pressure_ppm = 0;
 	this->impact_ppm = 0;
@@ -93,12 +94,17 @@ int64_t GoldReserveManager::GetCirculatingCash() const
 bool GoldReserveManager::EnsureStarted()
 {
 	if (this->price_cents > 0) return true;
+	if (_zone_market.count <= 0) return false; // The banks are the banks of the zones: wait until there are zones.
 	const int64_t supply = this->GetNotesInCirculation();
 	if (supply <= 0) return false;
 	this->price_cents = BASE_PRICE_CENTS;
 	this->market_stock_oz = MARKET_STOCK_START;
 	this->baseline_supply = supply;
-	this->bank_reserve_oz = std::max<int64_t>(1, supply * START_BACKING_PERCENT / 100 / (BASE_PRICE_CENTS / 100));
+	/* Every bank starts with gold worth START_BACKING_PERCENT of the notes of its own zone, but at least of the average zone: a bank with (almost) no gold can not buy any (its daily limit is a part of what it holds), so a zone without companies at the start would stay without backing for ever. */
+	for (int z = 0; z < BankCount(); z++) {
+		const int64_t notes = std::max(BankNotes(_banks[z]), supply / BankCount());
+		_banks[z].reserve_oz = std::max<int64_t>(1, notes * START_BACKING_PERCENT / 100 / (BASE_PRICE_CENTS / 100));
+	}
 	this->PushHistory(); // The first point of the gold chart: the price at the start.
 	return true;
 }
@@ -111,7 +117,7 @@ int64_t GoldReserveManager::GetHoldings(CompanyID company) const
 /** All the gold of the reserve: what the central bank holds and what the companies bought. */
 int64_t GoldReserveManager::GetTotalReserveOunces() const
 {
-	int64_t sum = this->bank_reserve_oz;
+	int64_t sum = BankReserveTotalOz();
 	for (int64_t h : this->holdings_oz) sum += h;
 	return sum;
 }
@@ -124,7 +130,7 @@ int64_t GoldReserveManager::GetReserveValue() const
 /** The ounces that back the notes: the gold of the central bank (and the gold of the companies only with BACKING_COUNTS_COMPANY_GOLD). */
 int64_t GoldReserveManager::GetBackingOunces() const
 {
-	return BACKING_COUNTS_COMPANY_GOLD ? this->GetTotalReserveOunces() : this->bank_reserve_oz;
+	return BACKING_COUNTS_COMPANY_GOLD ? this->GetTotalReserveOunces() : BankReserveTotalOz();
 }
 
 int64_t GoldReserveManager::GetBackingValue() const
@@ -441,7 +447,7 @@ CommandCost ExecuteGoldTrade(CompanyID company, bool is_buy, uint32_t amount, bo
 		const int64_t commission = GoldReserveManager::GetCommission(cost);
 		c->money -= Money(cost + commission);
 		/* The spread (ask minus the base price) and the commission are the income of the central bank. */
-		_central_bank.trading_revenue_cents += (_gold_reserve.GetAskCents() - _gold_reserve.price_cents) * ounces + commission * 100;
+		BankOfCompany(company).trading_revenue_cents += (_gold_reserve.GetAskCents() - _gold_reserve.price_cents) * ounces + commission * 100;
 		RecordLedger(company, LedgerItem::GoldBuy, -cost);
 		RecordLedger(company, LedgerItem::TradeCommission, -commission);
 		_gold_reserve.holdings_cost[i] += cost;
@@ -457,7 +463,7 @@ CommandCost ExecuteGoldTrade(CompanyID company, bool is_buy, uint32_t amount, bo
 		const int64_t basis = cost_base > 0 ? (held == ounces ? cost_base : cost_base * ounces / held) : gross;
 		cost_base = held == ounces ? 0 : std::max<int64_t>(0, cost_base - basis);
 		c->money += Money(gross - commission);
-		_central_bank.trading_revenue_cents += (_gold_reserve.price_cents - _gold_reserve.GetBidCents()) * ounces + commission * 100;
+		BankOfCompany(company).trading_revenue_cents += (_gold_reserve.price_cents - _gold_reserve.GetBidCents()) * ounces + commission * 100;
 		RecordLedger(company, LedgerItem::GoldSell, gross);
 		RecordLedger(company, LedgerItem::TradeCommission, -commission);
 		RecordLedger(company, LedgerItem::RealizedProfit, gross - basis);

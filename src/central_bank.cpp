@@ -11,6 +11,7 @@
 #include "game_time/game_time_manager.h"
 #include "central_bank.h"
 #include "gold_reserve.h"
+#include "zone_market.h"
 #include "economy_func.h"
 #include "economy_news.h"
 #include "market_events.h"
@@ -38,23 +39,114 @@
 
 #include "safeguards.h"
 
-CentralBank _central_bank;
+std::array<BankAccount, MAX_COMPANIES> CentralBank::accounts{};
+std::array<uint8_t, MAX_COMPANIES> CentralBank::account_zone{};
+std::array<int64_t, MAX_COMPANIES> CentralBank::auction_infra{};
+std::array<CentralBank, BANK_ZONES> _banks;
 Ledger _ledger;
 std::array<std::deque<BankLogEntry>, MAX_COMPANIES> _bank_log;
 
-/** Forget all loans, e.g. when a new game is started or a savegame is loaded. */
-void CentralBank::Reset()
+static_assert(BANK_ZONES == zonemath::MAX_ZONES, "one bank for every zone");
+
+/** The zone numbers of the banks, set once at the start of the program. */
+static const bool _banks_numbered = []() {
+	for (int i = 0; i < BANK_ZONES; i++) _banks[i].zone = i;
+	return true;
+}();
+
+int BankCount()
+{
+	return std::clamp(_zone_market.count, 1, BANK_ZONES);
+}
+
+CentralBank &BankOfZone(int zone)
+{
+	return _banks[zone >= 0 && zone < BankCount() ? zone : 0];
+}
+
+CentralBank &BankOfCompany(CompanyID company)
+{
+	return BankOfZone(_zone_market.ZoneOfCompany(company));
+}
+
+CentralBank &BankOfTile(TileIndex tile)
+{
+	return BankOfZone(_zone_market.ZoneOfTile(tile));
+}
+
+CentralBank &LocalBank()
+{
+	return BankOfCompany(_local_company);
+}
+
+/** The cash of the companies that belong to a bank. */
+int64_t BankNotes(const CentralBank &bank)
+{
+	int64_t sum = 0;
+	for (const Company *c : Company::Iterate()) {
+		if (BankOfCompany(c->index).zone != bank.zone) continue;
+		sum += std::max<int64_t>(0, static_cast<int64_t>(c->money));
+	}
+	return sum;
+}
+
+int64_t BankReserveTotalOz()
+{
+	int64_t sum = 0;
+	for (const CentralBank &b : _banks) sum += b.reserve_oz;
+	return sum;
+}
+
+int64_t BankBackingValue(const CentralBank &bank)
+{
+	return bank.reserve_oz * _gold_reserve.price_cents / 100;
+}
+
+int64_t BankBackingBp(const CentralBank &bank)
+{
+	if (_gold_reserve.GetPriceCents() <= 0) return 0;
+	const int64_t cash = BankNotes(bank);
+	if (cash <= 0) return 0;
+	return std::min<int64_t>(1000000, BankBackingValue(bank) * 10000 / cash);
+}
+
+int BankCreditTierIndex(const CentralBank &bank)
+{
+	const int64_t bp = BankBackingBp(bank);
+	if (bp >= TIER_AAA_BP) return 4;
+	if (bp >= TIER_AA_BP) return 3;
+	if (bp >= TIER_A_BP) return 2;
+	if (bp >= TIER_B_BP) return 1;
+	return 0;
+}
+
+/** Forget everything of all the banks: the loans, the ledger, the policies, the money, the gold. */
+void ResetBanks()
 {
 	_ledger.Reset(); // The ledger is saved and loaded together with the loans.
 	for (auto &log : _bank_log) log.clear(); // The account log is only for the display.
-	this->accounts.fill({});
+	CentralBank::accounts.fill({});
+	CentralBank::account_zone.fill(0);
+	CentralBank::auction_infra.fill(0);
+	_bank_legacy_reserve_oz = 0;
+	for (int i = 0; i < BANK_ZONES; i++) {
+		_banks[i].Reset();
+		_banks[i].zone = i;
+	}
+}
+
+/** Forget what belongs to this bank alone: its policy, its money, its bad debts, its gold. */
+void CentralBank::Reset()
+{
 	this->policy.Reset();
 	this->trading_revenue_cents = BANK_START_CAPITAL * 100;
 	this->written_off = 0;
 	this->uncovered_loss = 0;
-	this->auction_infra.fill(0);
+	this->reserve_oz = 0;
 	this->gold_log.clear();
 	this->iorb_created = 0;
+	this->short_oz_today = 0;
+	this->short_pnl_total = 0;
 }
 
 /**
@@ -75,27 +167,36 @@ static int64_t BankShareOf(int64_t amount, int64_t weight, int64_t total)
  * @param amount Money units, 0 or more.
  * @return The money units that were paid out.
  */
-static int64_t BankInjectCash(int64_t amount)
+static int64_t BankInjectCash(const CentralBank &bank, int64_t amount)
 {
 	if (amount <= 0) return 0;
 	std::array<int64_t, MAX_COMPANIES> weight{};
 	int64_t total = 0;
 	int shift = 0;
-	for (const Company *c : Company::Iterate()) total += std::max<int64_t>(0, static_cast<int64_t>(c->old_economy[0].company_value));
+	for (const Company *c : Company::Iterate()) {
+		if (BankOfCompany(c->index).zone != bank.zone) continue;
+		total += std::max<int64_t>(0, static_cast<int64_t>(c->old_economy[0].company_value));
+	}
 	while ((total >> shift) > 1'000'000'000) shift++;
 	total = 0;
 	for (const Company *c : Company::Iterate()) {
+		if (BankOfCompany(c->index).zone != bank.zone) continue;
 		weight[c->index.base()] = std::max<int64_t>(0, static_cast<int64_t>(c->old_economy[0].company_value)) >> shift;
 		total += weight[c->index.base()];
 	}
-	if (total <= 0) { // No value is known yet: all companies get the same.
-		for (const Company *c : Company::Iterate()) { weight[c->index.base()] = 1; total++; }
+	if (total <= 0) { // No value is known yet: all companies of the bank get the same.
+		for (const Company *c : Company::Iterate()) {
+			if (BankOfCompany(c->index).zone != bank.zone) continue;
+			weight[c->index.base()] = 1;
+			total++;
+		}
 	}
-	if (total <= 0) return 0; // No company at all.
+	if (total <= 0) return 0; // No company at all in this bank.
 
 	int64_t paid = 0;
 	Company *first = nullptr;
 	for (Company *c : Company::Iterate()) {
+		if (BankOfCompany(c->index).zone != bank.zone) continue;
 		if (first == nullptr) first = c;
 		const int64_t share = BankShareOf(amount, weight[c->index.base()], total);
 		if (share <= 0) continue;
@@ -111,31 +212,31 @@ static int64_t BankInjectCash(int64_t amount)
 	return paid;
 }
 
-/** The money that the bank may take out of the companies today: BANK_GOLD_CASH_MAX_PERCENT of the unborrowed liquid cash of all companies. */
-static int64_t BankWithdrawCapacity()
+/** The money that the bank may take out of the companies of its zone today: BANK_GOLD_CASH_MAX_PERCENT of their unborrowed liquid cash. */
+static int64_t BankWithdrawCapacity(const CentralBank &bank)
 {
 	int64_t total = 0;
-	for (const Company *c : Company::Iterate()) total += GetUnborrowedLiquidCash(c->index);
+	for (const Company *c : Company::Iterate()) {
+		if (BankOfCompany(c->index).zone == bank.zone) total += GetUnborrowedLiquidCash(c->index);
+	}
 	return total / 100 * BANK_GOLD_CASH_MAX_PERCENT + total % 100 * BANK_GOLD_CASH_MAX_PERCENT / 100;
 }
 
-/**
- * Take money out of the UNBORROWED liquid cash of the companies (the bank has sold gold), in proportion to that cash. Never more than a company has
- * unborrowed, so borrowed money is not touched. The money is booked as LedgerItem::BankGoldOp.
- * @param amount Money units, 0 or more, at most BankWithdrawCapacity().
- * @return The money units that were taken (the shares are rounded down, so it can be a few units less than #amount).
- */
-static int64_t BankWithdrawCash(int64_t amount)
+/** Take money out of the unborrowed liquid cash of the companies of a bank (it has sold gold), in proportion to that cash; see the old text of BankInjectCash for the rules. */
+static int64_t BankWithdrawCash(const CentralBank &bank, int64_t amount)
 {
 	if (amount <= 0) return 0;
 	std::array<int64_t, MAX_COMPANIES> weight{};
 	int64_t total = 0;
-	for (const Company *c : Company::Iterate()) total += GetUnborrowedLiquidCash(c->index);
+	for (const Company *c : Company::Iterate()) {
+		if (BankOfCompany(c->index).zone == bank.zone) total += GetUnborrowedLiquidCash(c->index);
+	}
 	if (total <= 0) return 0;
 	int shift = 0;
 	while ((total >> shift) > 1'000'000'000) shift++;
 	total = 0;
 	for (const Company *c : Company::Iterate()) {
+		if (BankOfCompany(c->index).zone != bank.zone) continue;
 		weight[c->index.base()] = GetUnborrowedLiquidCash(c->index) >> shift;
 		total += weight[c->index.base()];
 	}
@@ -144,6 +245,7 @@ static int64_t BankWithdrawCash(int64_t amount)
 	const int64_t scaled = amount >> shift;
 	int64_t taken = 0;
 	for (Company *c : Company::Iterate()) {
+		if (BankOfCompany(c->index).zone != bank.zone) continue;
 		const int64_t share = std::min(BankShareOf(scaled, weight[c->index.base()], total) << shift, GetUnborrowedLiquidCash(c->index));
 		if (share <= 0) continue;
 		c->money -= Money(share);
@@ -175,10 +277,10 @@ static bool BankOpenMarketWanted(const MonetaryPolicy &policy)
 void CentralBank::TradeGold(int64_t day)
 {
 	if (_gold_reserve.GetPriceCents() <= 0) return; // The gold market has not started.
-	const int64_t cash = _gold_reserve.GetNotesInCirculation();
+	const int64_t cash = BankNotes(*this); // The notes of the zone of this bank.
 	if (cash <= 0) return;
-	const int64_t backing = _gold_reserve.GetBackingBp();
-	const int64_t value = _gold_reserve.GetBackingValue(); // The gold that backs the notes (the bank's own, see GoldReserveManager::BACKING_COUNTS_COMPANY_GOLD).
+	const int64_t backing = BankBackingBp(*this);
+	const int64_t value = BankBackingValue(*this); // The gold that backs the notes (the bank's own, see GoldReserveManager::BACKING_COUNTS_COMPANY_GOLD).
 
 	int64_t ounces = 0;       // Positive: buy. Negative: sell.
 	int64_t price_cents = 0;
@@ -189,7 +291,7 @@ void CentralBank::TradeGold(int64_t day)
 		int64_t missing = std::max<int64_t>(0, cash / 10'000 * BANK_GOLD_BUY_BELOW_BP + cash % 10'000 * BANK_GOLD_BUY_BELOW_BP / 10'000 - value); // Money units to reach the target if the cash stayed the same.
 		if (BANK_GOLD_MOVES_CASH) missing = missing * 10'000 / (10'000 - BANK_GOLD_BUY_BELOW_BP); // The money that the bank creates is cash in circulation too.
 		ounces = (missing * 100 + price_cents - 1) / price_cents;
-		ounces = std::min({ounces, BankGoldDailyCapOz(_gold_reserve.bank_reserve_oz), _gold_reserve.market_stock_oz});
+		ounces = std::min({ounces, BankGoldDailyCapOz(this->reserve_oz), _gold_reserve.market_stock_oz});
 		if (BANK_GOLD_MOVES_CASH) {
 			ounces = std::min(ounces, (cash / 100 * BANK_GOLD_CREATE_MAX_PERCENT) * 100 / price_cents); // Never more money created than the daily limit.
 		} else {
@@ -198,12 +300,12 @@ void CentralBank::TradeGold(int64_t day)
 		if (ounces <= 0) return;
 		if (BANK_GOLD_MOVES_CASH) {
 			/* The bank creates the money that it pays: it comes into circulation, the companies get it. Its own money is not used. */
-			cash_moved = BankInjectCash(ounces * price_cents / 100);
+			cash_moved = BankInjectCash(*this, ounces * price_cents / 100);
 			if (cash_moved <= 0) return; // No company to pay to.
 		} else {
 			this->trading_revenue_cents -= ounces * price_cents;
 		}
-		_gold_reserve.bank_reserve_oz += ounces;
+		this->reserve_oz += ounces;
 		_gold_reserve.market_stock_oz -= ounces;
 		_gold_reserve.AddTradeImpact(ounces * GoldReserveManager::PPM / GoldReserveManager::DEPTH_OUNCES);
 	} else if (backing > BANK_GOLD_SELL_ABOVE_BP || (backing > BANK_OMO_MIN_BACKING_BP && BankOpenMarketWanted(this->policy))) {
@@ -214,19 +316,19 @@ void CentralBank::TradeGold(int64_t day)
 		int64_t excess = std::max<int64_t>(0, value - (cash / 10'000 * sell_limit_bp + cash % 10'000 * sell_limit_bp / 10'000));
 		if (BANK_GOLD_MOVES_CASH) excess = excess * 10'000 / (10'000 - sell_limit_bp); // The money that leaves circulation makes the cash smaller.
 		ounces = excess * 100 / price_cents;
-		ounces = std::min({ounces, BankGoldDailyCapOz(_gold_reserve.bank_reserve_oz), _gold_reserve.bank_reserve_oz});
-		if (BANK_GOLD_MOVES_CASH) ounces = std::min(ounces, BankWithdrawCapacity() * 100 / price_cents); // The buyers can only pay with their unborrowed cash.
+		ounces = std::min({ounces, BankGoldDailyCapOz(this->reserve_oz), this->reserve_oz});
+		if (BANK_GOLD_MOVES_CASH) ounces = std::min(ounces, BankWithdrawCapacity(*this) * 100 / price_cents); // The buyers can only pay with their unborrowed cash.
 		if (ounces <= 0) return;
 		if (BANK_GOLD_MOVES_CASH) {
 			/* The money that the bank receives leaves circulation: it is taken from the companies and destroyed. Its own money is not used. */
-			const int64_t taken = BankWithdrawCash(ounces * price_cents / 100);
+			const int64_t taken = BankWithdrawCash(*this, ounces * price_cents / 100);
 			if (taken <= 0) return;
 			cash_moved = -taken;
 		} else {
 			this->trading_revenue_cents += ounces * price_cents;
 		}
-		const int64_t reserve_before = _gold_reserve.bank_reserve_oz; // For the news: how much of its own gold the bank sold.
-		_gold_reserve.bank_reserve_oz -= ounces;
+		const int64_t reserve_before = this->reserve_oz; // For the news: how much of its own gold the bank sold.
+		this->reserve_oz -= ounces;
 		_gold_reserve.market_stock_oz += ounces;
 		_gold_reserve.AddTradeImpact(-(ounces * GoldReserveManager::PPM / GoldReserveManager::DEPTH_OUNCES));
 		PublishBankGoldSaleNews(ounces, reserve_before, backing); // Real news with the real numbers (the reserve is above its level); the price jumps down at once.
@@ -410,7 +512,7 @@ bool MonetaryPolicy::CheckUnscheduled(int64_t day, int64_t index_ppm, int64_t jo
 /** Money that a company owes to the central bank; 0 for a company that does not exist. */
 int64_t GetCentralBankDebt(CompanyID company)
 {
-	return company.base() < MAX_COMPANIES ? _central_bank.accounts[company.base()].debt : 0;
+	return company.base() < MAX_COMPANIES ? CentralBank::accounts[company.base()].debt : 0;
 }
 
 /**
@@ -436,16 +538,16 @@ int64_t GetCentralBankCreditLimit(CompanyID company)
 {
 	if (!Company::IsValidID(company)) return 0;
 	const int64_t equity = GetCentralBankEquity(company);
-	const int64_t percent = BankCreditPercentForPenalty(_central_bank.accounts[company.base()].penalty_level);
+	const int64_t percent = BankCreditPercentForPenalty(CentralBank::accounts[company.base()].penalty_level);
 	/* The share of the equity follows the policy shift, the credit standing of the gold reserve scales it, the penalty level lowers it. */
-	return std::max<int64_t>(0, equity) * BankPolicyCreditPercent(_central_bank.policy.shift_bp) / 100 * GetCentralBankTierCreditPercent() / 100 * percent / 100;
+	return std::max<int64_t>(0, equity) * BankPolicyCreditPercent(BankOfCompany(company).ShiftBp()) / 100 * GetCentralBankTierCreditPercent(company) / 100 * percent / 100;
 }
 
-/** Percent of the credit limit that the credit standing allows now. The standing is not known before the gold market has started: then 100%. */
-int64_t GetCentralBankTierCreditPercent()
+/** Percent of the credit limit that the credit standing of the bank of the company allows now. The standing is not known before the gold market has started: then 100%. */
+int64_t GetCentralBankTierCreditPercent(CompanyID company)
 {
 	if (_gold_reserve.GetPriceCents() <= 0) return 100;
-	return BankTierCreditPercent(static_cast<int>(_gold_reserve.GetCreditTier()));
+	return BankTierCreditPercent(BankCreditTierIndex(BankOfCompany(company)));
 }
 
 /**
@@ -455,11 +557,11 @@ int64_t GetCentralBankTierCreditPercent()
 int64_t GetCentralBankAnnualRateBp(CompanyID company)
 {
 	if (!Company::IsValidID(company)) return 0;
-	const BankAccount &a = _central_bank.accounts[company.base()];
+	const BankAccount &a = CentralBank::accounts[company.base()];
 	if (a.debt <= 0) return 0;
-	if (a.in_default) return BankPenaltyRateBp(std::max<int>(1, a.penalty_level), _central_bank.policy.shift_bp);
+	if (a.in_default) return BankPenaltyRateBp(std::max<int>(1, a.penalty_level), BankOfCompany(company).ShiftBp());
 	const int64_t news_bp = _market_events.CreditSpreadBp(company.base(), static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes()));
-	return BankShiftedRateBp(BankAnnualRateBp(BankDebtToEquityPpm(a.debt, GetCentralBankEquity(company))) + news_bp, _central_bank.policy.shift_bp);
+	return BankShiftedRateBp(BankAnnualRateBp(BankDebtToEquityPpm(a.debt, GetCentralBankEquity(company))) + news_bp, BankOfCompany(company).ShiftBp());
 }
 
 /** How much more a company may borrow now. */
@@ -625,7 +727,7 @@ CommandCost CmdBankBorrow(DoCommandFlags flags, uint8_t wallet, Money amount_in)
 	if (amount > GetCentralBankAvailable(_current_company)) return CommandCost(STR_BANK_ERROR_LIMIT);
 
 	if (flags.Test(DoCommandFlag::Execute)) {
-		_central_bank.accounts[_current_company.base()].debt += amount;
+		CentralBank::accounts[_current_company.base()].debt += amount;
 		Company::Get(_current_company)->money += Money(amount);
 		RecordLedger(_current_company, LedgerItem::BankLoan, amount);
 		InvalidateBankWindows();
@@ -659,7 +761,7 @@ CommandCost CmdBankRepay(DoCommandFlags flags, uint8_t wallet, Money amount_in)
 		} else {
 			AddToWallet(_current_company, wallet, -amount);
 		}
-		_central_bank.accounts[_current_company.base()].debt -= amount;
+		CentralBank::accounts[_current_company.base()].debt -= amount;
 		RecordLedger(_current_company, LedgerItem::BankLoan, -amount);
 		InvalidateBankWindows();
 	}
@@ -677,7 +779,7 @@ static void MoveOriginalLoansToCentralBank()
 	for (Company *c : Company::Iterate()) {
 		if (c->current_loan <= 0) continue;
 		const int64_t loan = static_cast<int64_t>(c->current_loan);
-		_central_bank.accounts[c->index.base()].debt += loan;
+		CentralBank::accounts[c->index.base()].debt += loan;
 		c->current_loan = 0;
 		if (c->index == _local_company) {
 			AddNewsItem(GetEncodedString(STR_JUST_RAW_STRING, fmt::format("Your original loan of {} was moved to the central bank. It is repaid there, and it costs the interest of the central bank.",
@@ -746,9 +848,9 @@ static int64_t BankSellGoldForDebt(CompanyID company, int64_t need)
 }
 
 /** The price in percent of the value that the bank pays now: its credit standing, lower at the auction. */
-static int64_t BankRepoPercentNow(bool auction)
+static int64_t BankRepoPercentNow(CompanyID company, bool auction)
 {
-	const int64_t percent = _gold_reserve.GetPriceCents() <= 0 ? BANK_REPO_PERCENT_NO_MARKET : BankRepoPercent(static_cast<int>(_gold_reserve.GetCreditTier()));
+	const int64_t percent = _gold_reserve.GetPriceCents() <= 0 ? BANK_REPO_PERCENT_NO_MARKET : BankRepoPercent(BankCreditTierIndex(BankOfCompany(company)));
 	return auction ? percent * BANK_AUCTION_PERCENT_OF_REPO / 100 : percent;
 }
 
@@ -764,7 +866,7 @@ static int64_t BankRepoPercentNow(bool auction)
 static int64_t BankSellVehiclesForDebt(CompanyID company, int64_t need, bool keep_one, bool auction)
 {
 	if (!BANK_REPO_ENABLED || need <= 0) return 0;
-	const int64_t percent = BankRepoPercentNow(auction);
+	const int64_t percent = BankRepoPercentNow(company, auction);
 
 	struct Candidate {
 		VehicleID id;       ///< The front vehicle of the chain.
@@ -831,7 +933,7 @@ static int64_t BankInfrastructureValue(const Company *c)
 	for (uint32_t count : c->infrastructure.road) value += static_cast<int64_t>(count) * static_cast<int64_t>(_price[PR_BUILD_ROAD]);
 	value += static_cast<int64_t>(c->infrastructure.signal) * static_cast<int64_t>(_price[PR_BUILD_SIGNALS]);
 	value += static_cast<int64_t>(c->infrastructure.water) * static_cast<int64_t>(_price[PR_BUILD_CANAL]);
-	const int64_t percent = BankRepoPercentNow(true);
+	const int64_t percent = BankRepoPercentNow(c->index, true);
 	return value / 100 * percent + value % 100 * percent / 100;
 }
 
@@ -911,8 +1013,9 @@ void CentralBank::ApplyMarketEffect()
 	p.last_gold_push_ppm = 0;
 	p.last_share_push_ppm = 0;
 	if (p.last_step_bp == 0) return;
-	const int64_t gold = PolicyGoldPushPpm(p.last_step_bp, p.last_surprise_bp);
-	const int64_t shares = PolicySharePushPpm(p.last_step_bp, p.last_surprise_bp);
+	/* The gold market and the shares are one world market: every bank pushes it with its share (1 / number of banks), so that all the banks together do what one bank did. */
+	const int64_t gold = PolicyGoldPushPpm(p.last_step_bp, p.last_surprise_bp) / BankCount();
+	const int64_t shares = PolicySharePushPpm(p.last_step_bp, p.last_surprise_bp) / BankCount();
 	if (_gold_reserve.GetPriceCents() > 0) {
 		_gold_reserve.pressure_ppm = std::clamp<int64_t>(_gold_reserve.pressure_ppm + gold, -GoldReserveManager::PRESSURE_MAX_PPM, GoldReserveManager::PRESSURE_MAX_PPM);
 		p.last_gold_push_ppm = gold;
@@ -931,12 +1034,13 @@ void CentralBank::ApplyMarketEffect()
 void CentralBank::PayIorb()
 {
 	if (!BANK_IORB_ENABLED) return;
-	const int64_t rate_bp = PolicyIorbBp(this->policy.shift_bp);
+	const int64_t rate_bp = PolicyIorbBp(this->ShiftBp());
 	if (rate_bp <= 0) return;
 
 	std::array<int64_t, MAX_COMPANIES> due{};
 	int64_t total = 0;
 	for (const Company *c : Company::Iterate()) {
+		if (&BankOfCompany(c->index) != this) continue; // The companies of the other banks are paid by their bank.
 		if (this->accounts[c->index.base()].in_default) continue;
 		const int64_t cash = IorbCashBase(GetUnborrowedLiquidCash(c->index));
 		due[c->index.base()] = cash * rate_bp / BANK_INTEREST_DIVISOR;
@@ -946,7 +1050,7 @@ void CentralBank::PayIorb()
 	int64_t available;
 	if (BANK_IORB_CREATES_MONEY) {
 		/* New money: only a safety limit against a bug or a huge rate. */
-		const int64_t circulating = _gold_reserve.GetNotesInCirculation();
+		const int64_t circulating = BankNotes(*this);
 		available = circulating > 0 ? std::max<int64_t>(1, circulating / 100 * BANK_IORB_CREATE_MAX_PERCENT) : total;
 	} else {
 		available = std::max<int64_t>(0, this->trading_revenue_cents / 100 - BANK_IORB_BUDGET_FLOOR);
@@ -992,8 +1096,8 @@ void CentralBank::ShortGold()
 	if (dev_ppm <= BANK_SHORT_FROM_PPM) return;
 	const int64_t push = std::min<int64_t>(BANK_SHORT_PUSH_MAX_PPM, (dev_ppm - BANK_SHORT_FROM_PPM) * BANK_SHORT_PUSH_MAX_PPM / (BANK_SHORT_FULL_PPM - BANK_SHORT_FROM_PPM));
 	if (push <= 0) return;
-	const int64_t volume_oz = push * BANK_SHORT_DEPTH_OUNCES / POLICY_PPM;
-	_gold_reserve.pressure_ppm = std::max<int64_t>(-GoldReserveManager::PRESSURE_MAX_PPM, _gold_reserve.pressure_ppm - push);
+	const int64_t volume_oz = push * BANK_SHORT_DEPTH_OUNCES / POLICY_PPM / BankCount(); // One short for the whole world, shared by the banks.
+	_gold_reserve.pressure_ppm = std::max<int64_t>(-GoldReserveManager::PRESSURE_MAX_PPM, _gold_reserve.pressure_ppm - push / BankCount());
 	this->short_oz_today = volume_oz;
 
 	/* Mark to market: the change of the price between the last two daily points. A short earns when the price fell. */
@@ -1026,7 +1130,7 @@ void CentralBank::AnnounceMeeting(int64_t shift_before)
 	const MonetaryPolicy &p = this->policy;
 	auto pct = [](int64_t bp) { return fmt::format("{}.{:02}%", bp / 100, bp % 100); };
 	const int64_t moved = p.shift_bp - shift_before;
-	const std::string range = fmt::format("{} - {}", pct(PolicyLowerBp(p.shift_bp)), pct(PolicyUpperBp(p.shift_bp)));
+	const std::string range = fmt::format("{} - {}", pct(PolicyLowerBp(this->ShiftBp())), pct(PolicyUpperBp(this->ShiftBp())));
 	std::string text;
 	if (moved > 0) {
 		text = fmt::format("FOMC{}: the central bank RAISED the target range by {} bp to {}. Inflation {}, growth {}. Loan rates follow at once.", p.last_unscheduled ? UnscheduledText(p.last_reason) : "", moved, range, pct(std::max<int64_t>(0, p.inflation_bp)), pct(std::max<int64_t>(0, p.growth_bp)));
@@ -1037,6 +1141,7 @@ void CentralBank::AnnounceMeeting(int64_t shift_before)
 		text = fmt::format("FOMC: the central bank KEPT the target range at {}.{}", range, bias);
 	}
 	if (p.emergency) text += " (Emergency mode.)";
+	if (BankCount() > 1) text = fmt::format("[Zone {}, {}] ", this->zone + 1, ZoneCurrencyName(this->zone)) + text; // Every zone has its own bank.
 	AddNewsItem(GetEncodedString(STR_JUST_RAW_STRING, text), NewsType::General, NewsStyle::Small, {});
 }
 
@@ -1052,19 +1157,13 @@ void CentralBank::UpdateDaily(int64_t day)
 {
 	for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
 		const CompanyID company{i};
-		BankAccount &a = this->accounts[i];
 		Company *c = Company::GetIfValid(company);
-		if (c == nullptr) {
-			this->WriteOffRemoved(company);
-			a = {};
-			_ledger.years[i].clear();
-			_bank_log[i].clear();
-			continue;
-		}
+		if (c == nullptr || &BankOfCompany(company) != this) continue; // A company that is gone is written off in UpdateAllBanks, the others belong to the bank of their zone.
+		BankAccount &a = this->accounts[i];
 
 		/* The news about the company (and a bank scare for everyone) adds to the risk rate; read from the news log at this midnight, so it is the same on every client. */
 		const int64_t news_bp = _market_events.CreditSpreadBp(company.base(), day * GameTimeManager::MINUTES_PER_DAY);
-		const BankDayResult r = BankSettleDay(a, static_cast<int64_t>(c->money), GetCentralBankEquity(company), day, this->policy.shift_bp, news_bp);
+		const BankDayResult r = BankSettleDay(a, static_cast<int64_t>(c->money), GetCentralBankEquity(company), day, this->ShiftBp(), news_bp);
 
 		if (r.paid_from_cash > 0) {
 			/* The money leaves the cash and is an expense of the company (loan interest in the finances window).
@@ -1080,16 +1179,16 @@ void CentralBank::UpdateDaily(int64_t day)
 		/* Default at the highest penalty level: the bank takes what it can reach (trading wallets, gold). */
 		if (c->months_of_bankruptcy >= BANK_AUCTION_MONTHS) this->Liquidate(company, true);
 		else if (r.defaulted && a.penalty_level >= BANK_PENALTY_LEVEL_MAX) this->Liquidate(company);
-
 	}
 
-	/* The monetary policy: the sum of the company values of the last two finished quarters is the measure of growth (as in the gold market). */
+	/* The monetary policy of this bank: the sum of the company values of the last two finished quarters of ITS companies is the measure of growth. */
 	int64_t value_now = 0, value_before = 0;
 	for (const Company *c : Company::Iterate()) {
+		if (&BankOfCompany(c->index) != this) continue;
 		value_now += static_cast<int64_t>(c->old_economy[0].company_value);
 		value_before += static_cast<int64_t>(c->old_economy[1].company_value);
 	}
-	/* Second mandate: the jobs. The two newest payroll reports (newest in front) give the yearly growth of the employment. */
+	/* Second mandate: the jobs (one payroll report for the whole world). The two newest payroll reports (newest in front) give the yearly growth of the employment. */
 	int64_t jobs_growth_bp = 0;
 	bool has_jobs = false;
 	if (_payroll_news.releases.size() >= 2) {
@@ -1111,6 +1210,37 @@ void CentralBank::UpdateDaily(int64_t day)
 	this->PayIorb();
 	this->TradeGold(day);
 	this->ShortGold();
+}
+
+/** The old reserve of a savegame from before the banks (one number for the whole world): split between the banks by the notes of their zones at the next midnight. 0 = nothing to split. */
+int64_t _bank_legacy_reserve_oz = 0;
+
+/** One game day of all the banks: first the companies that are gone, then every bank for its own companies. */
+static void UpdateAllBanks(int64_t day)
+{
+	if (_bank_legacy_reserve_oz > 0) {
+		int64_t total_notes = 0;
+		for (int z = 0; z < BankCount(); z++) total_notes += BankNotes(_banks[z]);
+		for (int z = 0; z < BankCount(); z++) {
+			_banks[z].reserve_oz = total_notes > 0 ? _bank_legacy_reserve_oz / 100 * (BankNotes(_banks[z]) * 100 / total_notes) + _bank_legacy_reserve_oz % 100 * (BankNotes(_banks[z]) * 100 / total_notes) / 100 : _bank_legacy_reserve_oz / BankCount();
+		}
+		_bank_legacy_reserve_oz = 0;
+	}
+
+	for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
+		const CompanyID company{i};
+		if (Company::IsValidID(company)) {
+			CentralBank::account_zone[i] = static_cast<uint8_t>(BankOfCompany(company).zone);
+			continue;
+		}
+		/* The company is gone: the bank that held its account writes off what it owed. */
+		BankOfZone(CentralBank::account_zone[i]).WriteOffRemoved(company);
+		CentralBank::accounts[i] = {};
+		_ledger.years[i].clear();
+		_bank_log[i].clear();
+	}
+
+	for (int z = 0; z < BankCount(); z++) _banks[z].UpdateDaily(day);
 
 	SnapshotYearlyExpenses();
 	InvalidateWindowData(WC_STOCK_MARKET, 0);
@@ -1120,5 +1250,5 @@ void CentralBank::UpdateDaily(int64_t day)
 /** Charge the interest of the central bank once per game day of the HH:MM clock (at 00:00, when the date of the game changes). */
 static const GameTimeSubscription _bank_daily(GameTimeEvent::Day, [](const GameTimeSnapshot &now)
 {
-	_central_bank.UpdateDaily(static_cast<int64_t>(now.total_minutes / GameTimeManager::MINUTES_PER_DAY));
+	UpdateAllBanks(static_cast<int64_t>(now.total_minutes / GameTimeManager::MINUTES_PER_DAY));
 });

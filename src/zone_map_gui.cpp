@@ -9,6 +9,8 @@
 #include "zone_map_gui.h"
 #include "zone_market.h"
 #include "tax.h"
+#include "central_bank.h"
+#include "gold_reserve.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -320,26 +322,45 @@ struct ZoneTaxWindow : Window {
 		int64_t all_zones = 0;
 		for (int i = 0; i < _zone_market.count; i++) {
 			const ZoneState &o = _zone_market.zones[i];
-			all_zones += o.land_tax + o.transport_tax + o.vat + o.fees;
+			all_zones += o.land_tax + o.transport_tax + o.vat + o.fees + o.company_tax;
 		}
-		const int64_t total = z.land_tax + z.transport_tax + z.vat + z.fees;
+		const int64_t total = z.land_tax + z.transport_tax + z.vat + z.fees + z.company_tax;
+		line(fmt::format("ระดับภาษีของโซนนี้: {}% ของอัตราฐาน (100% = อัตราฐาน)", z.tax_percent), z.tax_percent > 100 ? TC_ORANGE : (z.tax_percent < 100 ? TC_GREEN : TC_WHITE));
+		y += ScaleGUITrad(4);
 		line("ภาษีที่เก็บได้ในโซนนี้ (สะสมตั้งแต่เริ่มเกม)", TC_YELLOW);
 		line(fmt::format("  ภาษีที่ดิน (ที่ดินในโซน):  {}", MoneyText(z.land_tax)), TC_WHITE);
 		line(fmt::format("  ภาษีขนส่ง (ยานพาหนะที่อยู่ในโซน):  {}", MoneyText(z.transport_tax)), TC_WHITE);
 		line(fmt::format("  VAT (ส่งสินค้าเข้าโซนนี้):  {}", MoneyText(z.vat)), TC_WHITE);
+		line(fmt::format("  ภาษีบริษัทที่ตั้ง HQ ในโซนนี้ (รายได้ กำไรเทรด ปันผล):  {}", MoneyText(z.company_tax)), TC_WHITE);
 		line(fmt::format("  ค่าธรรมเนียมแลกเปลี่ยน (ส่งข้ามเส้นเข้าโซนนี้):  {}", MoneyText(z.fees)), TC_WHITE);
 		line(fmt::format("  รวม:  {}   ({}% ของทุกโซน)", MoneyText(total), all_zones > 0 ? total * 100 / all_zones : 0), TC_LIGHT_BLUE);
 		y += ScaleGUITrad(6);
 
-		/* The rates: the same in every zone. */
-		line("อัตราภาษี (เท่ากันทุกโซน)", TC_YELLOW);
-		line(fmt::format("  ที่ดิน: {} ต่อหน่วยต่อวัน (ตึกใหญ่ใกล้เมืองใหญ่แพงสุด +500%)", TAX_LAND_PER_UNIT_DAY), TC_GREY);
-		line(fmt::format("  ขนส่งต่อวัน: รถไฟ {}  รถบรรทุก {}  เรือ {}  เครื่องบิน {}", TAX_TRAIN_DAY, TAX_ROADVEH_DAY, TAX_SHIP_DAY, TAX_AIRCRAFT_DAY), TC_GREY);
-		line(fmt::format("  VAT {}% ของรายได้ส่งสินค้า   กำไรจากการเทรด {}%   เงินปันผล {}%", TAX_VAT_PERCENT, TAX_CAPITAL_GAINS_PERCENT, TAX_DIVIDEND_PERCENT), TC_GREY);
-		line(fmt::format("  ภาษีรายได้ต่อไตรมาส: {}% ถึง {}, {}% ถึง {}, เหนือนั้น {}%", TAX_INCOME_QUARTER_PERCENT, TAX_INCOME_BRACKET1, TAX_INCOME_PERCENT_2, TAX_INCOME_BRACKET2, TAX_INCOME_PERCENT_3), TC_GREY);
+		/* The rates that apply in this zone: the base rate x the level of the zone. */
+		const int64_t pct = z.tax_percent;
+		auto rate1 = [pct](int64_t base) {
+			const int64_t x = base * pct / 10; // x10, one decimal
+			return fmt::format("{}.{}", x / 10, x % 10);
+		};
+		line("อัตราภาษีที่ใช้ในโซนนี้ (อัตราฐาน x ระดับภาษีของโซน)", TC_YELLOW);
+		line(fmt::format("  ที่ดิน: {} ต่อหน่วยต่อวัน (ใกล้เมืองใหญ่แพงสุด +500%)", rate1(TAX_LAND_PER_UNIT_DAY)), TC_GREY);
+		line(fmt::format("  ขนส่งต่อวัน: รถไฟ {}  รถบรรทุก {}  เรือ {}  เครื่องบิน {}", rate1(TAX_TRAIN_DAY), rate1(TAX_ROADVEH_DAY), rate1(TAX_SHIP_DAY), rate1(TAX_AIRCRAFT_DAY)), TC_GREY);
+		line(fmt::format("  VAT {}% ของรายได้ส่งสินค้า   กำไรเทรด {}%   เงินปันผล {}%", rate1(TAX_VAT_PERCENT), rate1(TAX_CAPITAL_GAINS_PERCENT), rate1(TAX_DIVIDEND_PERCENT)), TC_GREY);
+		line(fmt::format("  ภาษีรายได้ต่อไตรมาส: {}% ถึง {}, {}% ถึง {}, เหนือนั้น {}%", rate1(TAX_INCOME_QUARTER_PERCENT), TAX_INCOME_BRACKET1, rate1(TAX_INCOME_PERCENT_2), TAX_INCOME_BRACKET2, rate1(TAX_INCOME_PERCENT_3)), TC_GREY);
 		y += ScaleGUITrad(6);
-		line("ภาษีทั้งหมดไปที่ธนาคารกลาง (ภาษีรายได้ กำไรเทรด ปันผลคิดที่บริษัท ไม่แยกโซน)", TC_GREY, 1);
-		line("ภาษีที่ดินและขนส่งนับทุกวันจากตำแหน่งจริงบนแผนที่ VAT นับจากรายได้ของแต่ละเที่ยว", TC_GREY, 1);
+		/* The central bank of this zone: its own policy, money and gold. The taxes of the zone are paid to it. */
+		const CentralBank &bk = BankOfZone(this->zone);
+		auto pct_text = [](int64_t bp) {
+			return fmt::format("{}{}.{:02}%", bp < 0 ? "-" : "", (bp < 0 ? -bp : bp) / 100, (bp < 0 ? -bp : bp) % 100);
+		};
+		const int64_t backing = BankBackingBp(bk);
+		line(fmt::format("ธนาคารกลางของโซนนี้ ({})", ZoneCurrencyName(this->zone)), TC_YELLOW);
+		line(fmt::format("  ช่วงดอกเบี้ยนโยบาย {} - {}   (ส่วนต่างของประเทศ {} bp)", pct_text(PolicyLowerBp(bk.ShiftBp())), pct_text(PolicyUpperBp(bk.ShiftBp())), BANK_ZONE_SPREAD_BP[this->zone]), TC_GREY);
+		line(fmt::format("  เงินของธนาคาร {}   ทอง {} oz", MoneyText(bk.trading_revenue_cents / 100), bk.reserve_oz), TC_WHITE);
+		line(fmt::format("  ทองหนุนหลังเงินสดในโซน {}   เครดิต {}", pct_text(backing), GetCreditTierName(static_cast<CreditTier>(BankCreditTierIndex(bk)))), TC_WHITE);
+		y += ScaleGUITrad(6);
+		line("ภาษีเข้าเป็นเงินของธนาคารโซนที่เก็บ ภาษีรายได้ กำไรเทรด ปันผล เข้าธนาคารโซนของ HQ บริษัท", TC_GREY, 1);
+		line("เปลี่ยนระดับภาษีด้วยคอนโซล: zone_tax <โซน> <เปอร์เซ็นต์> (เล่นคนเดียว)", TC_GREY, 1);
 	}
 };
 
@@ -350,7 +371,7 @@ static constexpr std::initializer_list<NWidgetPart> _nested_zone_tax_widgets = {
 		NWidget(WWT_SHADEBOX, COLOUR_GREY),
 		NWidget(WWT_STICKYBOX, COLOUR_GREY),
 	EndContainer(),
-	NWidget(WWT_PANEL, COLOUR_GREY, WID_ZT_PANEL), SetMinimalSize(560, 300), SetFill(1, 1),
+	NWidget(WWT_PANEL, COLOUR_GREY, WID_ZT_PANEL), SetMinimalSize(660, 560), SetFill(1, 1),
 	EndContainer(),
 };
 

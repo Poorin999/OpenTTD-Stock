@@ -9,6 +9,7 @@
 
 #include "stdafx.h"
 #include "cargotype.h"
+#include "custom_cargo_icons.h"
 
 #include "table/strings.h"
 
@@ -61,6 +62,8 @@ static const FirsDesertCargo FIRS_DESERT[] = {
 	{ CargoLabel{'FISH'}, CargoLabel{'FOOD'}, 208, 16, 0x100, 4550, 5, 25, true,  STR_FIRS_CARGO_PLURAL_FISH,       STR_FIRS_CARGO_SINGULAR_FISH,      STR_FIRS_QUANTITY_FISH,      STR_FIRS_ABBREV_FISH,      STR_TONS,   false },
 };
 
+static_assert(std::size(FIRS_DESERT) == CUSTOM_ICON_SPRITE_COUNT, "every FIRS desert cargo needs an icon: see make_cargo_icons.py");
+
 }
 
 /** How many FIRS desert cargo types the table has. */
@@ -104,5 +107,6 @@ bool MakeFirsDesertCargo(size_t n, CargoSpec &out, uint8_t bitnum, const CargoSp
 	out.units_volume = d.units;
 	out.quantifier = d.quantity;
 	out.abbrev = d.abbrev;
+	if (n < CUSTOM_ICON_SPRITE_COUNT) out.sprite = CUSTOM_ICON_SPRITE_BASE + static_cast<uint32_t>(n); // Own icon of this cargo (custom_cargo_icons.cpp), drawn by code.
 	return true;
 }

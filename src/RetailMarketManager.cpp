@@ -242,7 +242,7 @@ retail::CompanySignals RetailMarketManager::GatherSignals(CompanyID company) con
 	s.de_ppm = BankDebtToEquityPpm(GetCentralBankDebt(company), v.book);
 
 	/* The penalty interest rate of the central bank. */
-	const BankAccount &account = _central_bank.accounts[i];
+	const BankAccount &account = CentralBank::accounts[i];
 	s.in_default = account.in_default;
 	s.penalty_level = account.penalty_level;
 
@@ -565,7 +565,7 @@ BotView BotOpinion(CompanyID self, CompanyID target)
 	/* Quality: no long position in a company that may fail. */
 	const StockValuation &val = _stock_market.valuation[t];
 	const int64_t de = BankDebtToEquityPpm(GetCentralBankDebt(target), val.book);
-	const BankAccount &account = _central_bank.accounts[t];
+	const BankAccount &account = CentralBank::accounts[t];
 	if (account.in_default || de > BOT_MAX_DE_PPM || (val.quarters > 0 && val.earnings < 0)) v.can_long = false;
 	if (account.in_default) score -= retail::PPM / 10; // a company in default is more likely to fall further
 

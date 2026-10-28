@@ -163,7 +163,7 @@ static bool ConZones(std::span<std::string_view> argv)
 	for (int i = 0; i < _zone_market.count; i++) {
 		const ZoneState &z = _zone_market.zones[i];
 		const Town *capital = ClosestTownFromTile(z.capital, UINT_MAX);
-		IConsolePrint(CC_DEFAULT, "zone {}  capital {}  currency {} ({})  rate {}.{:03}  people {}  fees earned {}", i + 1, capital != nullptr ? GetString(STR_TOWN_NAME, capital->index) : std::string("-"), ZoneCurrencyName(i), ZoneCurrencySymbol(i), z.rate_ppm / 1'000'000, (z.rate_ppm % 1'000'000) / 1'000, z.population, z.fees);
+		IConsolePrint(CC_DEFAULT, "zone {}  capital {}  currency {} ({})  rate {}.{:03}  people {}  fees earned {}  tax level {}%", i + 1, capital != nullptr ? GetString(STR_TOWN_NAME, capital->index) : std::string("-"), ZoneCurrencyName(i), ZoneCurrencySymbol(i), z.rate_ppm / 1'000'000, (z.rate_ppm % 1'000'000) / 1'000, z.population, z.fees, z.tax_percent);
 	}
 	for (int a = 0; a < _zone_market.count; a++) {
 		for (int b = 0; b < _zone_market.count; b++) {
@@ -172,6 +172,34 @@ static bool ConZones(std::span<std::string_view> argv)
 			IConsolePrint(CC_DEFAULT, "fee {} -> {}: {}.{:02}%", a + 1, b + 1, f / 10'000, (f % 10'000) / 100);
 		}
 	}
+	return true;
+}
+
+/** Set the tax level of a zone: 'zone_tax <zone 1-4> <percent 0-300>', 100 = the base rates of tax.h. Single player only (it changes the game). */
+static bool ConZoneTax(std::span<std::string_view> argv)
+{
+	if (argv.empty() || (argv.size() >= 2 && argv[1] == "?")) {
+		IConsolePrint(CC_HELP, "Set the tax level of a money zone in percent of the base rates (100 = the base). Usage: 'zone_tax <zone> <percent>', zone 1-4, percent 0-300. It scales the land tax, transport tax and VAT of the zone, and the income, capital gains and dividend tax of the companies with headquarters there. Single player only. 'zones' shows the levels.");
+		return true;
+	}
+	if (_networking) {
+		IConsolePrint(CC_ERROR, "zone_tax is for single player only (it would differ between the players).");
+		return true;
+	}
+	if (argv.size() != 3) {
+		IConsolePrint(CC_ERROR, "Usage: zone_tax <zone> <percent>");
+		return true;
+	}
+	int zone = 0;
+	int percent = 0;
+	const auto r1 = std::from_chars(argv[1].data(), argv[1].data() + argv[1].size(), zone);
+	const auto r2 = std::from_chars(argv[2].data(), argv[2].data() + argv[2].size(), percent);
+	if (r1.ec != std::errc() || r2.ec != std::errc() || zone < 1 || zone > _zone_market.count || percent < 0 || percent > 300) {
+		IConsolePrint(CC_ERROR, "Zone must be 1 to {} and percent 0 to 300.", _zone_market.count);
+		return true;
+	}
+	_zone_market.zones[zone - 1].tax_percent = percent;
+	IConsolePrint(CC_DEFAULT, "zone {}: tax level {}%", zone, percent);
 	return true;
 }
 
@@ -307,6 +335,7 @@ void RegisterStockConsoleCommands()
 	IConsole::CmdRegister("cargo_prices", ConCargoPrices);
 	IConsole::CmdRegister("zones", ConZones);
 	IConsole::CmdRegister("zones_map", ConZonesMap);
+	IConsole::CmdRegister("zone_tax", ConZoneTax);
 	IConsole::CmdRegister("zone_lines", ConZoneLines);
 	IConsole::CmdRegister("gold_factors", ConGoldFactors);
 	IConsole::CmdRegister("citizen_gold", ConCitizenGold);

@@ -69,7 +69,8 @@ enum StockRecordKind : uint8_t {
 	SRK_TOWN_NEWS = 38, ///< What the daily town news scan remembers about a town: ym = index of the town, v1 = population at the start of the window, v2 = game day of that snapshot, v3 = number of population marks reached.
 	SRK_TOWN_POS = 37, ///< Open terminal position of a citizen group: a = group (citizengold::Style), b = symbol | 0x80 when long, ym = index of the town, v1 = volume, v2 = entry price, v3 = stop loss, v4 = take profit.
 	SRK_BANK_LOG = 41,  ///< Line of the account log of the bank window: a = company, b = line (LedgerItem), ym = game day of the year, v1 = amount (sum of the bookings), v2 = ledger year, v3 = number of bookings. Written newest first.
-	SRK_ZONE_TAX = 43, ///< Tax collected in a money zone: a = zone number, v1 = land tax, v2 = transport tax, v3 = VAT of deliveries into the zone (money units). Written for every zone, after SRK_ZONE.
+	SRK_BANK_GOLD = 44, ///< The gold of one bank: a = zone of the bank, v1 = ounces. Written for every bank, after SRK_GOLD (whose v3 is the sum, kept for the shape of the record: a savegame without SRK_BANK_GOLD splits it between the banks).
+	SRK_ZONE_TAX = 43, ///< Tax collected in a money zone: a = zone number, v1 = land tax, v2 = transport tax, v3 = VAT of deliveries into the zone, v4 = taxes of the companies with headquarters in the zone, v5 = tax level in percent + 1 (money units). Written for every zone, after SRK_ZONE.
 	SRK_ZONE = 42,    ///< Money zone: a = zone number, v1 = capital tile, v2 = exchange rate in ppm, v3 = exchange fees earned (money units). Written for every zone, in order.
 	SRK_GOLD_NEWS = 40, ///< State of the real gold news: ym = ounces that the mines delivered since the last news (mine_news_oz), v1 = shock of today in 1/100 money units (day_shift_cents, always 0 now), v2 = the level of the economy at the last price step in 1/100 money units (last_level_cents, 0 = unknown), v3 = cash in circulation averaged over about 7 game days (cash_avg, 0 = unknown), v4 = price impact of the trades in ppm (impact_ppm).
 	SRK_TOWN_BOOK = 36, ///< One group of citizens of a town: a = group (citizengold::Style), ym = index of the town, v1 = gold in hundredths of an ounce, v2 = what it cost, v3 = cash, v4 = profit of closed sales, v5 = wins | losses << 24 | cooldown << 48.
@@ -257,7 +258,7 @@ struct STCKChunkHandler : ChunkHandler {
 		}
 
 		for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
-			const BankAccount &b = _central_bank.accounts[i];
+			const BankAccount &b = CentralBank::accounts[i];
 			if (b.debt == 0 && b.interest_paid == 0) continue;
 			StockRecord r;
 			r.kind = SRK_BANK;
@@ -269,7 +270,7 @@ struct STCKChunkHandler : ChunkHandler {
 
 		/* The penalty status of the loans: without it a default would be forgotten when the game is loaded. */
 		for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
-			const BankAccount &b = _central_bank.accounts[i];
+			const BankAccount &b = CentralBank::accounts[i];
 			if (b.penalty_level == 0 && !b.in_default && b.clean_days == 0 && b.carry == 0 && b.rate_bp == 0 && b.last_charged_day < 0) continue;
 			StockRecord r;
 			r.kind = SRK_BANK_RISK;
@@ -281,10 +282,12 @@ struct STCKChunkHandler : ChunkHandler {
 			write(r);
 		}
 
-		if (_central_bank.policy.last_decision_day >= 0) {
-			const MonetaryPolicy &p = _central_bank.policy;
+		for (int z = 0; z < BankCount(); z++) {
+			const MonetaryPolicy &p = _banks[z].policy;
+			if (p.last_decision_day < 0) continue;
 			StockRecord r;
 			r.kind = SRK_POLICY;
+			r.a = static_cast<size_t>(z); // The bank of the zone (a savegame from before the zone banks has 0: the first bank).
 			r.ym = (p.measured ? 1 : 0) | (p.emergency ? 2 : 0); // Bit 0: measured. Bit 1: emergency mode.
 			r.v1 = p.shift_bp;
 			r.v2 = p.prev_index_ppm;
@@ -311,6 +314,8 @@ struct STCKChunkHandler : ChunkHandler {
 			r.v1 = _zone_market.zones[i].land_tax;
 			r.v2 = _zone_market.zones[i].transport_tax;
 			r.v3 = _zone_market.zones[i].vat;
+			r.v4 = _zone_market.zones[i].company_tax;
+			r.v5 = _zone_market.zones[i].tax_percent + 1; // +1: 0 means that an older savegame has no level.
 			write(r);
 		}
 
@@ -431,19 +436,23 @@ struct STCKChunkHandler : ChunkHandler {
 			}
 		}
 
-		if (_central_bank.written_off != 0 || _central_bank.uncovered_loss != 0) {
+		for (int z = 0; z < BankCount(); z++) {
+			const CentralBank &bk = _banks[z];
+			if (bk.written_off == 0 && bk.uncovered_loss == 0) continue;
 			StockRecord r;
 			r.kind = SRK_BANK_LOSS;
-			r.v1 = _central_bank.written_off;
-			r.v2 = _central_bank.uncovered_loss;
+			r.a = static_cast<size_t>(z);
+			r.v1 = bk.written_off;
+			r.v2 = bk.uncovered_loss;
 			write(r);
 		}
 
-		{
+		for (int z = 0; z < BankCount(); z++) {
 			/* Always written: a savegame without this record is from before the bank had its own money and gets the start capital. */
 			StockRecord r;
 			r.kind = SRK_BANK_BUDGET;
-			r.v1 = _central_bank.trading_revenue_cents;
+			r.a = static_cast<size_t>(z);
+			r.v1 = _banks[z].trading_revenue_cents;
 			write(r);
 		}
 
@@ -452,10 +461,18 @@ struct STCKChunkHandler : ChunkHandler {
 			r.kind = SRK_GOLD;
 			r.v1 = _gold_reserve.price_cents;
 			r.v2 = _gold_reserve.baseline_supply;
-			r.v3 = _gold_reserve.bank_reserve_oz;
+			r.v3 = BankReserveTotalOz();
 			r.v4 = _gold_reserve.pressure_ppm;
 			r.v5 = _gold_reserve.market_stock_oz + 1;
 			write(r);
+
+			for (int z = 0; z < BankCount(); z++) {
+				StockRecord g;
+				g.kind = SRK_BANK_GOLD;
+				g.a = static_cast<size_t>(z);
+				g.v1 = _banks[z].reserve_oz;
+				write(g);
+			}
 
 			StockRecord n;
 			n.kind = SRK_GOLD_NEWS;
@@ -746,13 +763,13 @@ struct STCKChunkHandler : ChunkHandler {
 
 				case SRK_BANK:
 					if (r.a >= MAX_COMPANIES) break;
-					_central_bank.accounts[r.a].debt = std::max<int64_t>(r.v1, 0);
-					_central_bank.accounts[r.a].interest_paid = std::max<int64_t>(r.v2, 0);
+					CentralBank::accounts[r.a].debt = std::max<int64_t>(r.v1, 0);
+					CentralBank::accounts[r.a].interest_paid = std::max<int64_t>(r.v2, 0);
 					break;
 
 				case SRK_BANK_RISK: {
 					if (r.a >= MAX_COMPANIES) break;
-					BankAccount &b = _central_bank.accounts[r.a];
+					BankAccount &b = CentralBank::accounts[r.a];
 					b.penalty_level = static_cast<uint8_t>(std::clamp<int64_t>(r.v1 & 0xFF, 0, BANK_PENALTY_LEVEL_MAX));
 					b.in_default = ((r.v1 >> 8) & 1) != 0;
 					b.clean_days = static_cast<uint16_t>(std::clamp<int64_t>((r.v1 >> 16) & 0xFFFF, 0, UINT16_MAX));
@@ -763,7 +780,8 @@ struct STCKChunkHandler : ChunkHandler {
 				}
 
 				case SRK_POLICY: {
-					MonetaryPolicy &p = _central_bank.policy;
+					if (r.a >= static_cast<size_t>(BANK_ZONES)) break;
+					MonetaryPolicy &p = _banks[r.a].policy;
 					p.shift_bp = std::clamp<int64_t>(r.v1, POLICY_SHIFT_MIN_BP, POLICY_EMERGENCY_SHIFT_MAX_BP);
 					p.prev_index_ppm = std::max<int64_t>(r.v2, 0);
 					p.last_decision_day = std::max<int64_t>(r.v3 - 1, -1);
@@ -799,6 +817,8 @@ struct STCKChunkHandler : ChunkHandler {
 						z.land_tax = std::max<int64_t>(r.v1, 0);
 						z.transport_tax = std::max<int64_t>(r.v2, 0);
 						z.vat = std::max<int64_t>(r.v3, 0);
+						z.company_tax = std::max<int64_t>(r.v4, 0);
+						if (r.v5 > 0) z.tax_percent = std::clamp<int64_t>(r.v5 - 1, 0, 300);
 					}
 					break;
 
@@ -926,18 +946,26 @@ struct STCKChunkHandler : ChunkHandler {
 				}
 
 				case SRK_BANK_LOSS:
-					_central_bank.written_off = std::max<int64_t>(r.v1, 0);
-					_central_bank.uncovered_loss = std::clamp<int64_t>(r.v2, 0, _central_bank.written_off);
+					if (r.a >= static_cast<size_t>(BANK_ZONES)) break;
+					_banks[r.a].written_off = std::max<int64_t>(r.v1, 0);
+					_banks[r.a].uncovered_loss = std::clamp<int64_t>(r.v2, 0, _banks[r.a].written_off);
 					break;
 
 				case SRK_BANK_BUDGET:
-					_central_bank.trading_revenue_cents = std::max<int64_t>(r.v1, 0);
+					if (r.a >= static_cast<size_t>(BANK_ZONES)) break;
+					_banks[r.a].trading_revenue_cents = std::max<int64_t>(r.v1, 0);
+					break;
+
+				case SRK_BANK_GOLD:
+					if (r.a >= static_cast<size_t>(BANK_ZONES)) break;
+					_banks[r.a].reserve_oz = std::max<int64_t>(r.v1, 0);
+					_bank_legacy_reserve_oz = 0; // The savegame knows the gold of every bank.
 					break;
 
 				case SRK_GOLD:
 					_gold_reserve.price_cents = std::max<int64_t>(r.v1, 0);
 					_gold_reserve.baseline_supply = std::max<int64_t>(r.v2, 0);
-					_gold_reserve.bank_reserve_oz = std::max<int64_t>(r.v3, 0);
+					_bank_legacy_reserve_oz = std::max<int64_t>(r.v3, 0); // Split between the banks at the next midnight, unless SRK_BANK_GOLD records follow.
 					_gold_reserve.market_stock_oz = r.v5 <= 0 ? GoldReserveManager::MARKET_STOCK_START : r.v5 - 1;
 					_gold_reserve.pressure_ppm = std::clamp<int64_t>(r.v4, -GoldReserveManager::PRESSURE_MAX_PPM, GoldReserveManager::PRESSURE_MAX_PPM);
 					break;

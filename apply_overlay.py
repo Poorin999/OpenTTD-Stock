@@ -43,7 +43,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "tax.h": "src", "tax.cpp": "src", "zone_market.h": "src", "zone_market.cpp": "src", "zone_market_math.h": "src", "zone_map_gui.h": "src", "zone_borders.h": "src", "zone_borders.cpp": "src", "hq_gate.h": "src", "hq_gate.cpp": "src", "zone_map_gui.cpp": "src",
     "cargo_market.h": "src", "cargo_market.cpp": "src", "CargoMarketMath.h": "src",
     "town_treasury.h": "src", "town_treasury.cpp": "src", "citizen_gold.h": "src", "citizen_terminal.h": "src", "gold_market_math.h": "src", "oil_market_math.h": "src", "oil_market_gui.h": "src", "oil_market_gui.cpp": "src",
-    "gold_reserve.h": "src", "gold_reserve.cpp": "src", "gold_industry.cpp": "src", "firs_desert_cargo.cpp": "src", "english_firs_strings.txt": "src", "desert_industries.cpp": "src", "english_desert_industries_strings.txt": "src",
+    "gold_reserve.h": "src", "gold_reserve.cpp": "src", "gold_industry.cpp": "src", "firs_desert_cargo.cpp": "src", "custom_cargo_icons.cpp": "src", "custom_cargo_icons.h": "src", "english_firs_strings.txt": "src", "desert_industries.cpp": "src", "english_desert_industries_strings.txt": "src",
     "valuables.h": "src", "valuables.cpp": "src",
     "gold_panel.h": "src", "gold_panel.cpp": "src", "gold_buy_gui.cpp": "src",
     "town_finance_gui.h": "src", "town_finance_gui.cpp": "src",
@@ -73,12 +73,13 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_GOLD_BUY", "buy gold for the reserve"),
     ("CMD_GOLD_SELL", "sell gold of the reserve"),
 ]
-NEW_SOURCES = ["zone_borders.cpp", "zone_borders.h", "hq_gate.cpp", "hq_gate.h", "zone_map_gui.cpp", "zone_map_gui.h", "zone_market.cpp", "zone_market.h", "zone_market_math.h", "wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "oil_market_math.h", "oil_market_gui.cpp", "oil_market_gui.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "firs_desert_cargo.cpp", "desert_industries.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "company_info_gui.cpp", "company_info_gui.h", "company_info_math.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
+NEW_SOURCES = ["zone_borders.cpp", "zone_borders.h", "hq_gate.cpp", "hq_gate.h", "zone_map_gui.cpp", "zone_map_gui.h", "zone_market.cpp", "zone_market.h", "zone_market_math.h", "wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "oil_market_math.h", "oil_market_gui.cpp", "oil_market_gui.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "firs_desert_cargo.cpp", "custom_cargo_icons.cpp", "custom_cargo_icons.h", "desert_industries.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "company_info_gui.cpp", "company_info_gui.h", "company_info_math.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
                "RetailMath.h", "RetailMarketManager.h", "RetailMarketManager.cpp",
                "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]
 REPLACE_KEYS = {"STR_STOCK_TIP_TOOLBOX", "STR_STOCK_TIP_SUMMARY", "STR_STOCK_ORDER_INFO", "STR_STOCK_TIP_DEPOSIT", "STR_STOCK_TIP_WITHDRAW"}
 STRING_FILES = ["english_stock_strings.txt", "english_wallet_strings.txt", "english_round8_strings.txt", "english_timeframe_strings.txt", "english_central_bank_strings.txt", "english_gold_strings.txt", "english_firs_strings.txt", "english_desert_industries_strings.txt", "english_town_finance_strings.txt", "english_company_info_strings.txt", "english_valuables_strings.txt", "english_news_strings.txt"]
+THAI_STRING_FILES = ["thai_firs_strings.txt", "thai_desert_industries_strings.txt"]  # Thai texts of the new strings, appended to lang/thai.txt
 ANCHORS = ["STR_STOCK_ERROR_NO_ORDER", "STR_STOCK_NEWS_ORDER_EXPIRED"]
 
 
@@ -970,6 +971,97 @@ def patch_firs_desert_cargo(tree):
     print("cargotype.cpp: FIRS desert cargo added to Sub-tropical")
 
 
+CUSTOM_ICON_MARKER = "CUSTOM_CARGO_ICON_PATCH"
+
+
+def patch_custom_icons(tree):
+    """Own small cargo icons drawn by code (custom_cargo_icons.cpp): spritecache.cpp builds the sprite numbers of the mod (0xF00000 and up,
+    far above every real sprite) from a list of palette numbers, so no NewGRF and no baseset file is needed. Four small edits, in place, at anchors;
+    nothing is written when an anchor is missing."""
+    p = tree / "src" / "spritecache.cpp"
+    if not p.is_file():
+        print("WARNING: spritecache.cpp not found, the own cargo icons are not added")
+        return
+    t, crlf = _read_lf(p)
+    if CUSTOM_ICON_MARKER in t:
+        print("spritecache.cpp: own cargo icons already there")
+        return
+    inc_anchor = '#include "spritecache_internal.h"\n'
+    reset_anchor = "void GfxInitSpriteMem()\n{\n"
+    clear_anchor = "void GfxClearSpriteCache()\n{\n"
+    raw_anchor = "void *GetRawSprite(SpriteID sprite, SpriteType type, SpriteAllocator *allocator, SpriteEncoder *encoder)\n{\n"
+    exist_anchor = "bool SpriteExists(SpriteID id)\n{\n"
+    for a in (inc_anchor, reset_anchor, clear_anchor, raw_anchor, exist_anchor):
+        if t.count(a) != 1:
+            print(f"WARNING: anchor not found exactly once in spritecache.cpp ({a.strip()[:40]}), the own cargo icons are not added")
+            return
+    m = f"/* {CUSTOM_ICON_MARKER} */"
+    build = f"""{m}
+/** The own icons of the mod once they are encoded for the blitter (cleared with the sprite cache). */
+static std::map<SpriteID, std::unique_ptr<std::byte[]>> _custom_icon_cache;
+
+/** Build the encoded sprite of an own icon from its list of palette numbers. */
+static void *BuildCustomIcon(const CustomIconData &icon, SpriteAllocator &allocator, SpriteEncoder *encoder)
+{{
+	if (encoder == nullptr) encoder = BlitterFactory::GetCurrentBlitter();
+
+	SpriteLoader::SpriteCollection sprite;
+	SpriteLoader::Sprite &root = sprite[ZoomLevel::Min];
+	root.width = icon.width;
+	root.height = icon.height;
+	root.x_offs = 0;
+	root.y_offs = 0;
+	root.colours = {{SpriteComponent::Palette}};
+	root.AllocateData(ZoomLevel::Min, static_cast<size_t>(icon.width) * icon.height);
+	for (size_t i = 0; i < static_cast<size_t>(icon.width) * icon.height; i++) {{
+		root.data[i].m = icon.pixels[i];
+		root.data[i].a = icon.pixels[i] != 0 ? 0xFF : 0x00;
+	}}
+
+	ZoomLevels avail;
+	avail.Set(ZoomLevel::Min);
+	if (!ResizeSprites(sprite, avail, encoder)) return nullptr;
+	return encoder->Encode(SpriteType::Normal, sprite, allocator);
+}}
+
+"""
+    t = t.replace(inc_anchor, inc_anchor + '#include "custom_cargo_icons.h" ' + m + "\n", 1)
+    t = t.replace(exist_anchor, exist_anchor + f"\tif (IsCustomIconSprite(id)) return false; {m}\n", 1)
+    t = t.replace(reset_anchor, reset_anchor + f"\t_custom_icon_cache.clear(); {m}\n", 1)
+    t = t.replace(clear_anchor, clear_anchor + f"\t_custom_icon_cache.clear(); {m}\n", 1)
+    hook = f"""	/* {m[3:-3]}: an own icon of the mod. */
+	if (IsCustomIconSprite(sprite) && type == SpriteType::Normal) {{
+		CustomIconData icon;
+		if (GetCustomIcon(sprite, icon)) {{
+			if (allocator != nullptr || encoder != nullptr) {{
+				UniquePtrSpriteAllocator own_allocator;
+				SpriteAllocator &use = allocator != nullptr ? *allocator : own_allocator;
+				void *data = BuildCustomIcon(icon, use, encoder);
+				if (data != nullptr) return data;
+			}} else {{
+				auto it = _custom_icon_cache.find(sprite);
+				if (it == _custom_icon_cache.end()) {{
+					UniquePtrSpriteAllocator cache_allocator;
+					if (BuildCustomIcon(icon, cache_allocator, nullptr) != nullptr) it = _custom_icon_cache.emplace(sprite, std::move(cache_allocator.data)).first;
+				}}
+				if (it != _custom_icon_cache.end()) return static_cast<void *>(it->second.get());
+			}}
+		}}
+		sprite = SPR_IMG_QUERY; // Something went wrong: the red question mark, like for every missing sprite.
+	}}
+
+"""
+    t = t.replace(raw_anchor, raw_anchor + hook, 1)
+    # BuildCustomIcon needs ResizeSprites (static, defined above ReadRecolourSprite) and must stand before GetRawSprite.
+    rm = re.search(r"^/\*\*\n \* Handles the case when a sprite of different type", t, re.M)
+    if not rm:
+        print("WARNING: HandleInvalidSpriteRequest comment not found in spritecache.cpp, the own cargo icons are not added")
+        return
+    t = t[:rm.start()] + build + t[rm.start():]
+    _write_like(p, t, crlf)
+    print("spritecache.cpp: own cargo icons added")
+
+
 def patch_gold_industries(tree):
     """Gold mines in every climate and banks that take the gold cargo (gold_industry.cpp): one declaration before ResetIndustries() and one call at
     the end of it, in industry_cmd.cpp (in place, at an anchor; nothing is written when the anchor is missing)."""
@@ -1179,6 +1271,7 @@ def main(tree):
     patch_company_yearly(tree)
     patch_gold_cargo(tree)
     patch_firs_desert_cargo(tree)
+    patch_custom_icons(tree)
     patch_gold_industries(tree)
     patch_desert_industries(tree)
     patch_console_file(tree)
@@ -1480,6 +1573,26 @@ def main(tree):
     s = s[:anchor.end()] + "\n".join(todo) + ("\n" if todo else "") + s[anchor.end():]
     p.write_text(s, encoding="utf-8")
     print(f"english.txt: {len(todo)} strings added")
+
+    # thai.txt: the Thai texts of the new strings (a key that is already in thai.txt is left alone; the other languages show the English text)
+    pt = tree / "src" / "lang" / "thai.txt"
+    if pt.is_file():
+        st = pt.read_bytes().decode("utf-8")
+        crlf_t = "\r\n" in st
+        st = st.replace("\r\n", "\n")
+        add_th = []
+        for name in THAI_STRING_FILES:
+            for line in find(name, "src").read_text(encoding="utf-8").replace("\r", "").splitlines():
+                if line.startswith("STR_") and not re.search(r"^" + re.escape(line.split()[0].split(":")[0]) + r"[ \t]+:", st, re.M):
+                    add_th.append(line)
+        if add_th:
+            if not st.endswith("\n"):
+                st += "\n"
+            st += "\n".join(add_th) + "\n"
+            pt.write_bytes((st.replace("\n", "\r\n") if crlf_t else st).encode("utf-8"))
+        print(f"thai.txt: {len(add_th)} strings added")
+    else:
+        print("WARNING: src/lang/thai.txt not found, the Thai texts of the new strings are not added")
     # Money trace (debug): every change of the cash of a company is summed per game minute and written to money_trace.log.
     # Money that moves without the normal expense functions (wallets, central bank) shows as "DIRECT". Switch off with MONEY_TRACE = False.
     p = find_definition(tree, r"^void SubtractMoneyFromCompanyFract\(")

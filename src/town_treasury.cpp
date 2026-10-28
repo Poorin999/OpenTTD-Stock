@@ -187,7 +187,7 @@ static void TermTotals(const TownAccount &a, citizengold::Style style, const Ter
 }
 
 /** One game hour of the terminal trade of one group (speculators and overtraders): stop loss, take profit, stop out, then a new decision. */
-static void TermStep(TownAccount &a, citizengold::Style style, uint64_t dice, const TermQuotes &qs)
+static void TermStep(TownAccount &a, CentralBank &bank, citizengold::Style style, uint64_t dice, const TermQuotes &qs)
 {
 	citizengold::Book &b = a.books[static_cast<size_t>(style)];
 
@@ -239,7 +239,7 @@ static void TermStep(TownAccount &a, citizengold::Style style, uint64_t dice, co
 	if (b.cash < commission || free_margin < margin + commission) return;
 	b.cash -= commission;
 	b.turnover += value;
-	_central_bank.trading_revenue_cents += commission * 100;
+	bank.trading_revenue_cents += commission * 100; // The bank of the zone of the town.
 	_stock_market.ApplyImpact(target, act.is_long, static_cast<uint32_t>(act.units));
 
 	citizengold::TermPos p;
@@ -256,7 +256,7 @@ static void TermStep(TownAccount &a, citizengold::Style style, uint64_t dice, co
 }
 
 /** Swap: every game day a position costs a small part of its value. */
-static void TermSwap(TownAccount &a)
+static void TermSwap(TownAccount &a, CentralBank &bank)
 {
 	for (const citizengold::TermPos &p : a.positions) {
 		int64_t price = p.entry;
@@ -268,7 +268,7 @@ static void TermSwap(TownAccount &a)
 		citizengold::Book &b = a.books[static_cast<size_t>(p.style)];
 		const int64_t paid = std::min(b.cash, swap);
 		b.cash -= paid;
-		_central_bank.trading_revenue_cents += paid * 100;
+		bank.trading_revenue_cents += paid * 100;
 	}
 }
 
@@ -308,7 +308,7 @@ static void TownsHourly(const GameTimeSnapshot &now)
 			if (b.cooldown > 0) b.cooldown--;
 			/* The speculators and the overtraders trade in the Trading Terminal (positions), the others buy physical gold. */
 			if (static_cast<citizengold::Style>(i) == citizengold::Style::Speculator || static_cast<citizengold::Style>(i) == citizengold::Style::Overtrader) {
-				TermStep(a, static_cast<citizengold::Style>(i), citizengold::Mix(CitizenSeed() ^ 0x7E2D, t->index.base(), i, hour), term_quotes);
+				TermStep(a, BankOfTile(t->xy), static_cast<citizengold::Style>(i), citizengold::Mix(CitizenSeed() ^ 0x7E2D, t->index.base(), i, hour), term_quotes);
 				continue;
 			}
 			const citizengold::GoldOrder o = citizengold::Decide(static_cast<citizengold::Style>(i), b, m, citizengold::Mix(CitizenSeed(), t->index.base(), i, hour));
@@ -318,13 +318,13 @@ static void TownsHourly(const GameTimeSnapshot &now)
 				if (f.cz <= 0) continue;
 				m.stock_cz -= f.cz;
 				net_bought_cz += f.cz;
-				_central_bank.trading_revenue_cents += (m.ask_cents - m.price_cents) * f.cz / citizengold::CZ_PER_OZ + f.commission * 100;
+				BankOfTile(t->xy).trading_revenue_cents += (m.ask_cents - m.price_cents) * f.cz / citizengold::CZ_PER_OZ + f.commission * 100;
 			} else {
 				const citizengold::Fill f = citizengold::ApplySell(b, o.cz, m.bid_cents);
 				if (f.cz <= 0) continue;
 				m.stock_cz += f.cz;
 				net_bought_cz -= f.cz;
-				_central_bank.trading_revenue_cents += (m.price_cents - m.bid_cents) * f.cz / citizengold::CZ_PER_OZ + f.commission * 100;
+				BankOfTile(t->xy).trading_revenue_cents += (m.price_cents - m.bid_cents) * f.cz / citizengold::CZ_PER_OZ + f.commission * 100;
 				if (static_cast<citizengold::Style>(i) == citizengold::Style::Speculator && b.gold_cz == 0) b.cooldown = static_cast<int32_t>(citizengold::SPEC_COOLDOWN_HOURS);
 				/* The town gains tax on the profit of the sale. */
 				if (f.gain > 0) {
@@ -378,7 +378,7 @@ static void TownsDaily(const GameTimeSnapshot &now)
 		a.taxed += tax;
 
 		/* The gold trade and the terminal trade of the citizens run every game hour (TownsHourly); the swap of their positions is paid here. */
-		TermSwap(a);
+		TermSwap(a, BankOfTile(t->xy));
 
 		/* Development: fund new buildings for 3 months, once the treasury can pay for it. */
 		const int64_t cost = (TOWN_DEVELOP_BASE_COST + pop * TOWN_DEVELOP_COST_PER_CAPITA) * index_ppm / 1'000'000;

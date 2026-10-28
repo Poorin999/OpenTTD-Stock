@@ -143,9 +143,9 @@ static bool TryRun(F &&cmd)
 /** Cash that the company keeps: a minimum, a month of interest at the highest penalty rate, and the working capital for growth. */
 static int64_t CashReserve(CompanyID id)
 {
-	const int64_t daily = BankDailyInterest(GetCentralBankDebt(id), BankPenaltyRateBp(BANK_PENALTY_LEVEL_MAX, _central_bank.policy.shift_bp), 0).interest; // The penalty rate is higher in emergency mode.
+	const int64_t daily = BankDailyInterest(GetCentralBankDebt(id), BankPenaltyRateBp(BANK_PENALTY_LEVEL_MAX, BankOfCompany(id).ShiftBp()), 0).interest; // The penalty rate is higher in emergency mode.
 	/* No growth cash for an account in default: then only the minimum counts and the bot does not borrow at all. */
-	const int64_t growth = _central_bank.accounts[id.base()].in_default ? 0 : GetCentralBankCreditLimit(id) * STOCK_AI_GROWTH_CASH_PERCENT / 100;
+	const int64_t growth = CentralBank::accounts[id.base()].in_default ? 0 : GetCentralBankCreditLimit(id) * STOCK_AI_GROWTH_CASH_PERCENT / 100;
 	return STOCK_AI_MIN_RESERVE + STOCK_AI_RESERVE_INTEREST_DAYS * daily + growth;
 }
 
@@ -232,7 +232,7 @@ static void EnsureCash(Company *c, uint8_t wallet)
 
 	/* Then the central bank, only when the cash is really low and the account is in good standing. */
 	if (money >= reserve * STOCK_AI_BORROW_BELOW_PERCENT / 100) return;
-	if (_central_bank.accounts[id.base()].in_default) return;
+	if (CentralBank::accounts[id.base()].in_default) return;
 	const int64_t amount = std::min(reserve - money, GetCentralBankAvailable(id) * STOCK_AI_BORROW_SAFETY_PERCENT / 100);
 	if (amount > 0) TryRun([&](DoCommandFlags f) { return CmdBankBorrow(f, WALLET_CASH, Money(amount)); });
 }

@@ -451,8 +451,8 @@ void GoldPanel::DrawInfo(const Rect &r) const
 	}
 
 	const int64_t price = _gold_reserve.GetPriceCents();
-	const int64_t backing = _gold_reserve.GetBackingBp();
-	const CreditTier tier = _gold_reserve.GetCreditTier();
+	const int64_t backing = BankBackingBp(LocalBank()); // The bank of the zone of the local company.
+	const CreditTier tier = static_cast<CreditTier>(BankCreditTierIndex(LocalBank()));
 	auto ounces = [](int64_t v) { return fmt::format("{} oz", v); };
 
 	/* Card 1: the spot prices (large) and the buy / sell price. */
@@ -485,9 +485,9 @@ void GoldPanel::DrawInfo(const Rect &r) const
 	{
 		const Rect card = at(l.table);
 		DrawCard(card, c.paper, c);
-		DrawTableRow(card, 0, l.row_h, GpText("ทองหนุนหลัง (ธนาคาร)", "Backing gold (bank)"), GpMoney(_gold_reserve.GetBackingValue()) + " (" + ounces(_gold_reserve.GetBackingOunces()) + ")", TC_BLACK, c);
+		DrawTableRow(card, 0, l.row_h, GpText("ทองหนุนหลัง (ธนาคาร)", "Backing gold (bank)"), GpMoney(BankBackingValue(LocalBank())) + " (" + ounces(LocalBank().reserve_oz) + ")", TC_BLACK, c);
 		DrawTableRow(card, 1, l.row_h, GpText("ทองในตลาดที่ขาย", "Market stock for sale"), ounces(_gold_reserve.market_stock_oz), TC_BLACK, c);
-		DrawTableRow(card, 2, l.row_h, GpText("เงินสดหมุนเวียน", "Circulating cash"), GpMoney(_gold_reserve.GetNotesInCirculation()), TC_BLACK, c);
+		DrawTableRow(card, 2, l.row_h, GpText("เงินสดหมุนเวียน", "Circulating cash"), GpMoney(BankNotes(LocalBank())), TC_BLACK, c);
 		DrawTableRow(card, 3, l.row_h, GpText("อัตราหนุนหลัง (ทองธนาคาร / เงินสด)", "Backing ratio (bank gold / cash)"), fmt::format("{}.{:02}%", backing / 100, backing % 100), TC_BLACK, c);
 		DrawTierRow(card, 4, l.row_h, GpText("ระดับเครดิต", "Credit standing"), tier, c);
 	}

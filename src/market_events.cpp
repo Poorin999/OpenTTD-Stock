@@ -99,9 +99,9 @@ void PublishMarketEvent(const MarketEvent &e)
 	/* A big crisis in the news can make the central bank meet at once (see MonetaryPolicy::CheckUnscheduled). Same event on every client, so the same decision. */
 	const int64_t news_day = e.minute / GameTimeManager::MINUTES_PER_DAY;
 	if ((e.kind == MarketEventKind::BankScare && e.severity >= 2) || (e.kind == MarketEventKind::Recession && e.severity >= 3)) {
-		_central_bank.policy.RequestNewsMeeting(PolicyNewsTrigger::Crisis, news_day);
+		for (int z = 0; z < BankCount(); z++) _banks[z].policy.RequestNewsMeeting(PolicyNewsTrigger::Crisis, news_day); // Every bank may meet.
 	} else if (e.kind == MarketEventKind::InflationScare && e.severity >= 3) {
-		_central_bank.policy.RequestNewsMeeting(PolicyNewsTrigger::InflationShock, news_day);
+		for (int z = 0; z < BankCount(); z++) _banks[z].policy.RequestNewsMeeting(PolicyNewsTrigger::InflationShock, news_day);
 	}
 
 	/* Every event is a news item. */
@@ -193,11 +193,16 @@ static bool RealGoldNewsForce(MarketEventKind kind, MarketEvent &out)
 		return true;
 	}
 	/* The bank sale. */
-	const int64_t before = _gold_reserve.bank_reserve_oz;
+	/* The bank with the most gold sells (the first one when they are equal). */
+	CentralBank *sale_bank = &_banks[0];
+	for (int z = 1; z < BankCount(); z++) {
+		if (_banks[z].reserve_oz > sale_bank->reserve_oz) sale_bank = &_banks[z];
+	}
+	const int64_t before = sale_bank->reserve_oz;
 	const int64_t ounces = before / 2;
 	if (ounces < MARKET_BANK_NEWS_MIN_OZ) return false;
-	const int64_t backing = _gold_reserve.GetBackingBp();
-	_gold_reserve.bank_reserve_oz -= ounces;
+	const int64_t backing = BankBackingBp(*sale_bank);
+	sale_bank->reserve_oz -= ounces;
 	_gold_reserve.market_stock_oz += ounces;
 	_gold_reserve.pressure_ppm = std::max<int64_t>(-GoldReserveManager::PRESSURE_MAX_PPM,
 			_gold_reserve.pressure_ppm - ounces * GoldReserveManager::PPM / GoldReserveManager::DEPTH_OUNCES); // A bank sale made as NEWS: stays in the news pressure.
@@ -230,7 +235,7 @@ static std::vector<CompanyFacts> CollectCompanyFacts()
 			f.value_prev = static_cast<int64_t>(q1.company_value);
 		}
 		f.debt = GetCentralBankDebt(c->index);
-		f.in_default = _central_bank.accounts[c->index.base()].in_default;
+		f.in_default = CentralBank::accounts[c->index.base()].in_default;
 		f.months_bankrupt = static_cast<int>(c->months_of_bankruptcy);
 		facts.push_back(f);
 	}

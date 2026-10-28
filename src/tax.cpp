@@ -37,9 +37,10 @@ static int64_t ScaleByPriceIndex(int64_t amount)
 
 /**
  * Take a tax from the cash of a company: it is an expense of the company (the "Other" line of the finances window), a line of the
- * account statement and income of the own money of the bank. The cash may go below zero, like it does for any other expense.
+ * account statement and income of the own money of a bank: the bank of the zone where the tax is collected (zone 0 .. count - 1), or, with zone -1,
+ * the bank of the zone of the headquarters of the company. The cash may go below zero, like it does for any other expense.
  */
-static void BookTax(CompanyID company, LedgerItem item, int64_t amount)
+static void BookTax(CompanyID company, LedgerItem item, int64_t amount, int zone = -1)
 {
 	if (amount <= 0 || !Company::IsValidID(company)) return;
 	{
@@ -47,7 +48,7 @@ static void BookTax(CompanyID company, LedgerItem item, int64_t amount)
 		SubtractMoneyFromCompany(CommandCost(EXPENSES_OTHER, Money(amount)));
 	}
 	RecordLedger(company, item, -amount);
-	_central_bank.trading_revenue_cents += amount * 100;
+	(zone >= 0 ? BankOfZone(zone) : BankOfCompany(company)).trading_revenue_cents += amount * 100;
 }
 
 /** An expense that is NOT a tax: the money goes out of the company cash (the "Other" line) and into the ledger, not to the central bank. */
@@ -61,15 +62,29 @@ static void BookFuel(CompanyID company, int64_t amount)
 	RecordLedger(company, LedgerItem::FuelCost, -amount);
 }
 
-void ChargeVat(CompanyID company, int64_t income)
+/** Income of the deliveries whose VAT was already charged one by one (ChargeVatPercent) in the payment that is running. One payment at a time, so one number is enough. */
+static int64_t _vat_charged_income = 0;
+
+int64_t ChargeVatPercent(CompanyID company, int64_t income, int64_t zone_percent, int zone)
 {
-	if (income <= 0) return;
-	BookTax(company, LedgerItem::TaxVat, income * TAX_VAT_PERCENT / 100);
+	if (income <= 0) return 0;
+	const int64_t vat = income * TAX_VAT_PERCENT * std::max<int64_t>(zone_percent, 0) / 10'000;
+	_vat_charged_income += income;
+	BookTax(company, LedgerItem::TaxVat, vat, zone);
+	return vat;
 }
 
-void ChargeZoneFee(CompanyID company, int64_t amount)
+void ChargeVat(CompanyID company, int64_t income)
 {
-	BookTax(company, LedgerItem::ZoneFee, amount);
+	const int64_t rest = income - _vat_charged_income; // What the zone VAT of the single deliveries did not cover.
+	_vat_charged_income = 0;
+	if (rest <= 0) return;
+	BookTax(company, LedgerItem::TaxVat, rest * TAX_VAT_PERCENT / 100);
+}
+
+void ChargeZoneFee(CompanyID company, int64_t amount, int zone)
+{
+	BookTax(company, LedgerItem::ZoneFee, amount, zone);
 }
 
 int64_t TakeInvestorTax(CompanyID company, LedgerItem item, int64_t profit)
@@ -82,10 +97,11 @@ int64_t TakeInvestorTax(CompanyID company, LedgerItem item, int64_t profit)
 		case LedgerItem::Dividends:      percent = TAX_DIVIDEND_PERCENT;      tax_item = LedgerItem::TaxDividend; break;
 		default: return 0;
 	}
-	const int64_t tax = profit * percent / 100;
+	const int64_t tax = profit * percent * ZoneTaxPercentOfCompany(company) / 10'000;
 	if (tax <= 0) return 0;
+	ZoneCountCompanyTax(company, tax);
 	RecordLedger(company, tax_item, -tax);
-	_central_bank.trading_revenue_cents += tax * 100;
+	BankOfCompany(company).trading_revenue_cents += tax * 100;
 	return tax;
 }
 
@@ -110,21 +126,21 @@ static const GameTimeSubscription _tax_daily(GameTimeEvent::Day, [](const GameTi
 {
 	if (_game_mode != GM_NORMAL) return;
 
-	/* The capitals of the zones, to say in which zone a tile or a vehicle is (the tax of the zone is shown in the zones window). */
+	/* The capitals of the zones, to say in which zone a tile or a vehicle is. Slot MAX_ZONES = outside of all zones (no zones yet), at the base rate. */
 	std::vector<zonemath::Pt> zone_caps;
 	for (int i = 0; i < _zone_market.count; i++) {
 		const TileIndex cap = _zone_market.zones[i].capital;
 		zone_caps.push_back({static_cast<int64_t>(TileX(cap)), static_cast<int64_t>(TileY(cap))});
 	}
 	auto zone_of = [&zone_caps](TileIndex tile) -> int {
-		if (zone_caps.empty()) return -1;
-		return zonemath::ZoneOf({static_cast<int64_t>(TileX(tile)), static_cast<int64_t>(TileY(tile))}, zone_caps);
+		if (zone_caps.empty()) return zonemath::MAX_ZONES;
+		const int z = zonemath::ZoneOf({static_cast<int64_t>(TileX(tile)), static_cast<int64_t>(TileY(tile))}, zone_caps);
+		return z >= 0 && z < zonemath::MAX_ZONES ? z : zonemath::MAX_ZONES;
 	};
-	std::array<int64_t, zonemath::MAX_ZONES> land_zone{};      // Land weight per zone.
-	std::array<int64_t, zonemath::MAX_ZONES> transport_zone{}; // Transport tax (before the price index) per zone.
+	using PerZone = std::array<int64_t, zonemath::MAX_ZONES + 1>;
 
-	/* Land: the weight of all tiles of every company in one pass over the map. */
-	std::array<int64_t, MAX_COMPANIES> land{};
+	/* Land: the weight of all tiles of every company, per zone, in one pass over the map. */
+	std::array<PerZone, MAX_COMPANIES> land{};
 	for (const auto tile : Map::Iterate()) {
 		switch (GetTileType(tile)) {
 			case MP_CLEAR: case MP_RAILWAY: case MP_ROAD: case MP_TUNNELBRIDGE: case MP_WATER: case MP_STATION: case MP_OBJECT: break;
@@ -132,14 +148,11 @@ static const GameTimeSubscription _tax_daily(GameTimeEvent::Day, [](const GameTi
 		}
 		const Owner owner = GetTileOwner(tile);
 		if (!Company::IsValidID(owner)) continue;
-		const int64_t weight = LandWeight(tile);
-		land[owner.base()] += weight;
-		const int zone = zone_of(static_cast<TileIndex>(tile));
-		if (zone >= 0 && zone < zonemath::MAX_ZONES) land_zone[zone] += weight;
+		land[owner.base()][zone_of(static_cast<TileIndex>(tile))] += LandWeight(tile);
 	}
 
-	/* Vehicles: every primary vehicle that is not stopped in a depot. */
-	std::array<int64_t, MAX_COMPANIES> transport{};
+	/* Vehicles: every primary vehicle that is not stopped in a depot; the transport tax counts in the zone where the vehicle is now. */
+	std::array<PerZone, MAX_COMPANIES> transport{};
 	std::array<int64_t, MAX_COMPANIES> fuel_base{}; // base fuel cost of the same vehicles (for an excess of 100%)
 	for (const Vehicle *v : Vehicle::Iterate()) {
 		if (!v->IsPrimaryVehicle() || v->IsStoppedInDepot() || !Company::IsValidID(v->owner)) continue;
@@ -151,25 +164,30 @@ static const GameTimeSubscription _tax_daily(GameTimeEvent::Day, [](const GameTi
 			case VEH_AIRCRAFT: rate = TAX_AIRCRAFT_DAY; fuel = cargomarket::FUEL_AIRCRAFT_DAY; break;
 			default: break;
 		}
-		transport[v->owner.base()] += rate;
-		const int vzone = zone_of(v->tile);
-		if (vzone >= 0 && vzone < zonemath::MAX_ZONES) transport_zone[vzone] += rate;
+		transport[v->owner.base()][zone_of(v->tile)] += rate;
 		fuel_base[v->owner.base()] += fuel;
 	}
 
 	/* Fuel: only while the fuel index is above its plain price. The index is read from the news log at this game minute. */
 	const int64_t fuel_index = FuelIndexWithOilPpm(_market_events.FuelIndexPpm(static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes()))); // News index changed by the oil market (valuables.cpp).
 
-	for (int z = 0; z < _zone_market.count && z < zonemath::MAX_ZONES; z++) {
-		_zone_market.zones[z].land_tax += ScaleByPriceIndex(land_zone[z] * TAX_LAND_PER_UNIT_DAY / 100);
-		_zone_market.zones[z].transport_tax += ScaleByPriceIndex(transport_zone[z]);
-	}
-
 	for (const Company *c : Company::Iterate()) {
 		const size_t i = c->index.base();
 		BookFuel(c->index, ScaleByPriceIndex(cargomarket::FuelDailyCost(fuel_base[i], fuel_index)));
-		BookTax(c->index, LedgerItem::TaxLand, ScaleByPriceIndex(land[i] * TAX_LAND_PER_UNIT_DAY / 100));
-		BookTax(c->index, LedgerItem::TaxTransport, ScaleByPriceIndex(transport[i]));
+		/* Every zone has its own tax level (percent of the base rate); the tax of the company is the sum over the zones where it owns land and runs vehicles. */
+		for (int z = 0; z <= zonemath::MAX_ZONES; z++) {
+			const bool real = z < _zone_market.count;
+			const int64_t percent = real ? _zone_market.zones[z].tax_percent : 100;
+			const int64_t land_z = ScaleByPriceIndex(land[i][z] * TAX_LAND_PER_UNIT_DAY * percent / 10'000);
+			const int64_t transport_z = ScaleByPriceIndex(transport[i][z] * percent / 100);
+			/* The tax goes to the bank of the zone where the land lies and the vehicle runs (outside of all zones: the bank of the company). */
+			BookTax(c->index, LedgerItem::TaxLand, land_z, real ? z : -1);
+			BookTax(c->index, LedgerItem::TaxTransport, transport_z, real ? z : -1);
+			if (real) {
+				_zone_market.zones[z].land_tax += land_z;
+				_zone_market.zones[z].transport_tax += transport_z;
+			}
+		}
 	}
 });
 
@@ -183,6 +201,8 @@ static const GameTimeSubscription _tax_quarter(GameTimeEvent::Day, [](const Game
 	for (const Company *c : Company::Iterate()) {
 		const CompanyEconomyEntry &last = c->old_economy[0];
 		const int64_t profit = static_cast<int64_t>(last.income) + static_cast<int64_t>(last.expenses);
-		BookTax(c->index, LedgerItem::TaxIncome, IncomeTaxOfQuarter(profit, index_ppm));
+		const int64_t income_tax = IncomeTaxOfQuarter(profit, index_ppm) * ZoneTaxPercentOfCompany(c->index) / 100; // At the tax level of the zone of the headquarters.
+		ZoneCountCompanyTax(c->index, income_tax);
+		BookTax(c->index, LedgerItem::TaxIncome, income_tax);
 	}
 }, 10);

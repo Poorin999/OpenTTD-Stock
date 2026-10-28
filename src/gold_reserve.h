@@ -81,7 +81,6 @@ struct GoldReserveManager {
 	int64_t price_cents = 0;      ///< Live base price of one ounce (the middle price) in 1/100 of a money unit. 0 = not started yet. A random walk (UpdateGlide, every 2 game minutes); at midnight it is the last point of history_cents. This IS the state of the price (saved).
 	int64_t spread_ppm = SPREAD_MIN_PPM; ///< Total spread (ask - bid) in ppm of the base price. Set once per game day (UpdateDaily), so it never jumps inside a day. Not saved: the minimum until the next day starts.
 	int64_t baseline_supply = 0;  ///< Cash in circulation when the market started; the supply factor is measured against it.
-	int64_t bank_reserve_oz = 0;  ///< The ounces that the central bank holds from the start.
 	int64_t market_stock_oz = 0;  ///< Ounces that the market still has for sale. Less stock = a dearer price (scarcity).
 	int64_t mine_intake_today_oz = 0; ///< Ounces that mines added today (limit MINE_DAILY_INTAKE_MAX_OZ). Cleared by UpdateDaily. Not saved: a load gives a new allowance for the rest of the day.
 	int64_t pressure_ppm = 0;     ///< Demand effect of the NEWS and the policy (lasts like a real news); fades by 3% a day. Not the trades: see impact_ppm.

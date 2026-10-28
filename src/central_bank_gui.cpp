@@ -15,6 +15,7 @@
 #include "gold_reserve.h"
 #include "central_bank_gui.h"
 #include "tax.h"
+#include "zone_market.h"
 #include "wallet_base.h"
 #include "wallet_cmd.h"
 #include "stock_gui.h"
@@ -520,7 +521,7 @@ struct CentralBankWindow : Window {
 		}
 
 		const Company *c = Company::Get(_local_company);
-		const BankAccount &a = _central_bank.accounts[_local_company.base()];
+		const BankAccount &a = CentralBank::accounts[_local_company.base()];
 		const int64_t limit = GetCentralBankCreditLimit(_local_company);
 		const int64_t rate_bp = GetCentralBankAnnualRateBp(_local_company);
 		const int64_t per_day = BankDailyInterest(a.debt, rate_bp, a.carry).interest;
@@ -849,7 +850,9 @@ static int DrawMonetaryPolicy(const Rect *r)
 	const int inner_right = panel_right - margin;
 	const int inner_w = inner_right - inner_left;
 
-	const MonetaryPolicy &p = _central_bank.policy;
+	const CentralBank &bank = LocalBank(); // The bank of the zone of the headquarters of the local company.
+	const MonetaryPolicy &p = bank.policy;
+	const int64_t shift = bank.ShiftBp(); // The shift of the policy plus the spread of the country.
 	auto pct = [](int64_t bp, bool plus = false) {
 		const int64_t a = bp < 0 ? -bp : bp;
 		return fmt::format("{}{}.{:02}%", bp < 0 ? "-" : (plus ? "+" : ""), a / 100, a % 100);
@@ -933,7 +936,7 @@ static int DrawMonetaryPolicy(const Rect *r)
 		const int n1 = 6;
 		card(cx[0], cx[0] + cw, col_top, n1, CbText("นโยบายดอกเบี้ย (POLICY RATE)", "POLICY RATE"));
 		const int a0 = cx[0] + pad_h, a1 = cx[0] + cw - pad_h;
-		row(a0, a1, CbText("ช่วงอัตราดอกเบี้ย (Target range)", "Target range"), fmt::format("{} - {}", pct(PolicyLowerBp(p.shift_bp)), pct(PolicyUpperBp(p.shift_bp))), p.shift_bp > 0 ? CBP_WARN : (p.shift_bp < 0 ? CBP_GOOD : CBP_TEXT));
+		row(a0, a1, fmt::format("{} [{}]", CbText("ช่วงอัตราดอกเบี้ย (Target range)", "Target range"), BankCount() > 1 ? ZoneCurrencyName(bank.zone) : ""), fmt::format("{} - {}", pct(PolicyLowerBp(shift)), pct(PolicyUpperBp(shift))), shift > 0 ? CBP_WARN : (shift < 0 ? CBP_GOOD : CBP_TEXT));
 		row(a0, a1, p.last_unscheduled ? CbText("ประชุมล่าสุด (นอกรอบ!)", "Last meeting (UNSCHEDULED!)") : CbText("การประชุมล่าสุด", "Last meeting"),
 				p.measured ? (p.last_step_bp > 0 ? fmt::format("{} {} bp", CbText("ขึ้น", "raised"), p.last_step_bp) : (p.last_step_bp < 0 ? fmt::format("{} {} bp", CbText("ลด", "lowered"), -p.last_step_bp) : std::string(CbText("คงที่", "held")))) : std::string("-"),
 				p.last_step_bp > 0 ? CBP_WARN : (p.last_step_bp < 0 ? CBP_GOOD : TC_GREY));
@@ -947,12 +950,12 @@ static int DrawMonetaryPolicy(const Rect *r)
 		const int top2 = col_bottom[0] + gap;
 		const int n2 = 6;
 		card(cx[0], cx[0] + cw, top2, n2, CbText("อัตราดอกเบี้ย (RATES)", "RATES"));
-		row(a0, a1, CbText("Prime rate (ช่วงบน + 3.00%)", "Prime rate (upper + 3.00%)"), pct(PolicyPrimeBp(p.shift_bp)));
-		row(a0, a1, "Discount rate / IORB", fmt::format("{} / {}", pct(PolicyDiscountBp(p.shift_bp)), pct(PolicyIorbBp(p.shift_bp))));
-		row(a0, a1, BANK_IORB_CREATES_MONEY ? CbText("IORB ที่จ่ายแล้ว (เงินใหม่)", "IORB paid so far (new money)") : CbText("IORB ที่จ่ายแล้ว (จากงบธนาคาร)", "IORB paid so far (bank budget)"), GetString(STR_JUST_CURRENCY_LONG, _central_bank.iorb_created), CBP_GOOD);
-		row(a0, a1, CbText("ดอกเบี้ยเงินกู้ เครดิตดี", "Loan rate, good credit"), fmt::format("{} - {}", pct(BankShiftedRateBp(BANK_RATE_GOOD_MIN_BP, p.shift_bp)), pct(BankShiftedRateBp(BANK_RATE_GOOD_MAX_BP, p.shift_bp))));
-		row(a0, a1, CbText("ดอกเบี้ยเงินกู้ เครดิตต่ำ", "Loan rate, poor credit"), fmt::format("{} - {}", pct(BankShiftedRateBp(BANK_RATE_POOR_MIN_BP, p.shift_bp)), pct(BankShiftedRateBp(BANK_RATE_POOR_MAX_BP, p.shift_bp))));
-		row(a0, a1, CbText("ดอกเบี้ยผิดนัด", "Penalty rate"), fmt::format("{} - {}", pct(BankPenaltyRateBp(1, p.shift_bp)), pct(BankPenaltyRateBp(BANK_PENALTY_LEVEL_MAX, p.shift_bp))), CBP_WARN);
+		row(a0, a1, CbText("Prime rate (ช่วงบน + 3.00%)", "Prime rate (upper + 3.00%)"), pct(PolicyPrimeBp(shift)));
+		row(a0, a1, "Discount rate / IORB", fmt::format("{} / {}", pct(PolicyDiscountBp(shift)), pct(PolicyIorbBp(shift))));
+		row(a0, a1, BANK_IORB_CREATES_MONEY ? CbText("IORB ที่จ่ายแล้ว (เงินใหม่)", "IORB paid so far (new money)") : CbText("IORB ที่จ่ายแล้ว (จากงบธนาคาร)", "IORB paid so far (bank budget)"), GetString(STR_JUST_CURRENCY_LONG, bank.iorb_created), CBP_GOOD);
+		row(a0, a1, CbText("ดอกเบี้ยเงินกู้ เครดิตดี", "Loan rate, good credit"), fmt::format("{} - {}", pct(BankShiftedRateBp(BANK_RATE_GOOD_MIN_BP, shift)), pct(BankShiftedRateBp(BANK_RATE_GOOD_MAX_BP, shift))));
+		row(a0, a1, CbText("ดอกเบี้ยเงินกู้ เครดิตต่ำ", "Loan rate, poor credit"), fmt::format("{} - {}", pct(BankShiftedRateBp(BANK_RATE_POOR_MIN_BP, shift)), pct(BankShiftedRateBp(BANK_RATE_POOR_MAX_BP, shift))));
+		row(a0, a1, CbText("ดอกเบี้ยผิดนัด", "Penalty rate"), fmt::format("{} - {}", pct(BankPenaltyRateBp(1, shift)), pct(BankPenaltyRateBp(BANK_PENALTY_LEVEL_MAX, shift))), CBP_WARN);
 		col_bottom[0] = top2 + card_height(n2);
 	}
 	{
@@ -960,10 +963,10 @@ static int DrawMonetaryPolicy(const Rect *r)
 		const int n3 = 3;
 		card(cx[1], cx[1] + cw, col_top, n3, CbText("วงเงินกู้ (CREDIT)", "CREDIT"));
 		const int a0 = cx[1] + pad_h, a1 = cx[1] + cw - pad_h;
-		const int64_t share = BankPolicyCreditPercent(p.shift_bp);
-		const int64_t tier_percent = GetCentralBankTierCreditPercent();
+		const int64_t share = BankPolicyCreditPercent(shift);
+		const int64_t tier_percent = GetCentralBankTierCreditPercent(_local_company);
 		row(a0, a1, CbText("วงเงินกู้ต่อส่วนของเจ้าของ", "Credit limit, share of equity"), fmt::format("{}%", share), share < CENTRAL_BANK_CREDIT_PERCENT ? CBP_WARN : (share > CENTRAL_BANK_CREDIT_PERCENT ? CBP_GOOD : CBP_TEXT));
-		row(a0, a1, CbText("ระดับเครดิตปรับวงเงิน", "Credit standing scales the limit"), fmt::format("{} x{}%", GetCreditTierName(_gold_reserve.GetCreditTier()), tier_percent), tier_percent < 100 ? CBP_WARN : (tier_percent > 100 ? CBP_GOOD : CBP_TEXT));
+		row(a0, a1, CbText("ระดับเครดิตปรับวงเงิน", "Credit standing scales the limit"), fmt::format("{} x{}%", GetCreditTierName(static_cast<CreditTier>(BankCreditTierIndex(bank))), tier_percent), tier_percent < 100 ? CBP_WARN : (tier_percent > 100 ? CBP_GOOD : CBP_TEXT));
 		if (Company::IsValidID(_local_company)) {
 			row(a0, a1, CbText("วงเงินกู้ของบริษัทคุณตอนนี้", "Your credit limit now"), GetString(STR_JUST_CURRENCY_LONG, GetCentralBankCreditLimit(_local_company)), CBP_GOOD);
 		} else {
@@ -1012,10 +1015,10 @@ static int DrawMonetaryPolicy(const Rect *r)
 		const int n5 = 4;
 		card(cx[2], cx[2] + cw, col_top, n5, CbText("ทองของธนาคาร (BANK GOLD)", "BANK GOLD"));
 		const int a0 = cx[2] + pad_h, a1 = cx[2] + cw - pad_h;
-		const int64_t backing = _gold_reserve.GetBackingBp();
+		const int64_t backing = BankBackingBp(bank);
 		row2(a0, a1, CbText("สำรองทองต่อเงินสดในระบบ (ซื้อ-ขาย)", "Gold backing (buy .. sell band)"), fmt::format("{}.{:02}%  ({} .. {})", backing / 100, backing % 100, pct(BANK_GOLD_BUY_BELOW_BP), pct(BANK_GOLD_SELL_ABOVE_BP)));
-		row(a0, a1, CbText("เงินของธนาคารเอง (ทุน + กำไร)", "Own money of the bank"), GetString(STR_JUST_CURRENCY_LONG, _central_bank.trading_revenue_cents / 100), CBP_GOOD);
-		row(a0, a1, CbText("หนี้สูญที่ตัดแล้ว (เกินงบ)", "Bad debt written off (beyond budget)"), GetString(STR_JUST_CURRENCY_LONG, _central_bank.written_off) + " (" + GetString(STR_JUST_CURRENCY_LONG, _central_bank.uncovered_loss) + ")", _central_bank.uncovered_loss > 0 ? CBP_BAD : TC_GREY);
+		row(a0, a1, CbText("เงินของธนาคารเอง (ทุน + กำไร)", "Own money of the bank"), GetString(STR_JUST_CURRENCY_LONG, bank.trading_revenue_cents / 100), CBP_GOOD);
+		row(a0, a1, CbText("หนี้สูญที่ตัดแล้ว (เกินงบ)", "Bad debt written off (beyond budget)"), GetString(STR_JUST_CURRENCY_LONG, bank.written_off) + " (" + GetString(STR_JUST_CURRENCY_LONG, bank.uncovered_loss) + ")", bank.uncovered_loss > 0 ? CBP_BAD : TC_GREY);
 		const int bottom5 = col_top + card_height(n5);
 
 		/* Column 3, card 6: the latest gold trades of the bank. 3 rows. */
@@ -1023,12 +1026,12 @@ static int DrawMonetaryPolicy(const Rect *r)
 		const int n6 = 3;
 		card(cx[2], cx[2] + cw, top6, n6, CbText("ธนาคารซื้อขายทองล่าสุด", "Latest gold trades"));
 		for (size_t i = 0; i < 3; i++) {
-			if (i >= _central_bank.gold_log.size()) {
+			if (i >= bank.gold_log.size()) {
 				if (paint && i == 0) DrawString(a0, a1, y, CbText("ยังไม่เคยซื้อขาย", "No trade yet"), TC_GREY, SA_LEFT);
 				y += row_h;
 				continue;
 			}
-			const BankGoldTrade &t = _central_bank.gold_log[i];
+			const BankGoldTrade &t = bank.gold_log[i];
 			row(a0, a1, fmt::format("D{} {} {} oz", t.day + 1, t.ounces >= 0 ? CbText("ซื้อ", "bought") : CbText("ขาย", "sold"), t.ounces >= 0 ? t.ounces : -t.ounces),
 					fmt::format("@ {}{}", GetString(STR_JUST_CURRENCY_LONG, t.price_cents / 100), t.cash == 0 ? std::string() : fmt::format(" ({}{})", t.cash > 0 ? "+" : "-", GetString(STR_JUST_CURRENCY_LONG, t.cash > 0 ? t.cash : -t.cash))),
 					t.ounces >= 0 ? CBP_WARN : CBP_GOOD);

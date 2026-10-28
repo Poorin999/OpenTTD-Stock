@@ -68,8 +68,17 @@ inline int64_t IncomeTaxOfQuarter(int64_t profit, int64_t index_ppm)
 /** VAT on an income of cargo delivery: taken from the company cash now. */
 void ChargeVat(CompanyID company, int64_t income);
 
+/**
+ * VAT of ONE final delivery at the tax level of the zone of the destination (zone_market.cpp, ZoneFeeOnDelivery). The income is remembered, so that
+ * ChargeVat, called once at the end of the payment with the whole income, only charges the part that was not charged here (the base rate).
+ * @param zone_percent The tax level of the zone, 100 = the base rate TAX_VAT_PERCENT.
+ * @param zone The zone of the destination: its bank gets the VAT.
+ * @return The VAT that was charged.
+ */
+int64_t ChargeVatPercent(CompanyID company, int64_t income, int64_t zone_percent, int zone);
+
 /** Exchange fee of a delivery across a zone border (zone_market.cpp): taken from the company cash now, booked as LedgerItem::ZoneFee, paid to the bank. */
-void ChargeZoneFee(CompanyID company, int64_t amount);
+void ChargeZoneFee(CompanyID company, int64_t amount, int zone);
 
 /**
  * Tax on a profit that is about to be paid to a wallet (closed trade, dividend). It is booked in the ledger and goes to the bank,

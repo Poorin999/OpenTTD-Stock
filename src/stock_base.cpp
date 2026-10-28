@@ -55,7 +55,7 @@ void StockMarket::Reset()
 	this->impact.fill(0);
 	this->valuation.fill({});
 	_wallets.Reset();
-	_central_bank.Reset();
+	ResetBanks();
 	_gold_reserve.Reset();
 	_valuables.Reset();
 	_payroll_news.Reset();
@@ -557,7 +557,7 @@ void StockMarket::HandleRemovedCompanies()
 		if (Company::IsValidID(CompanyID{i})) continue;
 		const bool stale = !this->candles[i].empty() || this->has_current[i] || this->price_fp[i] != 0 ||
 				this->base_fp[i] != 0 || this->impact[i] != 0 || this->valuation[i].quarters != 0 || _wallets.HasOwner(CompanyID{i}) || !this->daily[i].empty() || this->has_daily_current[i] || this->frames[i].HasRunning(GameTimeframe::H1) ||
-				this->stats[i].closed != 0 || !this->stats[i].months.empty() || _central_bank.accounts[i].debt != 0;
+				this->stats[i].closed != 0 || !this->stats[i].months.empty() || CentralBank::accounts[i].debt != 0;
 		if (!stale) continue;
 		this->candles[i].clear();
 		this->current[i] = {};
@@ -573,8 +573,8 @@ void StockMarket::HandleRemovedCompanies()
 		this->has_daily_current[i] = false;
 		this->stats[i] = {};
 		this->session_realized[i].fill(0);
-		_central_bank.WriteOffRemoved(CompanyID{i});
-		_central_bank.accounts[i] = {};
+		BankOfZone(CentralBank::account_zone[i]).WriteOffRemoved(CompanyID{i});
+		CentralBank::accounts[i] = {};
 		std::erase_if(this->history, [i](const StockClosedTrade &t) { return t.owner == i; });
 	}
 }

@@ -12,6 +12,7 @@
 
 #include "command_type.h"
 #include "company_type.h"
+#include "tile_type.h"
 #include "economy_type.h"
 #include <algorithm>
 #include <array>
@@ -575,12 +576,30 @@ struct BankGoldTrade {
 };
 
 /** The central bank: one account per company. Saved in the 'STCK' chunk together with the wallets. */
+/** How many banks there are at most: one central bank per money zone (zonemath::MAX_ZONES, checked by a static_assert in zone_market.cpp). */
+static constexpr int BANK_ZONES = 4;
+
+/** The own policy rate of each country on top of the policy of its bank (bp, added to the shift of the policy): a safe country is cheaper, a risky one dearer. Change here and build again. */
+static constexpr int64_t BANK_ZONE_SPREAD_BP[BANK_ZONES] = {0, -25, 25, 75};
+
+/**
+ * One central bank. There is one per money zone: the zones have their own bank with its own monetary policy (rate, meetings), its own money (capital),
+ * its own gold reserve and its own bad debts. A company belongs to the bank of the zone of its headquarters (BankOfCompany), a tax is paid to the
+ * bank of the zone where it is collected. The accounts (loans) are the same array for all the banks: the account of a company is simply read through
+ * the bank of the company, and it moves with the headquarters.
+ */
 struct CentralBank {
-	std::array<BankAccount, MAX_COMPANIES> accounts{};
-	MonetaryPolicy policy;             ///< Price index and the shift of the interest curve (monetary policy).
+	static std::array<BankAccount, MAX_COMPANIES> accounts;    ///< The loan of every company (shared by the banks, see above).
+	static std::array<uint8_t, MAX_COMPANIES> account_zone;    ///< The bank that held the account at the last daily update; for a company that is gone (its debt is written off by that bank). Not saved.
+	/** Auction value of the stations and infrastructure of a company in bankruptcy (money units, at the auction price). Not saved. */
+	static std::array<int64_t, MAX_COMPANIES> auction_infra;
+
+	int zone = 0;                      ///< The zone of this bank (0 .. BANK_ZONES - 1).
+	MonetaryPolicy policy;             ///< Price index and the shift of the interest curve (monetary policy) of this bank.
 	int64_t written_off = 0;           ///< Debt of companies that went bankrupt, written off by the bank, money units, total. Saved (SRK_BANK_LOSS).
 	int64_t uncovered_loss = 0;        ///< The part of #written_off that the budget could not pay, money units, total. Saved (SRK_BANK_LOSS).
-	int64_t trading_revenue_cents = BANK_START_CAPITAL * 100; ///< The own money of the bank, separate from the cash of the companies: start capital, commission and spread of the gold trades, loan interest paid in cash. In 1/100 of a money unit. Saved (SRK_BANK_BUDGET).
+	int64_t trading_revenue_cents = BANK_START_CAPITAL * 100; ///< The own money of the bank, separate from the cash of the companies: start capital, taxes of its zone, commission and spread of the gold trades, loan interest paid in cash. In 1/100 of a money unit.
+	int64_t reserve_oz = 0;            ///< The gold that this bank holds (its backing). Saved (SRK_BANK_GOLD).
 
 	std::deque<BankGoldTrade> gold_log{}; ///< The latest gold trades of the bank, the newest in front. Not saved: empty after a load.
 
@@ -594,14 +613,40 @@ struct CentralBank {
 	int64_t short_oz_today = 0;        ///< Ounces that the bank is short in the Terminal today (0 = no short); only for the display. Not saved.
 	int64_t short_pnl_total = 0;       ///< Money units that the short has earned (or lost) since the game was loaded; only for the display. Not saved.
 	int64_t iorb_created = 0;          ///< IORB that was paid since the game was loaded (money units); only for the display. Not saved.
-	/** Auction value of the stations and infrastructure of a company in bankruptcy (money units, at the auction price). Not saved. */
-	std::array<int64_t, MAX_COMPANIES> auction_infra{};
+
+	/** The shift that the loans of this bank use: the shift of the policy plus the spread of the country. */
+	int64_t ShiftBp() const { return this->policy.shift_bp + BANK_ZONE_SPREAD_BP[this->zone]; }
 
 	void Liquidate(CompanyID company, bool auction = false);
 	void WriteOffRemoved(CompanyID company);
 };
 
-extern CentralBank _central_bank;
+extern std::array<CentralBank, BANK_ZONES> _banks;
+
+/** How many banks are in use: one per zone, at least one (before the zones exist everything uses the first bank). */
+int BankCount();
+/** The bank of a zone (a zone that does not exist gives the first bank). */
+CentralBank &BankOfZone(int zone);
+/** The bank of a company: the bank of the zone of its headquarters, the first bank when it has none. */
+CentralBank &BankOfCompany(CompanyID company);
+/** The bank of the zone of a tile (a town, a station): the first bank when there are no zones. */
+CentralBank &BankOfTile(TileIndex tile);
+/** The bank of the local company, for the windows. */
+CentralBank &LocalBank();
+/** Gold reserve of a savegame from before the banks, to be split between the banks at the next midnight (saveload only). */
+extern int64_t _bank_legacy_reserve_oz;
+/** Forget everything of all the banks (a new game, a savegame is loaded). */
+void ResetBanks();
+/** The cash of the companies that belong to a bank (the notes of its zone), money units. */
+int64_t BankNotes(const CentralBank &bank);
+/** The gold that all the banks hold together, ounces. */
+int64_t BankReserveTotalOz();
+/** Backing of the notes of a bank by its own gold, in basis points (10000 = 100%). 0 when it has no notes or the gold market has not started. */
+int64_t BankBackingBp(const CentralBank &bank);
+/** Value of the gold of a bank at the price now, money units. */
+int64_t BankBackingValue(const CentralBank &bank);
+/** Credit standing of a bank: 0 = C, 1 = B, 2 = A, 3 = AA, 4 = AAA (the order of CreditTier in gold_reserve.h). */
+int BankCreditTierIndex(const CentralBank &bank);
 
 /** The price index in ppm (1,000,000 = 1.0 at the start): the inflation of the game, moved by the change of the cash in circulation. */
 int64_t GetPriceIndexPpm();
@@ -684,7 +729,7 @@ void SnapshotYearlyExpenses();
 int64_t GetCentralBankDebt(CompanyID company);
 int64_t GetCentralBankAnnualRateBp(CompanyID company);
 int64_t GetCentralBankCreditLimit(CompanyID company);
-int64_t GetCentralBankTierCreditPercent();
+int64_t GetCentralBankTierCreditPercent(CompanyID company);
 int64_t GetCentralBankAvailable(CompanyID company);
 int64_t GetUnborrowedLiquidCash(CompanyID company);
 CommandCost CheckTradingCapital(CompanyID company, int64_t amount);
