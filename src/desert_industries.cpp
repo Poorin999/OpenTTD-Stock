@@ -254,6 +254,10 @@ static void ApplyEntry(IndustrySpec &dst, const DesertIndustry &e, TileState &st
 		if constexpr (requires { s.appear_creation[0] = e.creation; }) std::fill(std::begin(s.appear_creation), std::end(s.appear_creation), e.creation);
 		if constexpr (requires { s.appear_ingame[0] = e.ingame; }) std::fill(std::begin(s.appear_ingame), std::end(s.appear_ingame), e.ingame);
 		if constexpr (requires { s.enabled = true; }) s.enabled = true;
+		/* The fish farm is a copy of the Fruit Plantation, which may NOT be built in the desert (CHECK_PLANTATION). The fish farm must be buildable there. */
+		if (e.source == DesertSource::FishFarm) {
+			if constexpr (requires { s.check_proc = CHECK_NOTHING; }) s.check_proc = CHECK_NOTHING;
+		}
 
 		/* What it produces and what it accepts: labels only, the numbers are filled in later. */
 		if constexpr (requires { s.produced_cargo[0] = INVALID_CARGO; }) {
