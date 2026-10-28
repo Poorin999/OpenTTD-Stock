@@ -171,15 +171,23 @@ CommandCost CmdZoneExchange(DoCommandFlags flags, uint8_t zone, bool sell, Money
 		if (GetUnborrowedLiquidCash(_current_company) < value) return CommandCost(STR_ZONE_EXCHANGE_ERROR_NO_CASH);
 		const int64_t notes = zonemath::AfterSpread(zonemath::NotesForMoney(value, rate));
 		if (notes <= 0) return CMD_ERROR;
-		if (flags.Test(DoCommandFlag::Execute)) held += notes;
-		return CommandCost(EXPENSES_OTHER, Money(value));
+		if (flags.Test(DoCommandFlag::Execute)) {
+			held += notes;
+			SubtractMoneyFromCompany(CommandCost(EXPENSES_OTHER, Money(value))); // Taken here, not through the returned cost.
+			RecordLedger(_current_company, LedgerItem::ZoneExchange, -value); // The account statement.
+		}
+		return CommandCost(EXPENSES_OTHER);
 	}
 
 	if (value > held) return CommandCost(STR_ZONE_EXCHANGE_ERROR_NO_NOTES);
 	const int64_t gross = zonemath::MoneyForNotes(value, rate);
 	const int64_t cash = zonemath::AfterSpread(gross);
-	if (flags.Test(DoCommandFlag::Execute)) held -= value;
-	return CommandCost(EXPENSES_OTHER, -Money(cash));
+	if (flags.Test(DoCommandFlag::Execute)) {
+		held -= value;
+		SubtractMoneyFromCompany(CommandCost(EXPENSES_OTHER, -Money(cash))); // A negative cost is income; paid here, not through the returned cost.
+		RecordLedger(_current_company, LedgerItem::ZoneExchange, cash); // The account statement.
+	}
+	return CommandCost(EXPENSES_OTHER);
 }
 
 void ZoneFeeOnDelivery(CompanyID owner, int64_t income, StationID source, StationID dest)

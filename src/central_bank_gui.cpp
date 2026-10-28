@@ -208,8 +208,10 @@ static void DrawAccountStatement(const Rect &r, int offset)
 	category("Fuel (paid to the market, not a tax)");
 	booked("Fuel Cost (extra, when fuel is dear)", LedgerItem::FuelCost);
 
-	category("Money zones (paid to the Central Bank)");
+	category("Money zones (fees paid to the Central Bank, banknotes)");
 	booked("Exchange Fee (cargo delivered across a zone border)", LedgerItem::ZoneFee);
+	booked("Building Permit (foreign zone)", LedgerItem::ZonePermit);
+	booked("Banknote Exchange (cash out / in, not earnings)", LedgerItem::ZoneExchange);
 
 	category("Assets & Operations");
 	yearly("Vehicle & Infrastructure Running Costs", {EXPENSES_TRAIN_RUN, EXPENSES_ROADVEH_RUN, EXPENSES_AIRCRAFT_RUN, EXPENSES_SHIP_RUN, EXPENSES_PROPERTY});
@@ -371,8 +373,10 @@ static void DrawArchiveStatement(const Rect &r, int age)
 	category("Fuel (paid to the market, not a tax)");
 	booked("Fuel Cost (extra, when fuel is dear)", LedgerItem::FuelCost);
 
-	category("Money zones (paid to the Central Bank)");
+	category("Money zones (fees paid to the Central Bank, banknotes)");
 	booked("Exchange Fee (cargo delivered across a zone border)", LedgerItem::ZoneFee);
+	booked("Building Permit (foreign zone)", LedgerItem::ZonePermit);
+	line("Banknote Exchange (cash out / in, not earnings)", GetLedgerEntry(_local_company, LedgerItem::ZoneExchange, year), true, false);
 
 	category("Assets & Operations");
 	yearly("Vehicle & Infrastructure Running Costs", LedgerItem::YearRunning, {EXPENSES_TRAIN_RUN, EXPENSES_ROADVEH_RUN, EXPENSES_AIRCRAFT_RUN, EXPENSES_SHIP_RUN, EXPENSES_PROPERTY});
@@ -621,6 +625,8 @@ struct CentralBankWindow : Window {
 			case LedgerItem::TaxDividend:     return CbText("ภาษีเงินปันผล", "Dividend tax");
 			case LedgerItem::TaxIncome:       return CbText("ภาษีเงินได้ไตรมาส", "Income tax");
 			case LedgerItem::TaxInterest:     return CbText("ภาษีดอกเบี้ยเงินสด (IORB)", "IORB tax");
+			case LedgerItem::ZonePermit:      return CbText("ค่าใบอนุญาตก่อสร้างต่างโซน", "Building permit");
+			case LedgerItem::ZoneExchange:    return e.amount >= 0 ? CbText("ขายธนบัตร", "Banknote sale") : CbText("ซื้อธนบัตร", "Banknote buy");
 			case LedgerItem::ZoneFee:         return CbText("ค่าธรรมเนียมแลกเงินข้ามโซน", "Zone exchange fee");
 			case LedgerItem::BankGoldOp:      return e.amount >= 0 ? CbText("ธนาคารซื้อทอง: เงินเข้า", "Bank gold buy: cash in") : CbText("ธนาคารขายทอง: เงินออก", "Bank gold sale: cash out");
 			default:                          return "";
@@ -751,7 +757,7 @@ struct CentralBankWindow : Window {
 
 /** The account statement window: this year and last year, in four groups. It is its own window, so it can stay open next to the bank window. */
 struct CentralBankStatementWindow : Window {
-	static constexpr int STATEMENT_ROWS = 40; ///< Number of rows in the account statement, with room for the notes.
+	static constexpr int STATEMENT_ROWS = 43; ///< Number of rows in the account statement, with room for the notes (43: two lines for the permit and the banknote exchange were added).
 
 	int offset = 0; ///< How many years back the statement is: 0 = this year and last year.
 

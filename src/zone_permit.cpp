@@ -13,6 +13,7 @@
 #include "command_func.h"
 #include "company_base.h"
 #include "company_func.h"
+#include "central_bank.h"
 #include "game_time/game_time_manager.h"
 
 #include "table/strings.h"
@@ -53,12 +54,17 @@ CommandCost CmdZonePermit(DoCommandFlags flags, uint8_t zone)
 	if (_zone_market.ZoneOfCompany(_current_company) == zone) return CommandCost(STR_ZONE_PERMIT_ERROR_HOME);
 
 	const int64_t fee = permitmath::Fee(_zone_market.zones[zone].tax_percent);
+	if (GetUnborrowedLiquidCash(_current_company) < fee) return CommandCost(STR_ZONE_EXCHANGE_ERROR_NO_CASH); // Nothing is bought with borrowed money.
 	if (flags.Test(DoCommandFlag::Execute)) {
 		int64_t &expires = _zone_permits.expires[_current_company.base()][zone];
 		expires = permitmath::Renew(expires, _zone_permits.Today());
 		_zone_permits.fees[zone] += fee;
+		/* The fee is taken HERE, not through the cost that the command returns (that way it was not taken in the game). */
+		SubtractMoneyFromCompany(CommandCost(EXPENSES_OTHER, Money(fee)));
+		RecordLedger(_current_company, LedgerItem::ZonePermit, -fee); // The account statement.
+		BankOfZone(zone).trading_revenue_cents += fee * 100; // The fee is income of the bank of that zone, like the other fees.
 	}
-	return CommandCost(EXPENSES_OTHER, Money(fee));
+	return CommandCost(EXPENSES_OTHER);
 }
 
 CommandCost ZonePermitAdjustCost(Commands cmd, TileIndex tile, const CommandCost &cost)
