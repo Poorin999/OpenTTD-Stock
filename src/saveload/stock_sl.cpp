@@ -72,6 +72,7 @@ enum StockRecordKind : uint8_t {
 	SRK_BANK_LOG = 41,  ///< Line of the account log of the bank window: a = company, b = line (LedgerItem), ym = game day of the year, v1 = amount (sum of the bookings), v2 = ledger year, v3 = number of bookings. Written newest first.
 	SRK_ZONE_HOLD = 45, ///< Banknotes of a zone that a company holds: a = company, b = zone, v1 = notes (units of that currency).
 	SRK_BANK_GOLD = 44, ///< The gold of one bank: a = zone of the bank, v1 = ounces. Written for every bank, after SRK_GOLD (whose v3 is the sum, kept for the shape of the record: a savegame without SRK_BANK_GOLD splits it between the banks).
+	SRK_ZONE_FX = 47, ///< Memory of the FX model of a zone: a = zone, ym = 0..2 (part), v1..v5 = the fields of zonemath::FxState (part 0: price level, exports avg, imports avg, gdp fast, gdp slow; 1: gdp days, capital, risk, news, reserve; 2: ref, expected policy). Written after SRK_ZONE_PERMIT.
 	SRK_ZONE_PERMIT = 46, ///< Building permit: ym = 0: a = company, b = zone, v1 = game day on which it ends; ym = 1: a = zone, v1 = permit fees paid to the zone, v2 = surcharges on construction in the zone (money units). Written after SRK_ZONE_TAX.
 	SRK_ZONE_TAX = 43, ///< Tax collected in a money zone: a = zone number, v1 = land tax, v2 = transport tax, v3 = VAT of deliveries into the zone, v4 = taxes of the companies with headquarters in the zone, v5 = tax level in percent + 1 (money units). Written for every zone, after SRK_ZONE.
 	SRK_ZONE = 42,    ///< Money zone: a = zone number, v1 = capital tile, v2 = exchange rate in ppm, v3 = exchange fees earned (money units). Written for every zone, in order.
@@ -353,6 +354,23 @@ struct STCKChunkHandler : ChunkHandler {
 				p.b = static_cast<size_t>(i);
 				p.v1 = _zone_permits.expires[c][i];
 				write(p);
+			}
+		}
+
+		for (int i = 0; i < _zone_market.count; i++) {
+			const zonemath::FxState &f = _zone_market.zones[i].fx;
+			const int64_t parts[3][5] = {
+				{f.price_level_ppm, f.exports_avg, f.imports_avg, f.gdp_fast, f.gdp_slow},
+				{f.gdp_days, f.capital_ppm, f.risk_ppm, f.news_ppm, f.reserve_ppm},
+				{f.ref_ppm, f.expected_policy_ppm, 0, 0, 0},
+			};
+			for (int k = 0; k < 3; k++) {
+				StockRecord r;
+				r.kind = SRK_ZONE_FX;
+				r.a = static_cast<size_t>(i);
+				r.ym = k;
+				r.v1 = parts[k][0]; r.v2 = parts[k][1]; r.v3 = parts[k][2]; r.v4 = parts[k][3]; r.v5 = parts[k][4];
+				write(r);
 			}
 		}
 
@@ -847,6 +865,26 @@ struct STCKChunkHandler : ChunkHandler {
 						if (r.v4 > 0) z.inflation_ppm = std::clamp<int64_t>(r.v4 - 1'000'000, zonemath::INFL_MIN_PPM, zonemath::INFL_MAX_PPM);
 						if (r.v5 > 0) z.policy_ppm = std::clamp<int64_t>(r.v5 - 1, zonemath::POLICY_MIN_PPM, zonemath::POLICY_MAX_PPM);
 						_zone_market.count = std::max<int>(_zone_market.count, static_cast<int>(r.a) + 1);
+					}
+					break;
+
+				case SRK_ZONE_FX:
+					if (r.a < static_cast<size_t>(zonemath::MAX_ZONES)) {
+						zonemath::FxState &f = _zone_market.zones[r.a].fx;
+						if (r.ym == 0) {
+							f.price_level_ppm = std::clamp<int64_t>(r.v1, zonemath::PRICE_LEVEL_MIN_PPM, zonemath::PRICE_LEVEL_MAX_PPM);
+							f.exports_avg = std::max<int64_t>(r.v2, 0); f.imports_avg = std::max<int64_t>(r.v3, 0);
+							f.gdp_fast = std::max<int64_t>(r.v4, 0); f.gdp_slow = std::max<int64_t>(r.v5, 0);
+						} else if (r.ym == 1) {
+							f.gdp_days = std::max<int64_t>(r.v1, 0);
+							f.capital_ppm = std::clamp<int64_t>(r.v2, -zonemath::CAPITAL_MAX_PPM, zonemath::CAPITAL_MAX_PPM);
+							f.risk_ppm = std::clamp<int64_t>(r.v3, 0, zonemath::RISK_MAX_PPM);
+							f.news_ppm = r.v4;
+							f.reserve_ppm = std::max<int64_t>(r.v5, 0);
+						} else if (r.ym == 2) {
+							f.ref_ppm = std::max<int64_t>(r.v1, 0);
+							f.expected_policy_ppm = std::clamp<int64_t>(r.v2, zonemath::POLICY_MIN_PPM, zonemath::POLICY_MAX_PPM);
+						}
 					}
 					break;
 
