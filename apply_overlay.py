@@ -40,7 +40,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "wallet_base.h": "src", "wallet_base.cpp": "src",
     "wallet_cmd.h": "src", "wallet_cmd.cpp": "src",
     "central_bank.h": "src", "central_bank.cpp": "src",
-    "tax.h": "src", "tax.cpp": "src", "zone_market.h": "src", "zone_market.cpp": "src", "zone_market_math.h": "src",
+    "tax.h": "src", "tax.cpp": "src", "zone_market.h": "src", "zone_market.cpp": "src", "zone_market_math.h": "src", "zone_map_gui.h": "src", "hq_gate.h": "src", "hq_gate.cpp": "src", "zone_map_gui.cpp": "src",
     "cargo_market.h": "src", "cargo_market.cpp": "src", "CargoMarketMath.h": "src",
     "town_treasury.h": "src", "town_treasury.cpp": "src", "citizen_gold.h": "src", "citizen_terminal.h": "src", "gold_market_math.h": "src", "oil_market_math.h": "src", "oil_market_gui.h": "src", "oil_market_gui.cpp": "src",
     "gold_reserve.h": "src", "gold_reserve.cpp": "src", "gold_industry.cpp": "src", "firs_desert_cargo.cpp": "src", "english_firs_strings.txt": "src", "desert_industries.cpp": "src", "english_desert_industries_strings.txt": "src",
@@ -73,7 +73,7 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_GOLD_BUY", "buy gold for the reserve"),
     ("CMD_GOLD_SELL", "sell gold of the reserve"),
 ]
-NEW_SOURCES = ["zone_market.cpp", "zone_market.h", "zone_market_math.h", "wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "oil_market_math.h", "oil_market_gui.cpp", "oil_market_gui.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "firs_desert_cargo.cpp", "desert_industries.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "company_info_gui.cpp", "company_info_gui.h", "company_info_math.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
+NEW_SOURCES = ["hq_gate.cpp", "hq_gate.h", "zone_map_gui.cpp", "zone_map_gui.h", "zone_market.cpp", "zone_market.h", "zone_market_math.h", "wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "oil_market_math.h", "oil_market_gui.cpp", "oil_market_gui.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "firs_desert_cargo.cpp", "desert_industries.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "company_info_gui.cpp", "company_info_gui.h", "company_info_math.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
                "RetailMath.h", "RetailMarketManager.h", "RetailMarketManager.cpp",
                "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]
@@ -806,20 +806,21 @@ COMPANY_TIME_MARKER = "GAME_COMPANY_TIME_PATCH"
 
 def patch_company_hourly(tree):
     """The monthly work of the companies in economy.cpp (CompaniesGenStatistics: infrastructure costs, bankruptcy check; CompaniesPayInterest;
-    HandleEconomyFluctuations) ran on the economy month (30 economy days = about 60 real seconds). It now runs on the Hour event of the clock
-    (every game hour = 60 real seconds at normal speed), so the money that it books follows the game clock and the amount per real time is the same."""
+    HandleEconomyFluctuations) ran on the economy month (30 economy days = about 60 real seconds). It now runs on the Month event of the clock
+    (every 30 game days = 12 real hours at normal speed): the infrastructure costs are charged once per 30 game days, as a real monthly maintenance bill.
+    The amount of one charge is the one of OpenTTD, so the money per real time is much lower than when it ran every game hour (owner decision 2026-10-28)."""
     p = tree / "src" / "economy.cpp"
     t, crlf = _read_lf(p)
     if COMPANY_TIME_MARKER in t:
-        print("economy.cpp: company monthly work already on the game hour")
+        print("economy.cpp: company monthly work already on the game month")
         return
     old = re.search(r"static const IntervalTimer<TimerGameEconomy> _economy_companies_monthly\(\{ ?TimerGameEconomy::MONTH, TimerGameEconomy::Priority::COMPANY ?\}, \[\]\(auto\)\n", t)
     if not old:
         sys.exit("ERROR: economy.cpp: _economy_companies_monthly not found (company time patch)")
-    t = t[:old.start()] + f"static const GameTimeSubscription _economy_companies_monthly(GameTimeEvent::Hour, [](const GameTimeSnapshot &) /* {COMPANY_TIME_MARKER} */\n" + t[old.end():]
+    t = t[:old.start()] + f"static const GameTimeSubscription _economy_companies_monthly(GameTimeEvent::Month, [](const GameTimeSnapshot &) /* {COMPANY_TIME_MARKER} */\n" + t[old.end():]
     t = ensure_include(t, '#include "game_time/game_time_manager.h"', ['#include "company_func.h"', '#include "stdafx.h"'])
     _write_like(p, t, crlf)
-    print("economy.cpp: company monthly work runs on the game hour")
+    print("economy.cpp: company monthly work runs on the game month (every 30 game days)")
 
 
 VAT_MARKER = "GAME_VAT_PATCH"
