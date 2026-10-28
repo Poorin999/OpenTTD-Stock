@@ -40,7 +40,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "wallet_base.h": "src", "wallet_base.cpp": "src",
     "wallet_cmd.h": "src", "wallet_cmd.cpp": "src",
     "central_bank.h": "src", "central_bank.cpp": "src",
-    "tax.h": "src", "tax.cpp": "src", "zone_market.h": "src", "zone_market.cpp": "src", "zone_market_math.h": "src", "zone_map_gui.h": "src", "hq_gate.h": "src", "hq_gate.cpp": "src", "zone_map_gui.cpp": "src",
+    "tax.h": "src", "tax.cpp": "src", "zone_market.h": "src", "zone_market.cpp": "src", "zone_market_math.h": "src", "zone_map_gui.h": "src", "zone_borders.h": "src", "zone_borders.cpp": "src", "hq_gate.h": "src", "hq_gate.cpp": "src", "zone_map_gui.cpp": "src",
     "cargo_market.h": "src", "cargo_market.cpp": "src", "CargoMarketMath.h": "src",
     "town_treasury.h": "src", "town_treasury.cpp": "src", "citizen_gold.h": "src", "citizen_terminal.h": "src", "gold_market_math.h": "src", "oil_market_math.h": "src", "oil_market_gui.h": "src", "oil_market_gui.cpp": "src",
     "gold_reserve.h": "src", "gold_reserve.cpp": "src", "gold_industry.cpp": "src", "firs_desert_cargo.cpp": "src", "english_firs_strings.txt": "src", "desert_industries.cpp": "src", "english_desert_industries_strings.txt": "src",
@@ -73,7 +73,7 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_GOLD_BUY", "buy gold for the reserve"),
     ("CMD_GOLD_SELL", "sell gold of the reserve"),
 ]
-NEW_SOURCES = ["hq_gate.cpp", "hq_gate.h", "zone_map_gui.cpp", "zone_map_gui.h", "zone_market.cpp", "zone_market.h", "zone_market_math.h", "wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "oil_market_math.h", "oil_market_gui.cpp", "oil_market_gui.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "firs_desert_cargo.cpp", "desert_industries.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "company_info_gui.cpp", "company_info_gui.h", "company_info_math.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
+NEW_SOURCES = ["zone_borders.cpp", "zone_borders.h", "hq_gate.cpp", "hq_gate.h", "zone_map_gui.cpp", "zone_map_gui.h", "zone_market.cpp", "zone_market.h", "zone_market_math.h", "wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "oil_market_math.h", "oil_market_gui.cpp", "oil_market_gui.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "firs_desert_cargo.cpp", "desert_industries.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "company_info_gui.cpp", "company_info_gui.h", "company_info_math.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
                "RetailMath.h", "RetailMarketManager.h", "RetailMarketManager.cpp",
                "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]
@@ -823,6 +823,55 @@ def patch_company_hourly(tree):
     print("economy.cpp: company monthly work runs on the game month (every 30 game days)")
 
 
+ZONE_BORDERS_MARKER = "ZONE_BORDERS_PATCH"
+ZONE_STATUS_MARKER = "ZONE_STATUS_PATCH"
+
+
+def patch_zone_borders(tree):
+    """The borders of the money zones in the main game view (zone_borders.cpp): one call in ViewportDoDraw() of viewport.cpp, right before the signs and names are drawn
+    (the drawing area is in screen pixels there). In place, at an anchor; the lines are optional, so when the anchor is missing only a WARNING is printed and the build goes on."""
+    p = tree / "src" / "viewport.cpp"
+    if not p.is_file():
+        print("WARNING: viewport.cpp not found, the zone borders are not drawn in the game view")
+        return
+    t, crlf = _read_lf(p)
+    if ZONE_BORDERS_MARKER in t:
+        print("viewport.cpp: zone borders hook already there")
+        return
+    anchor = "\tif (!_vd.string_sprites_to_draw.empty()) {\n\t\t/* translate to world coordinates */\n"
+    if t.count(anchor) != 1:
+        print("WARNING: the 'translate to world coordinates' lines of ViewportDoDraw were not found exactly once in viewport.cpp, the zone borders are not drawn in the game view")
+        return
+    call = (f"\t/* {ZONE_BORDERS_MARKER}: the borders of the money zones, coloured lines on the ground (zone_borders.cpp). dp is in screen pixels, like the signs. */\n"
+            "\tdp.left = UnScaleByZoom(_vd.dpi.left, zoom);\n\tdp.top = UnScaleByZoom(_vd.dpi.top, zoom);\n\tZoneBordersDraw(zoom);\n\n")
+    t = t.replace(anchor, call + anchor, 1)
+    t = ensure_include(t, '#include "zone_borders.h"', ['#include "viewport_func.h"', '#include "stdafx.h"'])
+    _write_like(p, t, crlf)
+    print("viewport.cpp: zone borders hook added")
+
+
+def patch_zone_status(tree):
+    """The zone under the mouse in the middle of the status bar (zone_borders.cpp, ZoneStatusText): the default text of the middle widget (the company name) gets
+    '| zone N (currency) capital rate'. In place, at the call that draws the company name; only a WARNING when it is not found."""
+    p = tree / "src" / "statusbar_gui.cpp"
+    if not p.is_file():
+        print("WARNING: statusbar_gui.cpp not found, the zone is not shown in the status bar")
+        return
+    t, crlf = _read_lf(p)
+    if ZONE_STATUS_MARKER in t:
+        print("statusbar_gui.cpp: zone text already there")
+        return
+    old = "GetString(STR_STATUSBAR_COMPANY_NAME, _local_company)"
+    n = t.count(old)
+    if n < 1:
+        print("WARNING: the draw of STR_STATUSBAR_COMPANY_NAME was not found in statusbar_gui.cpp, the zone is not shown in the status bar")
+        return
+    t = t.replace(old, f"ZoneStatusText(GetString(STR_STATUSBAR_COMPANY_NAME, _local_company)) /* {ZONE_STATUS_MARKER} */")
+    t = ensure_include(t, '#include "zone_borders.h"', ['#include "statusbar_gui.h"', '#include "stdafx.h"'])
+    _write_like(p, t, crlf)
+    print(f"statusbar_gui.cpp: zone text added ({n} places)")
+
+
 VAT_MARKER = "GAME_VAT_PATCH"
 
 
@@ -1121,6 +1170,8 @@ def main(tree):
     patch_cargo_market(tree)
     patch_cargo_local(tree)
     patch_zone_fee(tree)
+    patch_zone_borders(tree)
+    patch_zone_status(tree)
     patch_vat(tree)
     patch_vehicle_time(tree)
     patch_world_time(tree)

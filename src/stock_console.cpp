@@ -26,6 +26,7 @@
 #include "cargo_market.h"
 #include "zone_market.h"
 #include "zone_map_gui.h"
+#include "zone_borders.h"
 #include "town.h"
 #include "gold_reserve.h"
 #include "town_treasury.h"
@@ -116,6 +117,20 @@ static bool ConStockSkip(std::span<std::string_view> argv)
 	SkipGameMinutes(value * unit_minutes);
 	const GameTimeSnapshot now = GameTimeManager::Get().GetSnapshot();
 	IConsolePrint(CC_DEFAULT, "Skipped {} game minutes. The game time is now day {} of year {}, {:02}:{:02}.", value * unit_minutes, now.day, now.year, now.hour, now.minute);
+	return true;
+}
+
+/** Turn the zone border lines of the game view on or off. */
+static bool ConZoneLines(std::span<std::string_view> argv)
+{
+	if (argv.size() < 2 || argv[1] == "?") {
+		IConsolePrint(CC_HELP, "Show or hide the borders of the money zones in the game view (coloured lines on the ground). Usage: 'zone_lines on|off'.");
+		return true;
+	}
+	if (argv[1] == "on") SetZoneBordersEnabled(true);
+	else if (argv[1] == "off") SetZoneBordersEnabled(false);
+	else { IConsolePrint(CC_ERROR, "Usage: zone_lines on|off"); return true; }
+	IConsolePrint(CC_DEFAULT, "Zone borders in the game view: {}", ZoneBordersEnabled() ? "on" : "off");
 	return true;
 }
 
@@ -292,6 +307,7 @@ void RegisterStockConsoleCommands()
 	IConsole::CmdRegister("cargo_prices", ConCargoPrices);
 	IConsole::CmdRegister("zones", ConZones);
 	IConsole::CmdRegister("zones_map", ConZonesMap);
+	IConsole::CmdRegister("zone_lines", ConZoneLines);
 	IConsole::CmdRegister("gold_factors", ConGoldFactors);
 	IConsole::CmdRegister("citizen_gold", ConCitizenGold);
 }
