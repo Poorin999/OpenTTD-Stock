@@ -27,6 +27,8 @@ struct ZoneState {
 	int64_t company_tax = 0;          ///< Income tax, capital gains tax and dividend tax of the companies whose headquarters stand in this zone (saved, SRK_ZONE_TAX).
 	int64_t inflation_ppm = zonemath::INFL_START_PPM; ///< Yearly inflation of the zone in ppm. Saved (SRK_ZONE v4, +1,000,000).
 	int64_t policy_ppm = zonemath::POLICY_START_PPM;  ///< Yearly policy rate of the zone central bank in ppm: what banknotes of the zone earn. Saved (SRK_ZONE v5, +1).
+	zonemath::FxState fx;             ///< Memory of the FX model (price level, trade, growth, capital flow, risk, news, reserves). Saved (SRK_ZONE_FX).
+	zonemath::FxParts parts;          ///< The parts of the last fair value (console, windows). Not saved.
 	int64_t tax_percent = 100;        ///< The tax level of the zone in percent of the base rates of tax.h (100 = the base rate). Saved (SRK_ZONE_TAX, v5 = percent + 1).
 };
 

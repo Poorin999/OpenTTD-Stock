@@ -14,6 +14,7 @@
 #include "company_base.h"
 #include "company_func.h"
 #include "central_bank.h"
+#include "market_events.h"
 #include "command_func.h"
 #include "settings_type.h"
 #include "game_time/game_time_manager.h"
@@ -103,6 +104,7 @@ bool ZoneMarket::MakeZones()
 		this->zones[i] = {};
 		this->zones[i].capital = tiles[caps[i]];
 		this->zones[i].tax_percent = ZONE_TAX_DEFAULT_PERCENT[i];
+		this->zones[i].fx = zonemath::FxInitState(static_cast<int>(i));
 	}
 	this->count = static_cast<int>(caps.size());
 	this->RefreshPopulation();
@@ -125,16 +127,27 @@ void ZoneMarket::UpdateDaily()
 	/* Normally the zones exist long before the first game day (see the tick timer below); this is only the safety net. */
 	if (!this->MakeZones()) return;
 
-	/* The people of every zone, the level of every rate, one step of every rate. */
+	/* The people of every zone (display, tax window), then one game day of the FX model (zonemath::FxStepDay): inflation, policy meetings, trade, growth,
+	 * political risk, news, market mood, capital flows, the rate, and the defence of the zone central banks. */
 	this->RefreshPopulation();
-	int64_t total = 0;
-	for (int i = 0; i < this->count; i++) total += this->zones[i].population;
 	const int64_t day = static_cast<int64_t>(GameTimeManager::Get().GetSnapshot().total_minutes / GameTimeManager::MINUTES_PER_DAY);
+	std::array<zonemath::FxZone, zonemath::MAX_ZONES> fz{};
 	for (int i = 0; i < this->count; i++) {
-		const int64_t level = zonemath::LevelPpm(this->zones[i].population, total, this->count);
-		this->zones[i].rate_ppm = zonemath::NextRate(ZoneSeed(), i, day, this->zones[i].rate_ppm, level);
-		this->zones[i].inflation_ppm = zonemath::NextInflation(ZoneSeed(), i, day, this->zones[i].inflation_ppm);
-		this->zones[i].policy_ppm = zonemath::NextPolicy(this->zones[i].policy_ppm, this->zones[i].inflation_ppm);
+		fz[i].rate_ppm = this->zones[i].rate_ppm;
+		fz[i].inflation_ppm = this->zones[i].inflation_ppm;
+		fz[i].policy_ppm = this->zones[i].policy_ppm;
+		fz[i].fx = this->zones[i].fx;
+	}
+	zonemath::FxWorld world;
+	world.mood_ppm = _market_events.market_sentiment_ppm;
+	world.war = _market_events.WarIsOn();
+	zonemath::FxStepDay(ZoneSeed(), day, fz.data(), this->count, world);
+	for (int i = 0; i < this->count; i++) {
+		this->zones[i].rate_ppm = fz[i].rate_ppm;
+		this->zones[i].inflation_ppm = fz[i].inflation_ppm;
+		this->zones[i].policy_ppm = fz[i].policy_ppm;
+		this->zones[i].fx = fz[i].fx;
+		this->zones[i].parts = fz[i].parts;
 	}
 
 	/* Banknotes earn the policy rate of their zone every game day. */
@@ -147,7 +160,9 @@ void ZoneRateTrade(int zone, bool buy, uint32_t volume)
 {
 	if (zone < 0 || zone >= _zone_market.count) return;
 	int64_t &rate = _zone_market.zones[zone].rate_ppm;
+	const int64_t before = rate;
 	rate = zonemath::RateAfterTrade(rate, buy, volume);
+	if (before > 0) _zone_market.zones[zone].fx.capital_ppm += (rate - before) * zonemath::PPM / before; // the trade of a player is a capital flow
 }
 
 /**
@@ -197,6 +212,11 @@ void ZoneFeeOnDelivery(CompanyID owner, int64_t income, StationID source, Statio
 	const int from = _zone_market.ZoneOfTile(Station::Get(source)->xy);
 	const int to = _zone_market.ZoneOfTile(Station::Get(dest)->xy);
 	if (to >= 0 && to < _zone_market.count) _zone_market.zones[to].vat += ChargeVatPercent(owner, income, _zone_market.zones[to].tax_percent, to); // The VAT of this delivery at the tax level of the zone of the destination.
+	if (to >= 0 && to < _zone_market.count) _zone_market.zones[to].fx.gdp_today += income; // income of deliveries into the zone = its output
+	if (from >= 0 && to >= 0 && from != to && from < _zone_market.count && to < _zone_market.count) {
+		_zone_market.zones[from].fx.exports_today += income; // cargo crossing a border: export of the zone it came from, import of the zone it goes to
+		_zone_market.zones[to].fx.imports_today += income;
+	}
 	const int64_t fee_ppm = _zone_market.FeePpmBetween(from, to);
 	if (fee_ppm <= 0) return;
 	const int64_t fee = zonemath::FeeAmount(income, fee_ppm);
