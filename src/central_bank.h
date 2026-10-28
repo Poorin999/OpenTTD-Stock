@@ -638,6 +638,7 @@ enum class LedgerItem : uint8_t {
 	TaxIncome,       ///< Income tax on the profit of the quarter.
 	FuelCost,        ///< Extra fuel cost per running vehicle per game day while the fuel index is above its plain price (tax.cpp, the cost step of the cargo prices). Expense, NOT paid to the central bank. Appended last: the index is saved.
 	TaxInterest,     ///< Tax withheld from the IORB interest on idle cash (BANK_IORB_TAX_PERCENT). Expense, withheld at the source. Appended last: the index is saved.
+	ZoneFee,         ///< Exchange fee of a delivery that crossed a zone border (zone_market.cpp). Expense, paid to the central bank. Appended last: the index is saved.
 	End,
 };
 static constexpr size_t LEDGER_ITEMS = static_cast<size_t>(LedgerItem::End);

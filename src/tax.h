@@ -68,6 +68,9 @@ inline int64_t IncomeTaxOfQuarter(int64_t profit, int64_t index_ppm)
 /** VAT on an income of cargo delivery: taken from the company cash now. */
 void ChargeVat(CompanyID company, int64_t income);
 
+/** Exchange fee of a delivery across a zone border (zone_market.cpp): taken from the company cash now, booked as LedgerItem::ZoneFee, paid to the bank. */
+void ChargeZoneFee(CompanyID company, int64_t amount);
+
 /**
  * Tax on a profit that is about to be paid to a wallet (closed trade, dividend). It is booked in the ledger and goes to the bank,
  * but the cash is NOT touched: the caller pays the profit minus the returned tax.

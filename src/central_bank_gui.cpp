@@ -207,6 +207,9 @@ static void DrawAccountStatement(const Rect &r, int offset)
 	category("Fuel (paid to the market, not a tax)");
 	booked("Fuel Cost (extra, when fuel is dear)", LedgerItem::FuelCost);
 
+	category("Money zones (paid to the Central Bank)");
+	booked("Exchange Fee (cargo delivered across a zone border)", LedgerItem::ZoneFee);
+
 	category("Assets & Operations");
 	yearly("Vehicle & Infrastructure Running Costs", {EXPENSES_TRAIN_RUN, EXPENSES_ROADVEH_RUN, EXPENSES_AIRCRAFT_RUN, EXPENSES_SHIP_RUN, EXPENSES_PROPERTY});
 	yearly("Construction & Land Purchase", {EXPENSES_CONSTRUCTION});
@@ -366,6 +369,9 @@ static void DrawArchiveStatement(const Rect &r, int age)
 
 	category("Fuel (paid to the market, not a tax)");
 	booked("Fuel Cost (extra, when fuel is dear)", LedgerItem::FuelCost);
+
+	category("Money zones (paid to the Central Bank)");
+	booked("Exchange Fee (cargo delivered across a zone border)", LedgerItem::ZoneFee);
 
 	category("Assets & Operations");
 	yearly("Vehicle & Infrastructure Running Costs", LedgerItem::YearRunning, {EXPENSES_TRAIN_RUN, EXPENSES_ROADVEH_RUN, EXPENSES_AIRCRAFT_RUN, EXPENSES_SHIP_RUN, EXPENSES_PROPERTY});
@@ -614,6 +620,7 @@ struct CentralBankWindow : Window {
 			case LedgerItem::TaxDividend:     return CbText("ภาษีเงินปันผล", "Dividend tax");
 			case LedgerItem::TaxIncome:       return CbText("ภาษีเงินได้ไตรมาส", "Income tax");
 			case LedgerItem::TaxInterest:     return CbText("ภาษีดอกเบี้ยเงินสด (IORB)", "IORB tax");
+			case LedgerItem::ZoneFee:         return CbText("ค่าธรรมเนียมแลกเงินข้ามโซน", "Zone exchange fee");
 			case LedgerItem::BankGoldOp:      return e.amount >= 0 ? CbText("ธนาคารซื้อทอง: เงินเข้า", "Bank gold buy: cash in") : CbText("ธนาคารขายทอง: เงินออก", "Bank gold sale: cash out");
 			default:                          return "";
 		}

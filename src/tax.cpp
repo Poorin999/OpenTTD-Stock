@@ -65,6 +65,11 @@ void ChargeVat(CompanyID company, int64_t income)
 	BookTax(company, LedgerItem::TaxVat, income * TAX_VAT_PERCENT / 100);
 }
 
+void ChargeZoneFee(CompanyID company, int64_t amount)
+{
+	BookTax(company, LedgerItem::ZoneFee, amount);
+}
+
 int64_t TakeInvestorTax(CompanyID company, LedgerItem item, int64_t profit)
 {
 	if (profit <= 0 || !Company::IsValidID(company)) return 0;

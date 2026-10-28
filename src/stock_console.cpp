@@ -24,6 +24,8 @@
 #include "game_time/game_time_manager.h"
 #include "market_events.h"
 #include "cargo_market.h"
+#include "zone_market.h"
+#include "town.h"
 #include "gold_reserve.h"
 #include "town_treasury.h"
 #include "valuables.h"
@@ -117,6 +119,31 @@ static bool ConStockSkip(std::span<std::string_view> argv)
 }
 
 /** Print the price of every cargo: what a unit pays now against the normal pay, and the deliveries behind it. Read only, works always. */
+static bool ConZones(std::span<std::string_view> argv)
+{
+	if (!argv.empty() && argv.size() >= 2 && argv[1] == "?") {
+		IConsolePrint(CC_HELP, "Show the money zones: capital, currency, exchange rate (1.00 = the base unit), people, and the exchange fees that deliveries into the zone paid. A delivery across a zone border pays a fee (1% + a quarter of the rate difference, at most 12%).");
+		return true;
+	}
+	if (_zone_market.count <= 0) {
+		IConsolePrint(CC_DEFAULT, "No zones yet: they are made on the first game day when the map has at least two towns far enough apart.");
+		return true;
+	}
+	for (int i = 0; i < _zone_market.count; i++) {
+		const ZoneState &z = _zone_market.zones[i];
+		const Town *capital = ClosestTownFromTile(z.capital, UINT_MAX);
+		IConsolePrint(CC_DEFAULT, "zone {}  capital {}  currency {} ({})  rate {}.{:03}  people {}  fees earned {}", i + 1, capital != nullptr ? GetString(STR_TOWN_NAME, capital->index) : std::string("-"), ZoneCurrencyName(i), ZoneCurrencySymbol(i), z.rate_ppm / 1'000'000, (z.rate_ppm % 1'000'000) / 1'000, z.population, z.fees);
+	}
+	for (int a = 0; a < _zone_market.count; a++) {
+		for (int b = 0; b < _zone_market.count; b++) {
+			if (a == b) continue;
+			const int64_t f = _zone_market.FeePpmBetween(a, b);
+			IConsolePrint(CC_DEFAULT, "fee {} -> {}: {}.{:02}%", a + 1, b + 1, f / 10'000, (f % 10'000) / 100);
+		}
+	}
+	return true;
+}
+
 static bool ConCargoPrices(std::span<std::string_view> argv)
 {
 	if (argv.empty()) {
@@ -247,6 +274,7 @@ void RegisterStockConsoleCommands()
 	IConsole::CmdRegister("stock_skip", ConStockSkip);
 	IConsole::CmdRegister("stock_event", ConStockEvent);
 	IConsole::CmdRegister("cargo_prices", ConCargoPrices);
+	IConsole::CmdRegister("zones", ConZones);
 	IConsole::CmdRegister("gold_factors", ConGoldFactors);
 	IConsole::CmdRegister("citizen_gold", ConCitizenGold);
 }

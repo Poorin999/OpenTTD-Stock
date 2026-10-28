@@ -13,6 +13,7 @@
 #include "tax.h"
 #include "town_treasury.h"
 #include "cargo_market.h"
+#include "zone_market.h"
 #include "stock_gui.h"
 #include "central_bank.h"
 #include "gold_reserve.h"
@@ -60,6 +61,7 @@ void StockMarket::Reset()
 	_payroll_news.Reset();
 	_town_treasury.Reset();
 	_cargo_market.Reset();
+	_zone_market.Reset();
 	_market_events.Reset();
 	TownNewsReset();
 	RetailMarketManager::Get().Reset(); // The retail investors start again with every new game and every load.
