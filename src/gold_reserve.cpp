@@ -348,9 +348,12 @@ void GoldReserveManager::UpdateGlide(uint64_t total_minutes)
 
 	if (PRICE_USES_CASH) this->cash_avg = goldmath::SmoothedCash(this->cash_avg, this->GetNotesInCirculation());
 	this->impact_ppm = goldmath::FadedImpact(this->impact_ppm); // The push of the trades fades fast.
+	this->pressure_ppm = goldmath::FadedPressureStep(this->pressure_ppm); // The news pressure fades 3% a day, in small steps (no step at midnight).
+	this->market_stock_oz = goldmath::RebalancedStockStep(this->market_stock_oz, MARKET_STOCK_START); // The world refills / empties the stock in small steps.
 	const int64_t level = this->ComputeTargetCents();
 	if (this->last_level_cents > 0 && level > 0 && level != this->last_level_cents) p = p * level / this->last_level_cents;
 	if (level > 0) this->last_level_cents = level;
+	if (total_minutes % 60 == 0) p = goldmath::RevertedPriceHour(p, level); // The weak pull to the level, a 24th of the daily pull every game hour.
 
 	this->price_cents = std::max<int64_t>(1, p);
 }
@@ -368,16 +371,13 @@ void GoldReserveManager::UpdateDaily([[maybe_unused]] int64_t finished_day)
 
 	/* The only pull of the price: 0.5% of the gap to the level of the economy per day. It keeps the price from running away for good (a real price is tied to money, inflation and mining
 	 * by years, not by days) and takes no part in the daily path. last_level_cents is not touched: the next step still sees every change of the level. */
-	this->price_cents = goldmath::RevertedPrice(this->price_cents, this->ComputeTargetCents());
+	/* (The pull, the stock rebalance and the fade of the news pressure used to be one step here at midnight: the price jumped every midnight. They run in the 2-minute steps now, see UpdateGlide.) */
 
 	/* The world takes gold out of the stock and puts new gold in (scrap, jewellery, new mines): the stock moves back to its start level, so mines can not sink the price for good. */
-	this->market_stock_oz = goldmath::RebalancedStock(this->market_stock_oz, MARKET_STOCK_START);
 	this->PushHistory();
 	this->day_shift_cents = 0;
 
 	/* The demand effect of the buying and selling fades by 3% a day. */
-	this->pressure_ppm = std::clamp<int64_t>(this->pressure_ppm - this->pressure_ppm * 3 / 100, -PRESSURE_MAX_PPM, PRESSURE_MAX_PPM);
-
 	InvalidateWindowData(WC_STOCK_MARKET, 0);
 }
 

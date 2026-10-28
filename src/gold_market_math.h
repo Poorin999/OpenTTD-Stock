@@ -140,6 +140,31 @@ inline int64_t RevertedPrice(int64_t price, int64_t level)
 	return std::max<int64_t>(1, price + (level - price) * REVERT_PPM_PER_DAY / PPM);
 }
 
+/** The same weak pull, but every game HOUR (1/24 of the daily pull; a 2-minute step would round to 0 for a price in cents). No step at midnight. */
+inline int64_t RevertedPriceHour(int64_t price, int64_t level)
+{
+	if (level <= 0) return price;
+	return std::max<int64_t>(1, price + (level - price) * REVERT_PPM_PER_DAY / (PPM * 24));
+}
+
+/** The fade of the news pressure (3% a day) in the small steps of the price. Always moves at least 1 towards 0, so it can not stall. */
+inline int64_t FadedPressureStep(int64_t pressure)
+{
+	if (pressure == 0) return 0;
+	int64_t d = pressure * 3 / (100 * STEPS_PER_DAY);
+	if (d == 0) d = pressure > 0 ? 1 : -1;
+	return pressure - d;
+}
+
+/** The world moves the gold stock back to the start stock (STOCK_REBALANCE_PERMILLE a day) in the small steps of the price. Never passes the start stock. */
+inline int64_t RebalancedStockStep(int64_t stock, int64_t start)
+{
+	const int64_t gap = start - stock;
+	int64_t step = gap * STOCK_REBALANCE_PERMILLE / (1000 * STEPS_PER_DAY);
+	if (step == 0 && gap != 0) step = gap > 0 ? 1 : -1;
+	return stock + step;
+}
+
 /** A smooth wave from -PPM to +PPM: a triangle made round at the turns (3x - x^3) / 2. */
 inline int64_t SmoothWave(int64_t t, int64_t period)
 {

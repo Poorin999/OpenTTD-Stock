@@ -15,6 +15,7 @@ static int64_t Step(int64_t price, uint64_t seed, int64_t minute, int64_t level,
 	int64_t p = price / PPM * (PPM + noise) + price % PPM * (PPM + noise) / PPM;
 	if (last_level > 0 && level > 0 && level != last_level) p = p * level / last_level;
 	if (level > 0) last_level = level;
+	if (minute % 60 == 0) p = RevertedPriceHour(p, level);
 	return std::max<int64_t>(1, p);
 }
 
@@ -74,7 +75,6 @@ int main()
 		for (int64_t d = 1; d <= 1825; d++) {
 			const int64_t start = price; int64_t noon = start;
 			for (int64_t m = 2; m < 1440; m += 2) { price = Step(price, seed, d * 1440 + m, level, last_level); if (m == 720) noon = price; }
-			price = RevertedPrice(price, level);
 			const double r = double(price - start) / start;
 			ssum += r; ssq += r * r; n++; maxmove = std::max<int64_t>(maxmove, std::llabs(price - start) * 10000 / start);
 			const int64_t vol = SmoothVolatilityPpm(seed, d * 1440 + 720);
@@ -132,6 +132,26 @@ int main()
 		const double days = steps * 2.0 / 1440;
 		std::printf("trade impact: half gone after %.2f game days\n", days);
 		CHECK(days > 1.4 && days < 1.8);
+	}
+
+	/* The small steps of the daily adjustments: the same total as the old daily step, and no step at midnight. */
+	{
+		int64_t p = 1'000'000; for (int i = 0; i < 24; i++) p = RevertedPriceHour(p, 1'200'000);
+		const int64_t daily = RevertedPrice(1'000'000, 1'200'000);
+		std::printf("pull: one day of steps %lld, the old daily step %lld\n", (long long)(p - 1'000'000), (long long)(daily - 1'000'000));
+		CHECK(std::llabs((p - 1'000'000) - (daily - 1'000'000)) < 40);
+		{ int64_t c = 200'000; for (int i = 0; i < 24; i++) c = RevertedPriceHour(c, 240'000); CHECK(c > 200'000 + 150); } // a price in cents still feels the pull
+		int64_t q = 300'000; for (int i = 0; i < 720; i++) q = FadedPressureStep(q);
+		std::printf("pressure: 300000 -> %lld after a day (3%% fade = 291000)\n", (long long)q);
+		CHECK(q > 290'000 && q < 292'000);
+		int64_t n = 5; int steps = 0; while (n != 0 && steps < 100) { n = FadedPressureStep(n); steps++; } CHECK(n == 0);
+		CHECK(FadedPressureStep(-300'000) > -300'000 && FadedPressureStep(0) == 0);
+		int64_t st = 20'000'000; for (int i = 0; i < 720; i++) st = RebalancedStockStep(st, 32'000'000);
+		const int64_t old_st = RebalancedStock(20'000'000, 32'000'000);
+		std::printf("stock: one day of steps %lld, the old daily step %lld\n", (long long)(st - 20'000'000), (long long)(old_st - 20'000'000));
+		CHECK(std::llabs(st - old_st) < 2'000);
+		int64_t s2 = 31'999'990; for (int i = 0; i < 5000; i++) s2 = RebalancedStockStep(s2, 32'000'000); CHECK(s2 == 32'000'000);
+		int64_t s3 = 40'000'000; for (int i = 0; i < 720; i++) { s3 = RebalancedStockStep(s3, 32'000'000); CHECK(s3 >= 32'000'000); }
 	}
 
 	/* The cash average: the real cash jumps by +-5% from day to day, the average that the price sees moves far less, and it still follows a lasting change. */
