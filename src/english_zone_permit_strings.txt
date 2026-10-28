@@ -1,0 +1,6 @@
+# Strings of the building permits of the money zones, for src/lang/english.txt. apply_overlay.py adds them; it skips strings that already exist.
+
+STR_ZONE_PERMIT_ERROR_CAPTION                                   :{WHITE}Can't buy a building permit...
+STR_ZONE_PERMIT_ERROR_BAD_ZONE                                  :{WHITE}This zone doesn't exist
+STR_ZONE_PERMIT_ERROR_NO_HQ                                     :{WHITE}Build your headquarters first
+STR_ZONE_PERMIT_ERROR_HOME                                      :{WHITE}You build freely in the zone of your headquarters, no permit needed

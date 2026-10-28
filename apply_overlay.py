@@ -40,7 +40,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "wallet_base.h": "src", "wallet_base.cpp": "src",
     "wallet_cmd.h": "src", "wallet_cmd.cpp": "src",
     "central_bank.h": "src", "central_bank.cpp": "src",
-    "tax.h": "src", "tax.cpp": "src", "zone_market.h": "src", "zone_market.cpp": "src", "zone_market_math.h": "src", "zone_map_gui.h": "src", "zone_borders.h": "src", "zone_borders.cpp": "src", "hq_gate.h": "src", "hq_gate.cpp": "src", "zone_map_gui.cpp": "src",
+    "tax.h": "src", "tax.cpp": "src", "zone_market.h": "src", "zone_market.cpp": "src", "zone_market_math.h": "src", "zone_map_gui.h": "src", "zone_borders.h": "src", "zone_borders.cpp": "src", "hq_gate.h": "src", "hq_gate.cpp": "src", "zone_permit.h": "src", "zone_permit.cpp": "src", "zone_permit_math.h": "src", "zone_map_gui.cpp": "src",
     "cargo_market.h": "src", "cargo_market.cpp": "src", "CargoMarketMath.h": "src",
     "town_treasury.h": "src", "town_treasury.cpp": "src", "citizen_gold.h": "src", "citizen_terminal.h": "src", "gold_market_math.h": "src", "oil_market_math.h": "src", "oil_market_gui.h": "src", "oil_market_gui.cpp": "src",
     "gold_reserve.h": "src", "gold_reserve.cpp": "src", "gold_industry.cpp": "src", "firs_desert_cargo.cpp": "src", "custom_cargo_icons.cpp": "src", "custom_cargo_icons.h": "src", "english_firs_strings.txt": "src", "desert_industries.cpp": "src", "english_desert_industries_strings.txt": "src",
@@ -72,13 +72,15 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_BANK_REPAY", "repay the central bank"),
     ("CMD_GOLD_BUY", "buy gold for the reserve"),
     ("CMD_GOLD_SELL", "sell gold of the reserve"),
+    ("CMD_ZONE_EXCHANGE", "exchange cash for banknotes of a money zone, or back"),
+    ("CMD_ZONE_PERMIT", "buy a building permit for a foreign money zone"),
 ]
-NEW_SOURCES = ["zone_borders.cpp", "zone_borders.h", "hq_gate.cpp", "hq_gate.h", "zone_map_gui.cpp", "zone_map_gui.h", "zone_market.cpp", "zone_market.h", "zone_market_math.h", "wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "oil_market_math.h", "oil_market_gui.cpp", "oil_market_gui.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "firs_desert_cargo.cpp", "custom_cargo_icons.cpp", "custom_cargo_icons.h", "desert_industries.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "company_info_gui.cpp", "company_info_gui.h", "company_info_math.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
+NEW_SOURCES = ["zone_borders.cpp", "zone_borders.h", "hq_gate.cpp", "hq_gate.h", "zone_permit.cpp", "zone_permit.h", "zone_map_gui.cpp", "zone_map_gui.h", "zone_market.cpp", "zone_market.h", "zone_market_math.h", "wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "oil_market_math.h", "oil_market_gui.cpp", "oil_market_gui.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "firs_desert_cargo.cpp", "custom_cargo_icons.cpp", "custom_cargo_icons.h", "desert_industries.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "company_info_gui.cpp", "company_info_gui.h", "company_info_math.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
                "RetailMath.h", "RetailMarketManager.h", "RetailMarketManager.cpp",
                "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]
 REPLACE_KEYS = {"STR_STOCK_TIP_TOOLBOX", "STR_STOCK_TIP_SUMMARY", "STR_STOCK_ORDER_INFO", "STR_STOCK_TIP_DEPOSIT", "STR_STOCK_TIP_WITHDRAW"}
-STRING_FILES = ["english_stock_strings.txt", "english_wallet_strings.txt", "english_round8_strings.txt", "english_timeframe_strings.txt", "english_central_bank_strings.txt", "english_gold_strings.txt", "english_firs_strings.txt", "english_desert_industries_strings.txt", "english_town_finance_strings.txt", "english_company_info_strings.txt", "english_valuables_strings.txt", "english_news_strings.txt"]
+STRING_FILES = ["english_stock_strings.txt", "english_wallet_strings.txt", "english_round8_strings.txt", "english_timeframe_strings.txt", "english_central_bank_strings.txt", "english_gold_strings.txt", "english_firs_strings.txt", "english_desert_industries_strings.txt", "english_town_finance_strings.txt", "english_company_info_strings.txt", "english_valuables_strings.txt", "english_news_strings.txt", "english_zone_permit_strings.txt"]
 THAI_STRING_FILES = ["thai_firs_strings.txt", "thai_desert_industries_strings.txt"]  # Thai texts of the new strings, appended to lang/thai.txt
 ANCHORS = ["STR_STOCK_ERROR_NO_ORDER", "STR_STOCK_NEWS_ORDER_EXPIRED"]
 
@@ -662,6 +664,43 @@ def patch_zone_fee(tree):
     t = ensure_include(t, '#include "zone_market.h" /* ZONE_FEE_PATCH */', ['#include "central_bank.h"', '#include "stdafx.h"'])
     _write_like(p, t, crlf)
     print("economy.cpp: zone fee hook added")
+
+
+ZONE_PERMIT_MARKER = "ZONE_PERMIT_PATCH"
+
+
+def patch_zone_permit(tree):
+    """Building permits of the money zones (zone_permit.cpp): every executed construction in a foreign zone costs more. One call in
+    CommandHelperBase::InternalExecuteProcessResult (command.cpp), around the cost that is taken from the company:
+        SubtractMoneyFromCompany([_current_company, ]res_exec);  ->  SubtractMoneyFromCompany([_current_company, ]ZonePermitAdjustCost(cmd, tile, res_exec));
+    The anchor is found with a regular expression that accepts the one- and the two-argument form of SubtractMoneyFromCompany, only inside that function.
+    It is an extra: when the function, the anchor or GetCommandName is missing only a WARNING is printed, nothing is written and the build goes on without permits.
+    Known limit: the test run (money check, shift cost estimate) does not see the surcharge, so a company can go a little below zero by it."""
+    p = tree / "src" / "command.cpp"
+    if not p.is_file():
+        print("WARNING: command.cpp not found, the building permits are not hooked")
+        return
+    t, crlf = _read_lf(p)
+    if ZONE_PERMIT_MARKER in t:
+        print("command.cpp: zone permit hook already there")
+        return
+    m = re.search(r"CommandCost CommandHelperBase::InternalExecuteProcessResult\([^)]*\)\s*\{\n", t)
+    if not m:
+        print("WARNING: CommandHelperBase::InternalExecuteProcessResult not found in command.cpp, the building permits are not hooked")
+        return
+    end = t.find("\n}\n", m.end())
+    body = t[m.end():end]
+    calls = list(re.finditer(r"SubtractMoneyFromCompany\(((?:_current_company,\s*)?)res_exec\)", body))
+    if end < 0 or len(calls) != 1 or "GetCommandName" not in t:
+        print("WARNING: InternalExecuteProcessResult has a different layout (SubtractMoneyFromCompany(res_exec) once, GetCommandName), the building permits are not hooked")
+        return
+    c = calls[0]
+    new = f"SubtractMoneyFromCompany({c.group(1)}ZonePermitAdjustCost(cmd, tile, res_exec)) /* {ZONE_PERMIT_MARKER} */"
+    body = body[:c.start()] + new + body[c.end():]
+    t = t[:m.end()] + body + t[end:]
+    t = ensure_include(t, '#include "zone_permit.h" /* ZONE_PERMIT_PATCH */', ['#include "command_func.h"', '#include "stdafx.h"'])
+    _write_like(p, t, crlf)
+    print("command.cpp: zone permit hook added")
 
 
 VEHICLE_TIME_MARKER = "GAME_VEHICLE_TIME_PATCH"
@@ -1262,6 +1301,7 @@ def main(tree):
     patch_cargo_market(tree)
     patch_cargo_local(tree)
     patch_zone_fee(tree)
+    patch_zone_permit(tree)
     patch_zone_borders(tree)
     patch_zone_status(tree)
     patch_vat(tree)

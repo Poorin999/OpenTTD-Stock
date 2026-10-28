@@ -18,16 +18,20 @@
 #include "central_bank.h"
 /* The commands of the gold reserve too. */
 #include "gold_reserve.h"
+/* And the building permits of the money zones. */
+#include "zone_permit.h"
 
 CommandCost CmdWalletCreate(DoCommandFlags flags, WalletKind kind);
 CommandCost CmdWalletDelete(DoCommandFlags flags, uint8_t wallet);
 CommandCost CmdWalletTransfer(DoCommandFlags flags, uint8_t from, uint8_t to, Money amount);
 CommandCost CmdWalletLeverage(DoCommandFlags flags, uint8_t wallet, uint8_t level);
+CommandCost CmdZoneExchange(DoCommandFlags flags, uint8_t zone, bool sell, Money amount);
 
 DEF_CMD_TRAIT(CMD_WALLET_CREATE,   CmdWalletCreate,   {}, CommandType::MoneyManagement)
 DEF_CMD_TRAIT(CMD_WALLET_DELETE,   CmdWalletDelete,   {}, CommandType::MoneyManagement)
 DEF_CMD_TRAIT(CMD_WALLET_TRANSFER, CmdWalletTransfer, {}, CommandType::MoneyManagement)
 DEF_CMD_TRAIT(CMD_WALLET_LEVERAGE, CmdWalletLeverage, {}, CommandType::MoneyManagement)
+DEF_CMD_TRAIT(CMD_ZONE_EXCHANGE,   CmdZoneExchange,   {}, CommandType::MoneyManagement)
 
 #endif /* WALLET_CMD_H */
 

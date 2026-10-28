@@ -24,6 +24,7 @@
 #include "../citizen_gold.h"
 #include "../cargo_market.h"
 #include "../zone_market.h"
+#include "../zone_permit.h"
 #include "../game_time/game_time_manager.h"
 
 #include "../safeguards.h"
@@ -69,7 +70,9 @@ enum StockRecordKind : uint8_t {
 	SRK_TOWN_NEWS = 38, ///< What the daily town news scan remembers about a town: ym = index of the town, v1 = population at the start of the window, v2 = game day of that snapshot, v3 = number of population marks reached.
 	SRK_TOWN_POS = 37, ///< Open terminal position of a citizen group: a = group (citizengold::Style), b = symbol | 0x80 when long, ym = index of the town, v1 = volume, v2 = entry price, v3 = stop loss, v4 = take profit.
 	SRK_BANK_LOG = 41,  ///< Line of the account log of the bank window: a = company, b = line (LedgerItem), ym = game day of the year, v1 = amount (sum of the bookings), v2 = ledger year, v3 = number of bookings. Written newest first.
+	SRK_ZONE_HOLD = 45, ///< Banknotes of a zone that a company holds: a = company, b = zone, v1 = notes (units of that currency).
 	SRK_BANK_GOLD = 44, ///< The gold of one bank: a = zone of the bank, v1 = ounces. Written for every bank, after SRK_GOLD (whose v3 is the sum, kept for the shape of the record: a savegame without SRK_BANK_GOLD splits it between the banks).
+	SRK_ZONE_PERMIT = 46, ///< Building permit: ym = 0: a = company, b = zone, v1 = game day on which it ends; ym = 1: a = zone, v1 = permit fees paid to the zone, v2 = surcharges on construction in the zone (money units). Written after SRK_ZONE_TAX.
 	SRK_ZONE_TAX = 43, ///< Tax collected in a money zone: a = zone number, v1 = land tax, v2 = transport tax, v3 = VAT of deliveries into the zone, v4 = taxes of the companies with headquarters in the zone, v5 = tax level in percent + 1 (money units). Written for every zone, after SRK_ZONE.
 	SRK_ZONE = 42,    ///< Money zone: a = zone number, v1 = capital tile, v2 = exchange rate in ppm, v3 = exchange fees earned (money units). Written for every zone, in order.
 	SRK_GOLD_NEWS = 40, ///< State of the real gold news: ym = ounces that the mines delivered since the last news (mine_news_oz), v1 = shock of today in 1/100 money units (day_shift_cents, always 0 now), v2 = the level of the economy at the last price step in 1/100 money units (last_level_cents, 0 = unknown), v3 = cash in circulation averaged over about 7 game days (cash_avg, 0 = unknown), v4 = price impact of the trades in ppm (impact_ppm).
@@ -304,7 +307,21 @@ struct STCKChunkHandler : ChunkHandler {
 			r.v1 = static_cast<int64_t>(_zone_market.zones[i].capital.base());
 			r.v2 = _zone_market.zones[i].rate_ppm;
 			r.v3 = _zone_market.zones[i].fees;
+			r.v4 = _zone_market.zones[i].inflation_ppm + 1'000'000; // +1,000,000: 0 means that an older savegame has none.
+			r.v5 = _zone_market.zones[i].policy_ppm + 1;
 			write(r);
+		}
+
+		for (size_t c = 0; c < _zone_market.holdings.size(); c++) {
+			for (int i = 0; i < zonemath::MAX_ZONES; i++) {
+				if (_zone_market.holdings[c][i] <= 0) continue;
+				StockRecord r;
+				r.kind = SRK_ZONE_HOLD;
+				r.a = static_cast<uint8_t>(c);
+				r.b = static_cast<uint8_t>(i);
+				r.v1 = _zone_market.holdings[c][i];
+				write(r);
+			}
 		}
 
 		for (int i = 0; i < _zone_market.count; i++) {
@@ -317,6 +334,26 @@ struct STCKChunkHandler : ChunkHandler {
 			r.v4 = _zone_market.zones[i].company_tax;
 			r.v5 = _zone_market.zones[i].tax_percent + 1; // +1: 0 means that an older savegame has no level.
 			write(r);
+		}
+
+		for (int i = 0; i < _zone_market.count; i++) {
+			StockRecord r;
+			r.kind = SRK_ZONE_PERMIT;
+			r.ym = 1;
+			r.a = static_cast<size_t>(i);
+			r.v1 = _zone_permits.fees[i];
+			r.v2 = _zone_permits.surcharges[i];
+			write(r);
+			for (int c = 0; c < MAX_COMPANIES; c++) {
+				if (_zone_permits.expires[c][i] <= 0) continue;
+				StockRecord p;
+				p.kind = SRK_ZONE_PERMIT;
+				p.ym = 0;
+				p.a = static_cast<size_t>(c);
+				p.b = static_cast<size_t>(i);
+				p.v1 = _zone_permits.expires[c][i];
+				write(p);
+			}
 		}
 
 		for (auto it = _payroll_news.releases.rbegin(); it != _payroll_news.releases.rend(); ++it) {
@@ -807,8 +844,14 @@ struct STCKChunkHandler : ChunkHandler {
 						z.capital = TileIndex{static_cast<uint32_t>(r.v1)};
 						z.rate_ppm = std::clamp<int64_t>(r.v2, zonemath::RATE_MIN_PPM, zonemath::RATE_MAX_PPM);
 						z.fees = std::max<int64_t>(r.v3, 0);
+						if (r.v4 > 0) z.inflation_ppm = std::clamp<int64_t>(r.v4 - 1'000'000, zonemath::INFL_MIN_PPM, zonemath::INFL_MAX_PPM);
+						if (r.v5 > 0) z.policy_ppm = std::clamp<int64_t>(r.v5 - 1, zonemath::POLICY_MIN_PPM, zonemath::POLICY_MAX_PPM);
 						_zone_market.count = std::max<int>(_zone_market.count, static_cast<int>(r.a) + 1);
 					}
+					break;
+
+				case SRK_ZONE_HOLD:
+					if (r.a < MAX_COMPANIES && r.b < zonemath::MAX_ZONES && r.v1 > 0) _zone_market.holdings[r.a][r.b] = r.v1;
 					break;
 
 				case SRK_ZONE_TAX:
@@ -819,6 +862,15 @@ struct STCKChunkHandler : ChunkHandler {
 						z.vat = std::max<int64_t>(r.v3, 0);
 						z.company_tax = std::max<int64_t>(r.v4, 0);
 						if (r.v5 > 0) z.tax_percent = std::clamp<int64_t>(r.v5 - 1, 0, 300);
+					}
+					break;
+
+				case SRK_ZONE_PERMIT:
+					if (r.ym == 1 && r.a < static_cast<size_t>(zonemath::MAX_ZONES)) {
+						_zone_permits.fees[r.a] = std::max<int64_t>(r.v1, 0);
+						_zone_permits.surcharges[r.a] = std::max<int64_t>(r.v2, 0);
+					} else if (r.ym == 0 && r.a < static_cast<size_t>(MAX_COMPANIES) && r.b < static_cast<size_t>(zonemath::MAX_ZONES)) {
+						_zone_permits.expires[r.a][r.b] = std::max<int64_t>(r.v1, 0);
 					}
 					break;
 

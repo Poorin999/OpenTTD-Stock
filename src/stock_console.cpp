@@ -25,8 +25,15 @@
 #include "market_events.h"
 #include "cargo_market.h"
 #include "zone_market.h"
+#include "zone_permit.h"
+#include "command_func.h"
+#include "company_func.h"
 #include "zone_map_gui.h"
 #include "zone_borders.h"
+#include "command_func.h"
+#include "wallet_cmd.h"
+#include "company_func.h"
+#include "company_base.h"
 #include "town.h"
 #include "gold_reserve.h"
 #include "town_treasury.h"
@@ -175,6 +182,32 @@ static bool ConZones(std::span<std::string_view> argv)
 	return true;
 }
 
+/** Exchange cash for banknotes of a zone, or banknotes back for cash: 'zone_buy <zone 1-4> <money>', 'zone_sell <zone 1-4> <notes|all>'. */
+static bool ConZoneExchange(std::span<std::string_view> argv, bool sell)
+{
+	if (argv.size() < 3) {
+		IConsolePrint(CC_HELP, sell ? "Sell banknotes of a money zone for cash. Usage: 'zone_sell <zone 1-4> <notes|all>' (0.3% spread)." : "Buy banknotes of a money zone with cash. Usage: 'zone_buy <zone 1-4> <money>' (0.3% spread). Notes earn the policy rate of the zone every game day.");
+		return true;
+	}
+	if (!Company::IsValidID(_local_company)) { IConsolePrint(CC_ERROR, "You need a company."); return true; }
+	int zone = 0;
+	const auto rz = std::from_chars(argv[1].data(), argv[1].data() + argv[1].size(), zone);
+	if (rz.ec != std::errc() || zone < 1 || zone > _zone_market.count) { IConsolePrint(CC_ERROR, "No such zone."); return true; }
+	int64_t amount = 0;
+	if (sell && argv[2] == "all") {
+		amount = _zone_market.holdings[_local_company.base()][zone - 1];
+	} else {
+		const auto ra = std::from_chars(argv[2].data(), argv[2].data() + argv[2].size(), amount);
+		if (ra.ec != std::errc() || amount <= 0) { IConsolePrint(CC_ERROR, "The amount must be more than zero."); return true; }
+	}
+	if (amount <= 0) { IConsolePrint(CC_DEFAULT, "You hold no notes of that zone."); return true; }
+	Command<CMD_ZONE_EXCHANGE>::Post(STR_ZONE_EXCHANGE_ERROR, static_cast<uint8_t>(zone - 1), sell, Money(amount));
+	return true;
+}
+
+static bool ConZoneBuy(std::span<std::string_view> argv) { return ConZoneExchange(argv, false); }
+static bool ConZoneSell(std::span<std::string_view> argv) { return ConZoneExchange(argv, true); }
+
 /** Set the tax level of a zone: 'zone_tax <zone 1-4> <percent 0-300>', 100 = the base rates of tax.h. Single player only (it changes the game). */
 static bool ConZoneTax(std::span<std::string_view> argv)
 {
@@ -200,6 +233,41 @@ static bool ConZoneTax(std::span<std::string_view> argv)
 	}
 	_zone_market.zones[zone - 1].tax_percent = percent;
 	IConsolePrint(CC_DEFAULT, "zone {}: tax level {}%", zone, percent);
+	return true;
+}
+
+/** Building permits: 'zone_permit' lists the zones with the fee and the days left, 'zone_permit <zone>' buys or renews the permit of the local company. Works in multiplayer (it is a command). */
+static bool ConZonePermit(std::span<std::string_view> argv)
+{
+	if (argv.empty() || (argv.size() >= 2 && argv[1] == "?")) {
+		IConsolePrint(CC_HELP, "Building permits of the money zones. Usage: 'zone_permit' (list) or 'zone_permit <zone>' (buy or renew the permit of your company for that zone). In the zone of your headquarters you build at the normal price; in another zone every construction costs more (with a permit +50% scaled by the tax level of the zone, without one +400%). A permit lasts 180 game days; the fee is paid once.");
+		return true;
+	}
+	if (_game_mode != GM_NORMAL || _zone_market.count <= 0) {
+		IConsolePrint(CC_ERROR, "The zones are not made yet.");
+		return true;
+	}
+	if (argv.size() == 1) {
+		const int home = _zone_market.ZoneOfCompany(_local_company);
+		for (int z = 0; z < _zone_market.count; z++) {
+			if (z == home) {
+				IConsolePrint(CC_DEFAULT, "zone {} ({}): home zone, normal prices", z + 1, ZoneCurrencyName(z));
+				continue;
+			}
+			const int64_t left = _zone_permits.DaysLeft(_local_company, z);
+			IConsolePrint(CC_DEFAULT, "zone {} ({}): fee {}, {}", z + 1, ZoneCurrencyName(z), permitmath::Fee(_zone_market.zones[z].tax_percent),
+				left > 0 ? fmt::format("permit valid for {} more days (construction +{}%)", left, permitmath::SurchargePercent(true, _zone_market.zones[z].tax_percent))
+				         : fmt::format("no permit (construction +{}%)", permitmath::SurchargePercent(false, _zone_market.zones[z].tax_percent)));
+		}
+		return true;
+	}
+	int zone = 0;
+	const auto r = std::from_chars(argv[1].data(), argv[1].data() + argv[1].size(), zone);
+	if (r.ec != std::errc() || zone < 1 || zone > _zone_market.count) {
+		IConsolePrint(CC_ERROR, "Zone must be 1 to {}.", _zone_market.count);
+		return true;
+	}
+	Command<CMD_ZONE_PERMIT>::Post(STR_ZONE_PERMIT_ERROR_CAPTION, static_cast<uint8_t>(zone - 1));
 	return true;
 }
 
@@ -336,7 +404,10 @@ void RegisterStockConsoleCommands()
 	IConsole::CmdRegister("zones", ConZones);
 	IConsole::CmdRegister("zones_map", ConZonesMap);
 	IConsole::CmdRegister("zone_tax", ConZoneTax);
+	IConsole::CmdRegister("zone_permit", ConZonePermit);
 	IConsole::CmdRegister("zone_lines", ConZoneLines);
+	IConsole::CmdRegister("zone_buy", ConZoneBuy);
+	IConsole::CmdRegister("zone_sell", ConZoneSell);
 	IConsole::CmdRegister("gold_factors", ConGoldFactors);
 	IConsole::CmdRegister("citizen_gold", ConCitizenGold);
 }

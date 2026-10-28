@@ -14,6 +14,7 @@
 #include "town_treasury.h"
 #include "cargo_market.h"
 #include "zone_market.h"
+#include "zone_permit.h"
 #include "stock_gui.h"
 #include "central_bank.h"
 #include "gold_reserve.h"
@@ -62,6 +63,7 @@ void StockMarket::Reset()
 	_town_treasury.Reset();
 	_cargo_market.Reset();
 	_zone_market.Reset();
+	_zone_permits.Reset();
 	_market_events.Reset();
 	TownNewsReset();
 	RetailMarketManager::Get().Reset(); // The retail investors start again with every new game and every load.
@@ -141,6 +143,7 @@ std::string GetStockSymbolName(size_t symbol)
 {
 	if (IsValuableSymbol(symbol)) {
 		const ValuableInfo &info = ValuablesManager::Info(symbol - STOCK_FIRST_VALUABLE);
+		if (IsCurrencyValuable(symbol - STOCK_FIRST_VALUABLE)) return fmt::format("{} banknotes", ZoneCurrencyName(CurrencyValuableZone(symbol - STOCK_FIRST_VALUABLE))); // The notes carry the name of the currency of their zone.
 		return fmt::format("{} ({})", info.name, info.code);
 	}
 	return GetString(STR_STOCK_SYMBOL, CompanyID{static_cast<uint8_t>(std::min<size_t>(symbol, MAX_COMPANIES - 1))});
@@ -149,7 +152,10 @@ std::string GetStockSymbolName(size_t symbol)
 /** A short name of a symbol: the code of a valuable (XAU), or the name of the company. */
 std::string GetStockSymbolShortName(size_t symbol)
 {
-	if (IsValuableSymbol(symbol)) return ValuablesManager::Info(symbol - STOCK_FIRST_VALUABLE).code;
+	if (IsValuableSymbol(symbol)) {
+		if (IsCurrencyValuable(symbol - STOCK_FIRST_VALUABLE)) return ZoneCurrencyName(CurrencyValuableZone(symbol - STOCK_FIRST_VALUABLE)); // THB, USD ... instead of ZN1
+		return ValuablesManager::Info(symbol - STOCK_FIRST_VALUABLE).code;
+	}
 	return GetStockSymbolName(symbol);
 }
 
@@ -514,6 +520,7 @@ void StockMarket::ApplyImpact(CompanyID target, bool buy, uint32_t volume)
 	this->AddTradedVolume(target, volume);
 	if (i == STOCK_DIAMOND_SYMBOL) DiamondTerminalTrade(buy, volume); // The terminal draws on the real diamond stock.
 	if (i == STOCK_OIL_SYMBOL) OilTerminalTrade(buy, volume); // And on the real oil stock.
+	if (i >= STOCK_FIRST_VALUABLE && IsCurrencyValuable(i - STOCK_FIRST_VALUABLE)) ZoneRateTrade(CurrencyValuableZone(i - STOCK_FIRST_VALUABLE), buy, volume); // Banknotes: the real rate of the zone moves.
 
 	const int64_t shift = buy ? GetImpactPpm(volume, i) : -GetImpactPpm(volume, i);
 	this->impact[i] = std::clamp<int64_t>(this->impact[i] + shift, -STOCK_IMPACT_MAX_PPM, STOCK_IMPACT_MAX_PPM);
