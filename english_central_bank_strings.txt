@@ -1,0 +1,23 @@
+STR_CENTRAL_BANK_CAPTION                                        :ธนาคารกลาง (CENTRAL BANK)
+STR_CENTRAL_BANK_BORROW                                         :กู้ (Borrow)
+STR_CENTRAL_BANK_REPAY                                          :ชำระ (Repay)
+STR_CENTRAL_BANK_REPAY_ALL                                      :ชำระทั้งหมด
+STR_CENTRAL_BANK_TIP_BORROW                                     :{BLACK}Borrow from the central bank into the company cash. Borrowed money can never be moved to a trading wallet
+STR_CENTRAL_BANK_TIP_REPAY                                      :{BLACK}Repay a part of the debt from the company cash
+STR_CENTRAL_BANK_TIP_REPAY_ALL                                  :{BLACK}Repay as much of the debt as the company cash allows
+STR_BANK_ERROR_NO_TRADING_LOAN                                  :{WHITE}Central bank loans are paid into the company cash only, never into a trading wallet
+STR_BANK_ERROR_BORROWED_FUNDS                                   :{WHITE}Trading wallets can only be funded with your own unborrowed cash
+STR_BANK_ERROR_LEGACY_LOAN                                      :{WHITE}The original loan does not exist any more. Use the central bank
+STR_CENTRAL_BANK_STATEMENT                                      :ใบแจ้งยอดบัญชี (Account statement)
+STR_CENTRAL_BANK_TIP_STATEMENT                                  :{BLACK}Open the account statement in its own window, next to the bank window: interest and fees, dividends and profit, transfers, and the costs of vehicles and construction
+STR_CENTRAL_BANK_STATEMENT_CAPTION                              :ใบแจ้งยอดบัญชี (ACCOUNT STATEMENT)
+STR_CENTRAL_BANK_ARCHIVE_CAPTION                               :Statement ย้อนหลัง (PAST STATEMENTS)
+STR_CENTRAL_BANK_SKIP_1H                                        :+1 hour
+STR_CENTRAL_BANK_SKIP_1D                                        :+1 day
+STR_CENTRAL_BANK_SKIP_7D                                        :+7 days
+STR_CENTRAL_BANK_SKIP_30D                                       :+30 days
+STR_CENTRAL_BANK_SKIP_90D                                       :+90 days
+STR_CENTRAL_BANK_TIP_SKIP                                       :{BLACK}Test tool: move the game clock forward. Interest, retail investors, candles, gold price and quarters all run as if the time had passed. Single player only
+STR_CENTRAL_BANK_POLICY                                         :นโยบายการเงิน (Monetary policy)
+STR_CENTRAL_BANK_TIP_POLICY                                     :{BLACK}Open the monetary policy in its own window: price index, inflation against the target, the shift of the interest rates and when the bank decides next
+STR_CENTRAL_BANK_POLICY_CAPTION                                 :นโยบายการเงิน (MONETARY POLICY)

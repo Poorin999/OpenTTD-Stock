@@ -1,0 +1,81 @@
+/*
+ * This file is part of OpenTTD.
+ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
+ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
+ */
+
+/**
+ * @file cargo_market.h The price of cargo follows supply and demand (see CargoMarketMath.h for the rules).
+ * Two hooks in economy.cpp (apply_overlay.py, patch_cargo_market): every final delivery is counted (CargoMarketOnDelivery), and the income
+ * that OpenTTD calculates for a delivery is multiplied by the price of the cargo (CargoMarketAdjustIncome). Once per game day the prices move.
+ * The freight rate (step 3) needs no hook of its own: it is part of the factor in CargoMarketAdjustIncome.
+ * A third hook (patch_cargo_local) multiplies the income of a final delivery by the demand of the town of the destination station (CargoMarketAdjustLocalIncome).
+ * Gold and valuables are NOT touched: their price is the gold market.
+ */
+
+#ifndef CARGO_MARKET_H
+#define CARGO_MARKET_H
+
+#include "stdafx.h"
+#include "CargoMarketMath.h"
+#include "cargo_type.h"
+#include "economy_type.h"
+#include "station_type.h"
+#include "town_type.h"
+#include <algorithm>
+#include <array>
+#include <cstdint>
+
+/** The state of the cargo prices: one entry per cargo type of OpenTTD. Saved in the 'STCK' chunk (SRK_CARGO_MARKET). */
+struct CargoMarket {
+	std::array<cargomarket::CargoState, NUM_CARGO> cargo{};
+	cargomarket::FleetState fleet{}; ///< The vehicles of all companies (fast and long average), for the freight rate. Saved (SRK_FLEET).
+
+	/** The price shown in the cargo prices window (price x freight rate), one value per game day, newest last in ring order. Not saved: a load starts the history again. */
+	static constexpr size_t HISTORY_DAYS = 366;
+	std::array<std::array<int32_t, HISTORY_DAYS>, NUM_CARGO> history{};
+	uint32_t history_days = 0; ///< Number of days recorded so far (the ring holds the last HISTORY_DAYS).
+
+	void Reset()
+	{
+		this->cargo.fill({});
+		this->fleet = {};
+		for (auto &h : this->history) h.fill(0);
+		this->history_days = 0;
+	}
+	void UpdateDaily();
+	/** Number of days of history that can be read (0 .. HISTORY_DAYS). */
+	uint32_t HistoryAvailable() const { return std::min<uint32_t>(this->history_days, static_cast<uint32_t>(HISTORY_DAYS)); }
+	/** The shown price (ppm, 1.0 = normal pay) of a cargo this many days ago (0 = the latest day). Returns 0 when there is no such day. */
+	int64_t HistoryPpm(size_t cargo_index, uint32_t days_ago) const;
+	/** The price of the cargo from supply and demand (step 1), without the freight rate. */
+	int64_t GetPricePpm(CargoType cargo_type) const;
+	/** The freight rate of the cargo (step 3): the price of the transport service from the backlog at the stations and the size of the fleet, 70% .. 150%. */
+	int64_t GetFreightPpm(CargoType cargo_type) const;
+};
+
+extern CargoMarket _cargo_market;
+
+/** A final delivery: count the units (supply). */
+void CargoMarketOnDelivery(CargoType cargo_type, uint count);
+
+/** The income of a delivery times the price of the cargo and the freight rate. Same result on every client. */
+Money CargoMarketAdjustIncome(CargoType cargo_type, Money income);
+
+/** The local factor of a delivery to a town (1.0 = no change): the demand boost and the prosperity of the town, weighted by the kind of cargo. See CargoMarketMath.h. */
+int64_t CargoMarketLocalFactorPpm(CargoType cargo_type, TownID town);
+
+/** The income of a FINAL delivery times the local factor of the town of the destination station. Transfers and the estimates in windows do not use it. */
+Money CargoMarketAdjustLocalIncome(CargoType cargo_type, StationID dest, Money income);
+
+/** For the windows: true for the cargo that the gold market prices (it has no cargo price of its own). */
+bool CargoMarketIsGoldCargo(CargoType cargo_type);
+
+/** For the windows: true for passengers and mail (their price follows the people waiting, not the units delivered). */
+bool CargoMarketIsPeopleCargo(CargoType cargo_type);
+
+/** For the windows: the push of the news on the price goal of this cargo now, in ppm (0 when no news moves this cargo). */
+int64_t CargoMarketNewsPushPpm(CargoType cargo_type);
+
+#endif /* CARGO_MARKET_H */

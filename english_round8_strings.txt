@@ -1,0 +1,9 @@
+STR_STOCK_QUERY_TRAIL                                           :Trailing stop distance (empty to switch off)
+STR_STOCK_QUERY_BORROW                                          :Amount to borrow from the central bank
+STR_STOCK_QUERY_REPAY                                           :Amount to repay to the central bank
+STR_BANK_ERROR_CANT_BORROW                                      :{WHITE}Can't borrow from the central bank...
+STR_BANK_ERROR_CANT_REPAY                                       :{WHITE}Can't repay the central bank...
+STR_BANK_ERROR_LIMIT                                            :{WHITE}This is more than the central bank will lend you
+STR_BANK_ERROR_NO_DEBT                                          :{WHITE}You don't owe the central bank anything
+
+STR_STOCK_TIP_WALLET_SELECT                                     :{BLACK}Choose the wallet that is shown and traded with

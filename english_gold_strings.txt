@@ -1,0 +1,21 @@
+STR_GOLD_BUY                                                    :Buy Gold
+STR_GOLD_SELL                                                   :Sell Gold
+STR_GOLD_TAB                                                    :Gold
+STR_GOLD_TOGGLE                                                 :Gold / News
+STR_GOLD_CAPTION                                                :Gold Trading Panel
+STR_GOLD_TIP_TAB                                                :{BLACK}Show the gold trading panel instead of the news. Press again to go back to the news
+STR_GOLD_TIP_TOGGLE                                             :{BLACK}Switch between the gold trading panel and the news (random events of the market)
+STR_GOLD_TIP_BUY                                                :{BLACK}Buy gold for the reserve. It is paid from the unborrowed liquid cash only
+STR_GOLD_TIP_SELL                                               :{BLACK}Sell gold of your reserve. The money goes into the company cash
+STR_GOLD_TIP_QTY                                                :{BLACK}Click to type the number of ounces
+STR_GOLD_QUERY_BUY                                              :Ounces of gold to buy
+STR_GOLD_QUERY_SELL                                             :Ounces of gold to sell
+STR_GOLD_ERROR_CANT_BUY                                         :{WHITE}Can't buy gold...
+STR_GOLD_ERROR_CANT_SELL                                        :{WHITE}Can't sell gold...
+STR_GOLD_ERROR_BAD_QUANTITY                                     :{WHITE}The number of ounces is not valid
+STR_GOLD_ERROR_NO_MARKET                                        :{WHITE}The gold market has not started yet
+STR_GOLD_ERROR_BORROWED                                         :{WHITE}Gold can only be bought with unborrowed cash. The rest of your money is borrowed from the central bank
+STR_GOLD_ERROR_NO_CASH                                          :{WHITE}Not enough unborrowed liquid cash
+STR_GOLD_ERROR_NO_STOCK                                         :{WHITE}The market does not have that much gold for sale
+STR_GOLD_ERROR_NO_GOLD                                          :{WHITE}You do not hold that much gold
+STR_GOLD_BUY_CAPTION                                            :คลังบริษัท — ซื้อทอง (Buy Gold)

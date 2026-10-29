@@ -1,0 +1,6 @@
+# Strings of the valuables of the trading terminal (gold, silver, platinum, diamonds)
+STR_STOCK_TITLE_SYMBOL                                          :{WHITE}{RAW_STRING}     Bid {CURRENCY_LONG}     Ask {CURRENCY_LONG}
+STR_STOCK_NEWS_ORDER_EXPIRED_SYMBOL                             :{BLACK}Pending order #{NUM} ({STRING}) for {RAW_STRING} has expired
+STR_STOCK_ORDER_INFO_VALUABLE                                   :{WHITE}Volume: {COMMA} units   Value: {CURRENCY_LONG}   Margin: {CURRENCY_LONG}   Commission: {CURRENCY_LONG}   Leverage 1:{COMMA} (0 = unlimited)
+STR_STOCK_TIP_TAB_COMPANIES                                     :{BLACK}Show the shares of the companies in the Market Watch
+STR_STOCK_TIP_TAB_VALUABLES                                     :{BLACK}Show the valuables (gold, silver, platinum, diamonds) in the Market Watch. They are traded like shares with leverage, Stop Loss, Take Profit and pending orders; the margin and the results use the trading wallet
