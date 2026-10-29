@@ -11,7 +11,9 @@
  */
 
 #include "stdafx.h"
+#include <algorithm>
 #include <charconv>
+#include <vector>
 #include <span>
 #include <string>
 #include <string_view>
@@ -38,6 +40,7 @@
 #include "town.h"
 #include "gold_reserve.h"
 #include "town_treasury.h"
+#include "town_wallet.h"
 #include "valuables.h"
 #include "cargotype.h"
 #include "town.h"
@@ -180,6 +183,33 @@ static bool ConZones(std::span<std::string_view> argv)
 			IConsolePrint(CC_DEFAULT, "fee {} -> {}: {}.{:02}%", a + 1, b + 1, f / 10'000, (f % 10'000) / 100);
 		}
 	}
+	return true;
+}
+
+/** The city wallet of the towns: treasury, debts, what the town paid for consumer cargo, business tax and grants. Read only. 'town_wallet' = the 20 biggest treasuries, 'town_wallet all' = every town. */
+static bool ConTownWallet(std::span<std::string_view> argv)
+{
+	if (!argv.empty() && argv.size() >= 2 && argv[1] == "?") {
+		IConsolePrint(CC_HELP, "Show the city wallet of the towns: treasury, loan from the central bank, municipal bonds, what the town paid for Goods / Food / Water, what it could not pay, business tax and grants. Usage: 'town_wallet' (20 towns with the biggest treasury) or 'town_wallet all'.");
+		return true;
+	}
+	const bool all = argv.size() >= 2 && argv[1] == "all";
+	std::vector<std::pair<int64_t, uint32_t>> order;
+	for (const auto &[key, a] : _town_treasury.accounts) if (a.started) order.emplace_back(-a.treasury, key);
+	std::sort(order.begin(), order.end());
+	if (order.empty()) { IConsolePrint(CC_DEFAULT, "No town has a treasury yet."); return true; }
+	size_t shown = 0;
+	int64_t loans = 0, bonds = 0, paid = 0, lacked = 0, tax = 0, grants = 0;
+	for (const auto &[neg, key] : order) {
+		const TownAccount &a = _town_treasury.accounts[key];
+		loans += a.loan_debt; bonds += a.bond_debt; paid += a.goods_paid; lacked += a.shortfall; tax += a.business_tax; grants += a.grants;
+		if (!all && shown >= 20) continue;
+		shown++;
+		const TownID id{static_cast<uint16_t>(key)};
+		const std::string name = Town::IsValidID(id) ? GetString(STR_TOWN_NAME, id) : std::string("-");
+		IConsolePrint(CC_DEFAULT, "{}  treasury {}  loan {}  bonds {}  paid for goods {}  could not pay {}  business tax {}  grants {}  interest paid {}", name, a.treasury, a.loan_debt, a.bond_debt, a.goods_paid, a.shortfall, a.business_tax, a.grants, a.interest_paid);
+	}
+	IConsolePrint(CC_DEFAULT, "all {} towns: treasuries {}  loans {}  bonds {}  paid for goods {}  could not pay {}  business tax {}  grants {}", order.size(), _town_treasury.GetTotalTreasury(), loans, bonds, paid, lacked, tax, grants);
 	return true;
 }
 
@@ -403,6 +433,7 @@ void RegisterStockConsoleCommands()
 	IConsole::CmdRegister("stock_event", ConStockEvent);
 	IConsole::CmdRegister("cargo_prices", ConCargoPrices);
 	IConsole::CmdRegister("zones", ConZones);
+	IConsole::CmdRegister("town_wallet", ConTownWallet);
 	IConsole::CmdRegister("zones_map", ConZonesMap);
 	IConsole::CmdRegister("zone_tax", ConZoneTax);
 	IConsole::CmdRegister("zone_permit", ConZonePermit);

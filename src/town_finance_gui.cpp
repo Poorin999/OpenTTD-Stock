@@ -10,6 +10,7 @@
 #include "stdafx.h"
 #include "town_finance_gui.h"
 #include "town_treasury.h"
+#include "town_wallet_math.h"
 #include "central_bank.h"
 #include "gold_reserve.h"
 #include "stock_base.h"
@@ -132,6 +133,28 @@ struct TownFinanceWindow : Window {
 		pair(mid + pad, right, y, TfText("ราคาทอง (ขายคืน)", "Gold price (bid)"), TfMoney(bid / 100), TC_WHITE);
 		y += row + ScaleGUITrad(6);
 
+		/* The city wallet: what the town pays for consumer cargo, its debts, the business tax and the grants (town_wallet.cpp). */
+		{
+			if (y + row * 5 > bottom) return;
+			const int64_t scaled_pop = std::max<int64_t>(1, static_cast<int64_t>(t->cache.population) * GetPriceIndexPpm() / 1'000'000);
+			const int64_t loan_room = std::max<int64_t>(0, townwallet::LoanLimit(scaled_pop) - a.loan_debt);
+			const int64_t bond_room = std::max<int64_t>(0, townwallet::BondLimit(scaled_pop) - a.bond_debt);
+			DrawString(left, right, y, TfText("กระเป๋าเมือง (City wallet)", "City wallet"), TC_LIGHT_BLUE, SA_LEFT);
+			y += row;
+			pair(left, mid - pad, y, TfText("เงินกู้ธนาคารกลาง", "Loan from the central bank"), TfMoney(a.loan_debt), a.loan_debt > 0 ? TC_YELLOW : TC_WHITE);
+			pair(mid + pad, right, y, TfText("พันธบัตรเทศบาล", "Municipal bonds"), TfMoney(a.bond_debt), a.bond_debt > 0 ? TC_YELLOW : TC_WHITE);
+			y += row;
+			pair(left, mid - pad, y, TfText("จ่ายค่าสินค้าให้บริษัท", "Paid for Goods / Food / Water"), TfMoney(a.goods_paid), TC_WHITE);
+			pair(mid + pad, right, y, TfText("จ่ายไม่ไหว (บริษัทได้น้อยลง)", "Could not pay"), TfMoney(a.shortfall), a.shortfall > 0 ? TC_RED : TC_WHITE);
+			y += row;
+			pair(left, mid - pad, y, TfText("ภาษีธุรกิจที่เก็บได้", "Business tax collected"), TfMoney(a.business_tax), TC_WHITE);
+			pair(mid + pad, right, y, TfText("เงินอุดหนุนจากธนาคารกลาง", "Grants from the central bank"), TfMoney(a.grants), TC_WHITE);
+			y += row;
+			pair(left, mid - pad, y, TfText("ดอกเบี้ยที่จ่ายแล้ว", "Interest paid"), TfMoney(a.interest_paid), TC_WHITE);
+			pair(mid + pad, right, y, TfText("วงเงินกู้ / พันธบัตรที่เหลือ", "Credit left (loan / bonds)"), fmt::format("{} / {}", TfMoney(loan_room), TfMoney(bond_room)), TC_WHITE);
+			y += row + ScaleGUITrad(6);
+		}
+
 		/* The four groups of citizens. */
 		DrawString(left, right, y, TfText("พลเมือง 4 กลุ่ม", "Citizens: four groups"), TC_LIGHT_BLUE, SA_LEFT);
 		y += row;
@@ -234,7 +257,7 @@ static constexpr std::initializer_list<NWidgetPart> _nested_town_finance_widgets
 		NWidget(WWT_DEFSIZEBOX, COLOUR_BROWN),
 		NWidget(WWT_STICKYBOX, COLOUR_BROWN),
 	EndContainer(),
-	NWidget(WWT_PANEL, COLOUR_BROWN, WID_TFN_PANEL), SetMinimalSize(560, 340), SetFill(1, 1), SetResize(1, 1),
+	NWidget(WWT_PANEL, COLOUR_BROWN, WID_TFN_PANEL), SetMinimalSize(560, 440), SetFill(1, 1), SetResize(1, 1),
 	EndContainer(),
 	NWidget(NWID_HORIZONTAL),
 		NWidget(NWID_SPACER), SetFill(1, 0), SetResize(1, 0),

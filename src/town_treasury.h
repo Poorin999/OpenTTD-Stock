@@ -52,6 +52,16 @@ struct TownAccount {
 	int64_t treasury = 0;    ///< Cash of the town.
 	int64_t spent = 0;       ///< Everything the town has spent on development so far.
 	int64_t taxed = 0;       ///< Everything the town has collected so far (income tax and gains tax). Not saved.
+	/* City wallet (town_wallet.h / town_wallet_math.h). Saved in SRK_TOWN_WALLET. */
+	int64_t loan_debt = 0;       ///< Owed to the central bank of the zone.
+	int64_t bond_debt = 0;       ///< Municipal bonds that the saving citizens hold.
+	int64_t loan_carry = 0;      ///< Rest of the daily loan interest (below one unit).
+	int64_t bond_carry = 0;      ///< Rest of the daily bond coupon.
+	int64_t goods_paid = 0;      ///< Paid out of the treasury to companies for consumer cargo, total.
+	int64_t shortfall = 0;       ///< Consumer cargo payments that the town could not make, total (the company got less).
+	int64_t business_tax = 0;    ///< Business tax taken from the payment for industrial cargo delivered into the town, total.
+	int64_t interest_paid = 0;   ///< Loan interest and bond coupons paid, total.
+	int64_t grants = 0;          ///< Grants from the central bank, total.
 	std::vector<citizengold::TermPos> positions{}; ///< Open Trading Terminal positions of the speculators and the overtraders (citizen_terminal.h). Saved (SRK_TOWN_POS).
 
 	int64_t GoldCz() const { int64_t t = 0; for (const auto &b : this->books) t += b.gold_cz; return t; }

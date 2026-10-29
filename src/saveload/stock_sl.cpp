@@ -72,6 +72,7 @@ enum StockRecordKind : uint8_t {
 	SRK_BANK_LOG = 41,  ///< Line of the account log of the bank window: a = company, b = line (LedgerItem), ym = game day of the year, v1 = amount (sum of the bookings), v2 = ledger year, v3 = number of bookings. Written newest first.
 	SRK_ZONE_HOLD = 45, ///< Banknotes of a zone that a company holds: a = company, b = zone, v1 = notes (units of that currency).
 	SRK_BANK_GOLD = 44, ///< The gold of one bank: a = zone of the bank, v1 = ounces. Written for every bank, after SRK_GOLD (whose v3 is the sum, kept for the shape of the record: a savegame without SRK_BANK_GOLD splits it between the banks).
+	SRK_TOWN_WALLET = 48, ///< City wallet of a town (town_wallet_math.h): ym = index of the town; b = 0: v1 = loan debt, v2 = bond debt, v3 = loan carry, v4 = bond carry, v5 = interest paid; b = 1: v1 = consumer cargo paid, v2 = shortfall, v3 = business tax, v4 = grants. Written after the records of the town.
 	SRK_ZONE_FX = 47, ///< Memory of the FX model of a zone: a = zone, ym = 0..2 (part), v1..v5 = the fields of zonemath::FxState (part 0: price level, exports avg, imports avg, gdp fast, gdp slow; 1: gdp days, capital, risk, news, reserve; 2: ref, expected policy). Written after SRK_ZONE_PERMIT.
 	SRK_ZONE_PERMIT = 46, ///< Building permit: ym = 0: a = company, b = zone, v1 = game day on which it ends; ym = 1: a = zone, v1 = permit fees paid to the zone, v2 = surcharges on construction in the zone (money units). Written after SRK_ZONE_TAX.
 	SRK_ZONE_TAX = 43, ///< Tax collected in a money zone: a = zone number, v1 = land tax, v2 = transport tax, v3 = VAT of deliveries into the zone, v4 = taxes of the companies with headquarters in the zone, v5 = tax level in percent + 1 (money units). Written for every zone, after SRK_ZONE.
@@ -488,6 +489,20 @@ struct STCKChunkHandler : ChunkHandler {
 				pr.v3 = tp.sl;
 				pr.v4 = tp.tp;
 				write(pr);
+			}
+			if (a.loan_debt != 0 || a.bond_debt != 0 || a.interest_paid != 0 || a.goods_paid != 0 || a.shortfall != 0 || a.business_tax != 0 || a.grants != 0) {
+				StockRecord w0;
+				w0.kind = SRK_TOWN_WALLET;
+				w0.b = 0;
+				w0.ym = static_cast<int32_t>(key);
+				w0.v1 = a.loan_debt; w0.v2 = a.bond_debt; w0.v3 = a.loan_carry; w0.v4 = a.bond_carry; w0.v5 = a.interest_paid;
+				write(w0);
+				StockRecord w1;
+				w1.kind = SRK_TOWN_WALLET;
+				w1.b = 1;
+				w1.ym = static_cast<int32_t>(key);
+				w1.v1 = a.goods_paid; w1.v2 = a.shortfall; w1.v3 = a.business_tax; w1.v4 = a.grants;
+				write(w1);
 			}
 		}
 
@@ -981,6 +996,20 @@ struct STCKChunkHandler : ChunkHandler {
 					_cargo_market.fleet.slow_x100 = std::max<int64_t>(r.v2, 0);
 					_cargo_market.fleet.started = true;
 					break;
+
+				case SRK_TOWN_WALLET: {
+					if (r.ym < 0 || r.ym > 0xFFFF) break;
+					TownAccount &a = _town_treasury.accounts[static_cast<uint32_t>(r.ym)];
+					if (r.b == 0) {
+						a.loan_debt = std::max<int64_t>(r.v1, 0); a.bond_debt = std::max<int64_t>(r.v2, 0);
+						a.loan_carry = std::max<int64_t>(r.v3, 0); a.bond_carry = std::max<int64_t>(r.v4, 0);
+						a.interest_paid = std::max<int64_t>(r.v5, 0);
+					} else {
+						a.goods_paid = std::max<int64_t>(r.v1, 0); a.shortfall = std::max<int64_t>(r.v2, 0);
+						a.business_tax = std::max<int64_t>(r.v3, 0); a.grants = std::max<int64_t>(r.v4, 0);
+					}
+					break;
+				}
 
 				case SRK_TOWN: {
 					if (r.ym < 0 || r.ym > 0xFFFF) break;

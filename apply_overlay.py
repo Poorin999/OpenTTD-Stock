@@ -40,7 +40,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "wallet_base.h": "src", "wallet_base.cpp": "src",
     "wallet_cmd.h": "src", "wallet_cmd.cpp": "src",
     "central_bank.h": "src", "central_bank.cpp": "src",
-    "tax.h": "src", "tax.cpp": "src", "zone_market.h": "src", "zone_market.cpp": "src", "zone_market_math.h": "src", "zone_map_gui.h": "src", "zone_borders.h": "src", "zone_borders.cpp": "src", "hq_gate.h": "src", "hq_gate.cpp": "src", "zone_permit.h": "src", "zone_permit.cpp": "src", "zone_permit_math.h": "src", "zone_map_gui.cpp": "src",
+    "tax.h": "src", "tax.cpp": "src", "zone_market.h": "src", "zone_market.cpp": "src", "zone_market_math.h": "src", "town_wallet.h": "src", "town_wallet.cpp": "src", "town_wallet_math.h": "src", "zone_map_gui.h": "src", "zone_borders.h": "src", "zone_borders.cpp": "src", "hq_gate.h": "src", "hq_gate.cpp": "src", "zone_permit.h": "src", "zone_permit.cpp": "src", "zone_permit_math.h": "src", "zone_map_gui.cpp": "src",
     "cargo_market.h": "src", "cargo_market.cpp": "src", "CargoMarketMath.h": "src",
     "town_treasury.h": "src", "town_treasury.cpp": "src", "citizen_gold.h": "src", "citizen_terminal.h": "src", "gold_market_math.h": "src", "oil_market_math.h": "src", "oil_market_gui.h": "src", "oil_market_gui.cpp": "src",
     "gold_reserve.h": "src", "gold_reserve.cpp": "src", "gold_industry.cpp": "src", "firs_desert_cargo.cpp": "src", "custom_cargo_icons.cpp": "src", "custom_cargo_icons.h": "src", "custom_industry_gfx.cpp": "src", "custom_industry_gfx.h": "src", "english_firs_strings.txt": "src", "desert_industries.cpp": "src", "english_desert_industries_strings.txt": "src",
@@ -75,7 +75,7 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_ZONE_EXCHANGE", "exchange cash for banknotes of a money zone, or back"),
     ("CMD_ZONE_PERMIT", "buy a building permit for a foreign money zone"),
 ]
-NEW_SOURCES = ["zone_borders.cpp", "zone_borders.h", "hq_gate.cpp", "hq_gate.h", "zone_permit.cpp", "zone_permit.h", "zone_map_gui.cpp", "zone_map_gui.h", "zone_market.cpp", "zone_market.h", "zone_market_math.h", "wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "oil_market_math.h", "oil_market_gui.cpp", "oil_market_gui.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "firs_desert_cargo.cpp", "custom_cargo_icons.cpp", "custom_cargo_icons.h", "custom_industry_gfx.cpp", "custom_industry_gfx.h", "desert_industries.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "company_info_gui.cpp", "company_info_gui.h", "company_info_math.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
+NEW_SOURCES = ["town_wallet.cpp", "town_wallet.h", "town_wallet_math.h", "zone_borders.cpp", "zone_borders.h", "hq_gate.cpp", "hq_gate.h", "zone_permit.cpp", "zone_permit.h", "zone_map_gui.cpp", "zone_map_gui.h", "zone_market.cpp", "zone_market.h", "zone_market_math.h", "wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "oil_market_math.h", "oil_market_gui.cpp", "oil_market_gui.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "firs_desert_cargo.cpp", "custom_cargo_icons.cpp", "custom_cargo_icons.h", "custom_industry_gfx.cpp", "custom_industry_gfx.h", "desert_industries.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "company_info_gui.cpp", "company_info_gui.h", "company_info_math.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
                "RetailMath.h", "RetailMarketManager.h", "RetailMarketManager.cpp",
                "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]
@@ -664,6 +664,37 @@ def patch_zone_fee(tree):
     t = ensure_include(t, '#include "zone_market.h" /* ZONE_FEE_PATCH */', ['#include "central_bank.h"', '#include "stdafx.h"'])
     _write_like(p, t, crlf)
     print("economy.cpp: zone fee hook added")
+
+
+TOWN_WALLET_MARKER = "TOWN_WALLET_PATCH"
+
+
+def patch_town_wallet(tree):
+    """City wallet (town_wallet.cpp): the payment of a final delivery goes through the town of the destination station. One line in
+    CargoPayment::PayFinalDelivery (economy.cpp), right BEFORE the line that adds the profit to route_profit:
+        profit = TownPayForDelivery(cargo, this->current_station, profit);
+    Goods / Food / Water are paid from the treasury of the town (the company gets what the town can pay); other industrial cargo pays a business tax to the town.
+    This is an extra: when an anchor is missing the build goes on without it (a WARNING, nothing is written)."""
+    p = tree / "src" / "economy.cpp"
+    t, crlf = _read_lf(p)
+    if TOWN_WALLET_MARKER in t:
+        print("economy.cpp: town wallet hook already there")
+        return
+    m = re.search(r"^void CargoPayment::PayFinalDelivery\(CargoType cargo, const CargoPacket \*cp, uint count, TileIndex current_tile\)\n\{\n", t, re.M)
+    if not m:
+        print("WARNING: CargoPayment::PayFinalDelivery not found in economy.cpp, the town wallet is not hooked")
+        return
+    end = t.find("\n}\n", m.end())
+    body = t[m.end():end]
+    line = "\tthis->route_profit += profit;\n"
+    if end < 0 or body.count(line) != 1 or "\tMoney profit = " not in body:
+        print("WARNING: PayFinalDelivery has a different layout (route_profit / profit), the town wallet is not hooked")
+        return
+    body = body.replace(line, f"\tprofit = static_cast<Money>(TownPayForDelivery(cargo, this->current_station, static_cast<int64_t>(profit))); /* {TOWN_WALLET_MARKER} */\n" + line, 1)
+    t = t[:m.end()] + body + t[end:]
+    t = ensure_include(t, '#include "town_wallet.h" /* TOWN_WALLET_PATCH */', ['#include "central_bank.h"', '#include "stdafx.h"'])
+    _write_like(p, t, crlf)
+    print("economy.cpp: town wallet hook added")
 
 
 ZONE_PERMIT_MARKER = "ZONE_PERMIT_PATCH"
@@ -1460,6 +1491,7 @@ def main(tree):
     patch_cargo_market(tree)
     patch_cargo_local(tree)
     patch_zone_fee(tree)
+    patch_town_wallet(tree)
     patch_zone_permit(tree)
     patch_zone_borders(tree)
     patch_zone_status(tree)
