@@ -51,7 +51,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "economy_news.h": "src", "economy_news.cpp": "src",
     "market_events.h": "src", "market_events.cpp": "src", "town_news.h": "src", "town_news.cpp": "src", "market_news_ai.h": "src", "market_news_gui.h": "src", "market_news_gui.cpp": "src", "cargo_market_gui.h": "src", "cargo_market_gui.cpp": "src",
     "game_calendar.h": "src", "game_calendar.cpp": "src",
-    "stock_dev.h": "src", "stock_console.cpp": "src",
+    "stock_dev.h": "src", "stock_console.cpp": "src", "km_math.h": "src", "km_system.cpp": "src",
     "central_bank_gui.h": "src", "central_bank_gui.cpp": "src",
     "central_bank_widget.h": "src/widgets",
     "RetailMath.h": "src", "RetailMarketManager.h": "src", "RetailMarketManager.cpp": "src",
@@ -75,7 +75,7 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_ZONE_EXCHANGE", "exchange cash for banknotes of a money zone, or back"),
     ("CMD_ZONE_PERMIT", "buy a building permit for a foreign money zone"),
 ]
-NEW_SOURCES = ["town_wallet.cpp", "town_wallet.h", "town_wallet_math.h", "zone_borders.cpp", "zone_borders.h", "hq_gate.cpp", "hq_gate.h", "zone_permit.cpp", "zone_permit.h", "zone_map_gui.cpp", "zone_map_gui.h", "zone_market.cpp", "zone_market.h", "zone_market_math.h", "wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "oil_market_math.h", "oil_market_gui.cpp", "oil_market_gui.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "firs_desert_cargo.cpp", "custom_cargo_icons.cpp", "custom_cargo_icons.h", "custom_industry_gfx.cpp", "custom_industry_gfx.h", "desert_industries.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "company_info_gui.cpp", "company_info_gui.h", "company_info_math.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
+NEW_SOURCES = ["km_system.cpp", "km_math.h", "town_wallet.cpp", "town_wallet.h", "town_wallet_math.h", "zone_borders.cpp", "zone_borders.h", "hq_gate.cpp", "hq_gate.h", "zone_permit.cpp", "zone_permit.h", "zone_map_gui.cpp", "zone_map_gui.h", "zone_market.cpp", "zone_market.h", "zone_market_math.h", "wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "oil_market_math.h", "oil_market_gui.cpp", "oil_market_gui.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "firs_desert_cargo.cpp", "custom_cargo_icons.cpp", "custom_cargo_icons.h", "custom_industry_gfx.cpp", "custom_industry_gfx.h", "desert_industries.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "company_info_gui.cpp", "company_info_gui.h", "company_info_math.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
                "RetailMath.h", "RetailMarketManager.h", "RetailMarketManager.cpp",
                "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]
@@ -664,6 +664,31 @@ def patch_zone_fee(tree):
     t = ensure_include(t, '#include "zone_market.h" /* ZONE_FEE_PATCH */', ['#include "central_bank.h"', '#include "stdafx.h"'])
     _write_like(p, t, crlf)
     print("economy.cpp: zone fee hook added")
+
+
+ORDER_KM_MARKER = "ORDER_KM_PATCH"
+
+
+def patch_order_km(tree):
+    """Kilometres at the end of every order line of the orders window (order_gui.cpp, DrawOrderString): the distance from the order before it,
+    from KmOrderSuffix in km_system.cpp. One declaration and one line, in place, at anchors. Not in the timetable window (it draws with timetable = true)."""
+    p = tree / "src" / "order_gui.cpp"
+    t, crlf = _read_lf(p)
+    if ORDER_KM_MARKER in t:
+        print("order_gui.cpp: km hook already there")
+        return
+    anchor = "\tDrawString(rtl ? left : middle, rtl ? middle : right, y, line, colour);\n}\n"
+    if t.count(anchor) != 1 or "void DrawOrderString(const Vehicle *v, const Order *order, VehicleOrderID order_index, int y, bool selected, bool timetable, int left, int middle, int right)" not in t:
+        sys.exit("ERROR: order_gui.cpp: DrawOrderString has a different layout (km patch)")
+    hook = f"\tif (!timetable) line += KmOrderSuffix(v, order_index); /* {ORDER_KM_MARKER} */\n"
+    t = t.replace(anchor, hook + anchor, 1)
+    m = re.search(r'^#include "safeguards.h"\n', t, re.M)
+    if not m:
+        sys.exit("ERROR: order_gui.cpp: #include \"safeguards.h\" not found (km patch)")
+    decl = f"\nstd::string KmOrderSuffix(const Vehicle *v, VehicleOrderID order_index); /* {ORDER_KM_MARKER}: km_system.cpp */\n"
+    t = t[:m.end()] + decl + t[m.end():]
+    _write_like(p, t, crlf)
+    print("order_gui.cpp: km hook added")
 
 
 TOWN_WALLET_MARKER = "TOWN_WALLET_PATCH"
@@ -1492,6 +1517,7 @@ def main(tree):
     patch_cargo_local(tree)
     patch_zone_fee(tree)
     patch_town_wallet(tree)
+    patch_order_km(tree)
     patch_zone_permit(tree)
     patch_zone_borders(tree)
     patch_zone_status(tree)

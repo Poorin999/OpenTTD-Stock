@@ -21,6 +21,10 @@
 #include "central_bank.h"
 #include "wallet_base.h"
 #include "stock_gui.h"
+#include "zone_market.h"
+#include "zone_permit.h"
+#include "zone_permit_math.h"
+#include "hq_gate.h"
 #include "openttd.h"
 #include "game_time/game_time_manager.h"
 #include <algorithm>
@@ -68,6 +72,8 @@ bool _company_info_use_original = false;
 /* ------------------------------------------------------------------------------------------------------------------------------------ */
 /* Income and costs per game month (for the chart). Not saved: the chart starts empty after a load and fills as game days pass.        */
 /* ------------------------------------------------------------------------------------------------------------------------------------ */
+
+void ShowCompanyPermitWindow(CompanyID company); /* below: the permits tab */
 
 namespace {
 
@@ -157,15 +163,15 @@ int InfoRow()
 }
 
 /** The texts of the tabs and of the buttons (Thai / English). Shared by the size calculation and by the drawing. */
-const char *const TAB_TH[4] = {"ข้อมูลบริษัท", "การเงิน", "ยานพาหนะ", "โครงสร้างพื้นฐาน"};
-const char *const TAB_EN[4] = {"Company", "Finance", "Vehicles", "Infrastructure"};
+const char *const TAB_TH[5] = {"ข้อมูลบริษัท", "การเงิน", "ยานพาหนะ", "โครงสร้างพื้นฐาน", "ใบอนุญาต"};
+const char *const TAB_EN[5] = {"Company", "Finance", "Vehicles", "Infrastructure", "Permits"};
 const char *const BTN_TH[4] = {"เปลี่ยนชื่อบริษัท", "ชื่อประธาน", "ซื้อหุ้น", "IPO บริษัท"};
 const char *const BTN_EN[4] = {"Rename company", "President name", "Stocks", "Company IPO"};
 constexpr int BTN_IPO = 3; ///< Index of the IPO button (orange).
 
 /** All the rectangles of the window, from the rectangle of the panel. Draw and click use the same numbers. */
 struct InfoLayout {
-	Rect tabs[4];
+	Rect tabs[5];
 	Rect date;
 	Rect profile, ops, chart, colours;
 	Rect face, face_btn, hq_btn, net_box;
@@ -202,9 +208,9 @@ InfoLayout MakeInfoLayout(const Rect &r, int net_text_w)
 
 	/* The tabs (as wide as their text) and the date. */
 	const int tab_h = std::max(ScaleGUITrad(22), fh + ScaleGUITrad(10));
-	const int tab_min[4] = {92, 72, 86, 116};
+	const int tab_min[5] = {92, 72, 86, 116, 86};
 	int x = left;
-	for (int i = 0; i < 4; i++) {
+	for (int i = 0; i < 5; i++) {
 		const int w = std::max(ScaleGUITrad(tab_min[i]), static_cast<int>(GetStringBoundingBox(CiText(TAB_TH[i], TAB_EN[i])).width) + ScaleGUITrad(24));
 		l.tabs[i] = {x, y, x + w, y + tab_h};
 		x += w + ScaleGUITrad(4);
@@ -418,7 +424,7 @@ struct CompanyInfoWindow : Window {
 		const PixelColour box_fill = GetColourGradient(COLOUR_GREY, SHADE_NORMAL);
 
 		/* Tabs and date. */
-		for (int i = 0; i < 4; i++) {
+		for (int i = 0; i < 5; i++) {
 			DrawButton(l.tabs[i], CiText(TAB_TH[i], TAB_EN[i]), i == 0 ? GetColourGradient(COLOUR_YELLOW, SHADE_DARK) : box_fill, i == 0 ? TC_BLACK : TC_WHITE);
 		}
 		DrawString(l.date.left, l.date.right, l.date.top + (l.date.bottom - l.date.top + 1 - GetCharacterHeight(FS_NORMAL)) / 2, GetString(STR_JUST_DATE_LONG, TimerGameCalendar::date), TC_WHITE, SA_RIGHT);
@@ -661,6 +667,7 @@ struct CompanyInfoWindow : Window {
 		if (InRect(l.tabs[1], pt)) { ShowCompanyFinances(this->company); return; }
 		if (InRect(l.tabs[2], pt)) { this->OpenVehicleList(); return; }
 		if (InRect(l.tabs[3], pt)) { ShowCompanyInfrastructureOfMod(this->company); return; }
+		if (InRect(l.tabs[4], pt)) { ShowCompanyPermitWindow(this->company); return; }
 
 		/* Face and headquarters: only the original window can do these. */
 		if (InRect(l.face_btn, pt)) {
@@ -770,7 +777,205 @@ WindowDesc _company_info_desc(
 	_nested_company_info_widgets
 );
 
+
+/** The window number of the permit window of a company inside WC_CENTRAL_BANK (the company windows use CI_WINDOW_BASE + company). */
+constexpr int CI_PERMIT_WINDOW_BASE = 200100;
+
+/** The rectangles of the permit window. Same tabs and same card style as the company window. */
+struct PermitLayout {
+	Rect tabs[5];
+	Rect date;
+	Rect card;
+	Rect rows[zonemath::MAX_ZONES];
+	Rect btns[zonemath::MAX_ZONES];
+	Rect footer;
+	int hdr = 0;
+	int pad = 0;
+};
+
+PermitLayout MakePermitLayout(const Rect &r)
+{
+	PermitLayout l;
+	const int pad = ScaleGUITrad(8);
+	const int gap = ScaleGUITrad(8);
+	const int fh = GetCharacterHeight(FS_NORMAL);
+	const int row = InfoRow();
+	l.pad = pad;
+	l.hdr = std::max(ScaleGUITrad(18), fh + ScaleGUITrad(6));
+	const int left = r.left + pad;
+	const int right = r.right - pad;
+	int y = r.top + pad;
+
+	const int tab_h = std::max(ScaleGUITrad(22), fh + ScaleGUITrad(10));
+	const int tab_min[5] = {92, 72, 86, 116, 86};
+	int x = left;
+	for (int i = 0; i < 5; i++) {
+		const int w = std::max(ScaleGUITrad(tab_min[i]), static_cast<int>(GetStringBoundingBox(CiText(TAB_TH[i], TAB_EN[i])).width) + ScaleGUITrad(24));
+		l.tabs[i] = {x, y, x + w, y + tab_h};
+		x += w + ScaleGUITrad(4);
+	}
+	const int date_w = std::max<int>(ScaleGUITrad(170), GetStringBoundingBox(GetString(STR_JUST_DATE_LONG, TimerGameCalendar::date)).width + ScaleGUITrad(8));
+	l.date = {std::max(x, right - date_w), y, right, y + tab_h};
+	y += tab_h + gap;
+
+	/* One row per zone: two text lines and the button on the right. */
+	const int row_h = 2 * row + ScaleGUITrad(10);
+	const int btn_h = std::max(ScaleGUITrad(26), fh + ScaleGUITrad(10));
+	const int btn_w = ScaleGUITrad(170);
+	const int card_h = l.hdr + pad + zonemath::MAX_ZONES * (row_h + ScaleGUITrad(4)) + pad;
+	l.card = {left, y, right, y + card_h};
+	int ry = l.card.top + l.hdr + pad;
+	for (int i = 0; i < zonemath::MAX_ZONES; i++) {
+		l.rows[i] = {l.card.left + pad, ry, l.card.right - pad, ry + row_h};
+		const int by = ry + (row_h - btn_h) / 2;
+		l.btns[i] = {l.rows[i].right - btn_w - ScaleGUITrad(4), by, l.rows[i].right - ScaleGUITrad(4), by + btn_h};
+		ry += row_h + ScaleGUITrad(4);
+	}
+	y += card_h + gap;
+	l.footer = {left, y, right, y + 2 * row};
+	return l;
+}
+
+/** The permits tab: for every zone the fee, the surcharge on construction, and the days left; a button buys or renews the permit. */
+struct CompanyPermitWindow : Window {
+	CompanyID company;
+
+	const IntervalTimer<TimerWindow> redraw_interval = {std::chrono::milliseconds(250), [this](auto) {
+		if (!Company::IsValidID(this->company)) {
+			this->Close();
+			return;
+		}
+		this->SetDirty();
+	}};
+
+	CompanyPermitWindow(WindowDesc &desc, CompanyID c) : Window(desc), company(c)
+	{
+		this->InitNested(CI_PERMIT_WINDOW_BASE + static_cast<int>(c.base()));
+	}
+
+	bool IsMine() const
+	{
+		return Company::IsValidID(this->company) && this->company == _local_company;
+	}
+
+	std::string GetWidgetString(WidgetID widget, StringID stringid) const override
+	{
+		if (widget == WID_CIW_CAPTION) {
+			if (!Company::IsValidID(this->company)) return std::string();
+			return fmt::format("{} ({} {}) - {}", GetString(STR_STOCK_SYMBOL, this->company), CiText("บริษัท", "Company"), this->company.base() + 1, CiText("ใบอนุญาต", "Permits"));
+		}
+		return this->Window::GetWidgetString(widget, stringid);
+	}
+
+	void OnInvalidateData([[maybe_unused]] int data = 0, [[maybe_unused]] bool gui_scope = true) override
+	{
+		this->SetDirty();
+	}
+
+	void DrawWidget(const Rect &r, WidgetID widget) const override
+	{
+		if (widget != WID_CIW_PANEL) return;
+		if (!Company::IsValidID(this->company)) return;
+		const PermitLayout l = MakePermitLayout(r);
+		const PixelColour box_fill = GetColourGradient(COLOUR_GREY, SHADE_NORMAL);
+		const int row = InfoRow();
+
+		/* Tabs and date: the same as the company window, the permits tab is the lit one. */
+		for (int i = 0; i < 5; i++) {
+			CompanyInfoWindow::DrawButton(l.tabs[i], CiText(TAB_TH[i], TAB_EN[i]), i == 4 ? GetColourGradient(COLOUR_YELLOW, SHADE_DARK) : box_fill, i == 4 ? TC_BLACK : TC_WHITE);
+		}
+		DrawString(l.date.left, l.date.right, l.date.top + (l.date.bottom - l.date.top + 1 - GetCharacterHeight(FS_NORMAL)) / 2, GetString(STR_JUST_DATE_LONG, TimerGameCalendar::date), TC_WHITE, SA_RIGHT);
+
+		const int home = _zone_market.ZoneOfCompany(this->company);
+		const bool no_hq = CompanyNeedsHq(this->company);
+		CompanyInfoWindow::DrawCard(l.card, l.hdr, CiText("ใบอนุญาตก่อสร้างในโซนต่างถิ่น", "Building permits in foreign zones"),
+			home >= 0 ? fmt::format("{} {} ({})", CiText("โซนที่ตั้งสำนักงานใหญ่", "Home zone"), home + 1, ZoneCurrencyName(home)) : CiText("ยังไม่มีสำนักงานใหญ่", "No headquarters yet"));
+
+		for (int i = 0; i < zonemath::MAX_ZONES; i++) {
+			const Rect &rw = l.rows[i];
+			GfxFillRect(rw.left, rw.top, rw.right, rw.bottom, GetColourGradient(COLOUR_GREY, SHADE_DARK));
+			if (i >= _zone_market.count) {
+				DrawString(rw.left + ScaleGUITrad(8), rw.right - ScaleGUITrad(8), rw.top + ScaleGUITrad(5), fmt::format("{} {}", CiText("โซน", "Zone"), i + 1), TC_GREY, SA_LEFT);
+				DrawString(rw.left + ScaleGUITrad(8), rw.right - ScaleGUITrad(8), rw.top + ScaleGUITrad(5) + row, CiText("ยังไม่มีโซนนี้", "This zone does not exist"), TC_GREY, SA_LEFT);
+				continue;
+			}
+			const int64_t tax = _zone_market.zones[i].tax_percent;
+			const int64_t fee = permitmath::Fee(tax);
+			const int64_t left_days = _zone_permits.DaysLeft(this->company, i);
+			const bool is_home = i == home;
+			const int tx = rw.left + ScaleGUITrad(8);
+			const int tr = l.btns[i].left - ScaleGUITrad(8);
+			DrawString(tx, tr, rw.top + ScaleGUITrad(5), fmt::format("{} {} · {} · {} {}%", CiText("โซน", "Zone"), i + 1, ZoneCurrencyName(i), CiText("ภาษี", "Tax"), tax), TC_YELLOW, SA_LEFT);
+			std::string status;
+			TextColour sc = TC_WHITE;
+			if (is_home) {
+				status = CiText("ก่อสร้างราคาปกติในโซนนี้ ไม่ต้องมีใบอนุญาต", "Normal construction prices here, no permit needed");
+				sc = TC_GREY;
+			} else if (left_days > 0) {
+				status = fmt::format("{} {} {} · {} +{}%", CiText("มีใบอนุญาต เหลือ", "Permit valid,"), left_days, CiText("วัน", "days left"), CiText("ก่อสร้าง", "construction"), permitmath::SurchargePercent(true, tax));
+				sc = TC_GREEN;
+			} else {
+				status = fmt::format("{} · {} +{}% · {} {}", CiText("ไม่มีใบอนุญาต", "No permit"), CiText("ก่อสร้าง", "construction"), permitmath::SurchargePercent(false, tax), CiText("ค่าธรรมเนียม", "fee"), CiMoney(fee));
+			}
+			DrawString(tx, tr, rw.top + ScaleGUITrad(5) + row, status, sc, SA_LEFT);
+
+			const bool can_buy = this->IsMine() && !is_home && !no_hq;
+			CompanyInfoWindow::DrawButton(l.btns[i], fmt::format("{} {}", left_days > 0 ? CiText("ต่ออายุ", "Renew") : CiText("ซื้อใบอนุญาต", "Buy permit"), CiMoney(fee)), box_fill, TC_WHITE, can_buy);
+		}
+
+		DrawString(l.footer.left, l.footer.right, l.footer.top, fmt::format("{} {} {}", CiText("ใบอนุญาตมีอายุ", "A permit lasts"), permitmath::VALID_DAYS, CiText("วันในเกม จ่ายค่าธรรมเนียมครั้งเดียว ต่ออายุได้ไม่เกิน", "game days, the fee is paid once; renewing banks at most")) + fmt::format(" {} ", permitmath::MAX_BANKED_DAYS) + CiText("วันนับจากวันนี้", "days from today"), TC_GREY, SA_LEFT);
+		DrawString(l.footer.left, l.footer.right, l.footer.top + row, CiText("ก่อสร้างในโซนอื่นโดยไม่มีใบอนุญาตยังทำได้ แต่แพงขึ้น", "Building in another zone without a permit still works, but costs more"), TC_GREY, SA_LEFT);
+	}
+
+	void OnClick(Point pt, WidgetID widget, [[maybe_unused]] int click_count) override
+	{
+		if (widget != WID_CIW_PANEL) return;
+		if (!Company::IsValidID(this->company)) return;
+		const PermitLayout l = MakePermitLayout(this->GetWidget<NWidgetBase>(WID_CIW_PANEL)->GetCurrentRect());
+
+		if (InRect(l.tabs[0], pt)) { ShowCompanyInfoWindow(this->company); return; }
+		if (InRect(l.tabs[1], pt)) { ShowCompanyFinances(this->company); return; }
+		if (InRect(l.tabs[2], pt)) {
+			const VehicleStats vs = CollectVehicles(this->company);
+			VehicleType type = VEH_ROAD;
+			if (vs.count[1] == 0) {
+				if (vs.count[0] > 0) type = VEH_TRAIN;
+				else if (vs.count[2] > 0) type = VEH_SHIP;
+				else if (vs.count[3] > 0) type = VEH_AIRCRAFT;
+			}
+			ShowVehicleListWindow(this->company, type);
+			return;
+		}
+		if (InRect(l.tabs[3], pt)) { ShowCompanyInfrastructureOfMod(this->company); return; }
+		/* tabs[4] is this window. */
+
+		if (!this->IsMine() || CompanyNeedsHq(this->company)) return;
+		const int home = _zone_market.ZoneOfCompany(this->company);
+		for (int i = 0; i < _zone_market.count && i < zonemath::MAX_ZONES; i++) {
+			if (i != home && InRect(l.btns[i], pt)) {
+				Command<CMD_ZONE_PERMIT>::Post(STR_ZONE_PERMIT_ERROR_CAPTION, static_cast<uint8_t>(i));
+				this->SetDirty();
+				return;
+			}
+		}
+	}
+};
+
+WindowDesc _company_permit_desc(
+	WDP_AUTO, "company_permit", 0, 0,
+	WC_CENTRAL_BANK, WC_NONE,
+	{},
+	_nested_company_info_widgets
+);
+
 } // namespace
+
+void ShowCompanyPermitWindow(CompanyID company)
+{
+	if (!Company::IsValidID(company)) return;
+	if (BringWindowToFrontById(WC_CENTRAL_BANK, CI_PERMIT_WINDOW_BASE + static_cast<int>(company.base())) != nullptr) return;
+	new CompanyPermitWindow(_company_permit_desc, company);
+}
 
 void ShowCompanyInfoWindow(CompanyID company)
 {

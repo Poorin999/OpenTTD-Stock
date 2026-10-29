@@ -426,6 +426,8 @@ static bool ConCitizenGold(std::span<std::string_view> argv)
 	return true;
 }
 
+void RegisterKmConsoleCommands(); /* km_system.cpp */
+
 void RegisterStockConsoleCommands()
 {
 	IConsole::CmdRegister("stock_dev", ConStockDev);
@@ -442,4 +444,5 @@ void RegisterStockConsoleCommands()
 	IConsole::CmdRegister("zone_sell", ConZoneSell);
 	IConsole::CmdRegister("gold_factors", ConGoldFactors);
 	IConsole::CmdRegister("citizen_gold", ConCitizenGold);
+	RegisterKmConsoleCommands();
 }
