@@ -1,0 +1,8 @@
+# Strings of the commercial banks of the towns (CMD_CBANK_BORROW / CMD_CBANK_REPAY, console bank_borrow / bank_repay), for src/lang/english.txt. apply_overlay.py adds them; it skips strings that already exist.
+
+STR_CBANK_ERROR_CAPTION                                         :{WHITE}Can't deal with the commercial bank...
+STR_CBANK_ERROR_NO_BANK                                         :{WHITE}This town has no bank
+STR_CBANK_ERROR_OTHER_ZONE                                      :{WHITE}This bank lends only in the money zone of your headquarters
+STR_CBANK_ERROR_DEFAULT                                         :{WHITE}You are in default at this bank
+STR_CBANK_ERROR_LIMIT                                           :{WHITE}Over your credit limit, or the bank can't lend that much
+STR_CBANK_ERROR_NO_DEBT                                         :{WHITE}You owe nothing to this bank
