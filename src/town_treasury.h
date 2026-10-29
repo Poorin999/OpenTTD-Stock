@@ -34,7 +34,7 @@
 
 /* Rates. Change here and build again. Money amounts are in the base currency at price index 1.0. */
 static constexpr int64_t TOWN_MIN_POPULATION = 200;          ///< Towns below this have no treasury and no gold trade.
-static constexpr int64_t TOWN_INCOME_CENTS_PER_CAPITA_DAY = 50; ///< Income of one citizen per game day, in 1/100 of a money unit.
+static constexpr int64_t TOWN_INCOME_CENTS_PER_CAPITA_DAY = 150; ///< Income of one citizen per game day, in 1/100 of a money unit (was 50: too little against the payments of the companies, poverty fix 2026-10-29).
 static constexpr int64_t TOWN_INCOME_TAX_PERCENT = 25;       ///< Town income tax: share of the income that goes to the treasury.
 static constexpr int64_t TOWN_GAINS_TAX_PERCENT = 10;        ///< Town tax on the profit of a gold sale of the citizens.
 static constexpr size_t  TOWN_GOLD_MIN_HISTORY_DAYS = 10;    ///< The 30 day average is only used when the chart has this many days.

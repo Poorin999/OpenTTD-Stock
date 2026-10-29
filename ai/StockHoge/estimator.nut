@@ -773,7 +773,7 @@ class CommonEstimator extends Estimator {
 				
 			
 				local infraBuildingTime = GetBuildingTime(pathDistance, engineInfrastractureType);
-				local runningCost = AIEngine.GetRunningCost(e);
+				local runningCost = HogeAI.GetFullRunningCost(e);
 				local cruiseSpeed;
 				local maxSpeed = AIEngine.GetMaxSpeed(e);
 				if(vehicleType == AIVehicle.VT_AIR) {
@@ -1534,14 +1534,14 @@ class TrainEstimator extends Estimator {
 				trainEngineInfo.engine <- trainEngine;
 				trainEngineInfo.cargo <- cargo;
 				trainEngineInfo.capacity <-  trainCapacity;
-				trainEngineInfo.runningCost <-  AIEngine.GetRunningCost(trainEngine);
+				trainEngineInfo.runningCost <-  HogeAI.GetFullRunningCost(trainEngine);
 				trainEngineInfo.price <- AIEngine.GetPrice(trainEngine);
 				trainEngineInfo.maxTractiveEffort <- AIEngine.GetMaxTractiveEffort(trainEngine);
 				trainEngineInfo.power <- AIEngine.GetPower(trainEngine);
 				trainEngineInfo.lengthWeight <- [trainInfo.length, AIEngine.GetWeight(trainEngine) + GetCargoWeight(cargo, trainCapacity)];
 				
 				
-				local trainRunningCost = AIEngine.GetRunningCost(trainEngine);
+				local trainRunningCost = HogeAI.GetFullRunningCost(trainEngine);
 				local trainPrice = AIEngine.GetPrice(trainEngine); 
 				local trainReiliability = useReliability ? AIEngine.GetReliability(trainEngine) / breakdownDifficulty : 100;
 				local maxSpeed = min(AIEngine.GetMaxSpeed(trainEngine),wagonSpeed);

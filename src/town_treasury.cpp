@@ -19,6 +19,7 @@
 #include "news_func.h"
 #include "strings_func.h"
 #include "town.h"
+#include "town_wallet_math.h"
 #include "market_events.h"
 #include "table/strings.h"
 
@@ -187,7 +188,7 @@ static void TermTotals(const TownAccount &a, citizengold::Style style, const Ter
 }
 
 /** One game hour of the terminal trade of one group (speculators and overtraders): stop loss, take profit, stop out, then a new decision. */
-static void TermStep(TownAccount &a, CentralBank &bank, citizengold::Style style, uint64_t dice, const TermQuotes &qs)
+static void TermStep(TownAccount &a, CentralBank &bank, citizengold::Style style, uint64_t dice, const TermQuotes &qs, int64_t reserve)
 {
 	citizengold::Book &b = a.books[static_cast<size_t>(style)];
 
@@ -222,7 +223,7 @@ static void TermStep(TownAccount &a, CentralBank &bank, citizengold::Style style
 		if (a.positions[i].style == style) { mine.push_back(a.positions[i]); where.push_back(i); }
 	}
 	TermTotals(a, style, qs, used, floating);
-	const int64_t free_margin = b.cash + floating - used;
+	const int64_t free_margin = townwallet::SpendableCash(b.cash, reserve) + floating - used; // the living cash is not margin
 	const citizengold::TermAction act = citizengold::DecideTerminal(style, mine, free_margin, b.cooldown, qs.data(), qs.size(), dice);
 	if (act.kind == citizengold::TermAction::Kind::Close) {
 		if (act.close_index < where.size()) CloseTermPosition(a, where[act.close_index], qs);
@@ -298,20 +299,25 @@ static void TownsHourly(const GameTimeSnapshot &now)
 	BuildTermQuotes(term_quotes);
 
 	int64_t net_bought_cz = 0;
+	const int64_t index_ppm = GetPriceIndexPpm();
 	for (Town *t : Town::Iterate()) {
 		if (t->cache.population < TOWN_MIN_POPULATION) continue;
 		auto it = _town_treasury.accounts.find(t->index.base());
 		if (it == _town_treasury.accounts.end() || !it->second.started) continue;
 		TownAccount &a = it->second;
+		const auto shares = citizengold::GroupSharePpm(CitizenSeed(), t->index.base());
 		for (size_t i = 0; i < citizengold::STYLE_COUNT; i++) {
 			citizengold::Book &b = a.books[i];
+			const int64_t reserve = townwallet::GroupReserve(t->cache.population, shares[i], index_ppm); // living cash of this group: not traded
 			if (b.cooldown > 0) b.cooldown--;
 			/* The speculators and the overtraders trade in the Trading Terminal (positions), the others buy physical gold. */
 			if (static_cast<citizengold::Style>(i) == citizengold::Style::Speculator || static_cast<citizengold::Style>(i) == citizengold::Style::Overtrader) {
-				TermStep(a, BankOfTile(t->xy), static_cast<citizengold::Style>(i), citizengold::Mix(CitizenSeed() ^ 0x7E2D, t->index.base(), i, hour), term_quotes);
+				TermStep(a, BankOfTile(t->xy), static_cast<citizengold::Style>(i), citizengold::Mix(CitizenSeed() ^ 0x7E2D, t->index.base(), i, hour), term_quotes, reserve);
 				continue;
 			}
-			const citizengold::GoldOrder o = citizengold::Decide(static_cast<citizengold::Style>(i), b, m, citizengold::Mix(CitizenSeed(), t->index.base(), i, hour));
+			citizengold::Book spendable = b; // the group decides on the cash above its living cash only; the order is then filled from the real cash
+			spendable.cash = townwallet::SpendableCash(b.cash, reserve);
+			const citizengold::GoldOrder o = citizengold::Decide(static_cast<citizengold::Style>(i), spendable, m, citizengold::Mix(CitizenSeed(), t->index.base(), i, hour));
 			if (o.cz <= 0) continue;
 			if (o.buy) {
 				const citizengold::Fill f = citizengold::ApplyBuy(b, o.cz, m.ask_cents, m.stock_cz);

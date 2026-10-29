@@ -12,10 +12,11 @@ require("railbuilder.nut");
 require("road.nut");
 require("water.nut");
 require("air.nut");
+require("zones.nut");
 
 
 class HogeAI extends AIController {
-	static version = 115;
+	static version = 116;
 
 	static container = Container();
 	static notBuildableList = AIList();
@@ -928,6 +929,9 @@ class HogeAI extends AIController {
 		local builtAirOfInfrastructureMaintenance = false;
 		while(routeCandidates.Count() >= 1){
 			local t = routeCandidates.Pop();
+			if(!StockZones.PrepareCandidate(t)) { // OpenTTD-Stock: foreign zones need a building permit, a border costs a fee
+				continue;
+			}
 			if(builtAirOfInfrastructureMaintenance && t.vehicleType == AIVehicle.VT_AIR) {
 				HgLog.Warning("Need to estimate again for bulding two airports with InfrastructureMaintenance");
 				return;
@@ -4382,6 +4386,11 @@ class HogeAI extends AIController {
 		local debt = HogeAI.GetCentralBankDebt();
 		if(debt == null) return HogeAI.GetCash();
 		return max(0, HogeAI.GetCash() - debt);
+	}
+
+	/** The running cost of an engine for a year plus the transport tax of the OpenTTD-Stock mod (tax level 100%). */
+	static function GetFullRunningCost(engine) {
+		return AIEngine.GetRunningCost(engine) + StockZones.TransportTax(engine);
 	}
 
 	function IsTooExpensive(cost) {

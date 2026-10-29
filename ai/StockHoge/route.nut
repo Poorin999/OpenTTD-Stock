@@ -4148,7 +4148,7 @@ class InfrastructureCost {
 	
 	function GetCostPerDistanceRail(railType) {
 		if(!HogeAI.Get().IsInfrastructureMaintenance()) {
-			return AIRail.GetMaintenanceCostFactor(railType) * 4;
+			return AIRail.GetMaintenanceCostFactor(railType) * 4 + StockZones.LandTaxPerTile();
 		}
 		CheckCache();
 		if(railTypeCostCache.rawin(railType)) {
@@ -4163,7 +4163,8 @@ class InfrastructureCost {
 			result = 0;
 		} else {
 			result = AIInfrastructure.GetMonthlyRailCosts(AICompany.COMPANY_SELF , railType) * 12 * 2 / distance;
-			if(result==0) return AIRail.GetMaintenanceCostFactor(railType) * 4;//まだレールが無い
+			if(result==0) return AIRail.GetMaintenanceCostFactor(railType) * 4 + StockZones.LandTaxPerTile();//まだレールが無い
+			result += StockZones.LandTaxPerTile();
 		}
 		railTypeCostCache[railType] <- result;
 		return result;
@@ -4171,7 +4172,7 @@ class InfrastructureCost {
 	
 	function GetCostPerDistanceRoad(roadType) {
 		if(!HogeAI.Get().IsInfrastructureMaintenance()) {
-			return [0,AIRoad.GetMaintenanceCostFactor(roadType)* 2];
+			return [0,AIRoad.GetMaintenanceCostFactor(roadType)* 2 + StockZones.LandTaxPerTile()];
 		}
 		CheckCache();
 		if(roadTypeCostCache.rawin(roadType)) {
@@ -4183,9 +4184,9 @@ class InfrastructureCost {
 		}
 		local result;
 		if(distance == 0) {
-			result = AIRoad.GetMaintenanceCostFactor(roadType) * 2;
+			result = AIRoad.GetMaintenanceCostFactor(roadType) * 2 + StockZones.LandTaxPerTile();
 		} else {
-			result = AIInfrastructure.GetMonthlyRoadCosts(AICompany.COMPANY_SELF, roadType) * 12 / distance;
+			result = AIInfrastructure.GetMonthlyRoadCosts(AICompany.COMPANY_SELF, roadType) * 12 / distance + StockZones.LandTaxPerTile();
 		}
 		roadTypeCostCache[roadType] <- [distance,result];
 		//HgLog.Info("GetCostPerDistanceRoad distance:"+distance+" cost/d:"+result);

@@ -3,7 +3,7 @@
    function GetAuthor()      { return "Rei Ishibashi (adapted for OpenTTD-Stock)"; }
    function GetName()        { return "StockHoge"; }
    function GetDescription() { return "StockHoge is AAAHogEx adapted to the OpenTTD-Stock mod (money from the central bank, no original loan). AAAHogEx is a highly profitable AI that offers a fun and challenging experience even for experienced players. It supports various types of transportation, including trains, trams, cars, trucks, ships, and airplanes. It is also compatible with most major mods. For a beginner-friendly setup guide, please visit the website below."; }
-   function GetVersion()     { return 115; } // main.nutも変更必要
+   function GetVersion()     { return 116; } // main.nutも変更必要
    function MinVersionToLoad() { return 105; }
    function GetDate()        { return "2026-03-18"; }
    function CreateInstance() { return "HogeAI"; }

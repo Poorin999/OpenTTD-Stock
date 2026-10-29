@@ -46,6 +46,7 @@ static constexpr int64_t GRANT_TARGET_PER_CAPITA = 20;    ///< A treasury below 
 static constexpr int64_t GRANT_NEED_MIN_PPM = 250'000;    ///< Weight factor of a rich town: 0.25 ...
 static constexpr int64_t GRANT_NEED_MAX_PPM = 2'000'000;  ///< ... of the poorest town: 2.0.
 static constexpr int64_t GRANT_MAX_PER_CAPITA = 10;       ///< No town gets more than this per citizen in one year.
+static constexpr int64_t CITIZEN_RESERVE_PER_CAPITA = 60; ///< LIVING CASH: the citizens never put the last 60 per citizen (money units at price index 1.0) into gold or Trading Terminal positions; it stays as cash for fares, bonds and daily life (poverty fix, 2026-10-29).
 
 /** Result of a payment for a delivery. */
 struct Payment {
@@ -92,6 +93,15 @@ inline Payment PayIndustrial(int64_t income)
 	p.tax = Percent(income, BUSINESS_TAX_PERCENT);
 	p.paid = income - p.tax;
 	return p;
+}
+
+/** Cash that a group may put into gold / terminal positions: what is above its living cash. */
+inline int64_t SpendableCash(int64_t cash, int64_t reserve) { return std::max<int64_t>(0, cash - std::max<int64_t>(0, reserve)); }
+/** Living cash of one group of a town: CITIZEN_RESERVE_PER_CAPITA x citizens x the share of the group x the price index (the division comes before the index, so nothing overflows). */
+inline int64_t GroupReserve(int64_t population, int64_t share_ppm, int64_t index_ppm)
+{
+	if (population <= 0 || share_ppm <= 0 || index_ppm <= 0) return 0;
+	return population * CITIZEN_RESERVE_PER_CAPITA * share_ppm / PPM * index_ppm / PPM;
 }
 
 /** The wages inside a payment that the town made (the company is paid `paid - WageOf(paid)`). */

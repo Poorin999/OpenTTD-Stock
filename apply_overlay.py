@@ -39,6 +39,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "stock_gui.h": "src", "stock_gui.cpp": "src", "stock_order_gui.cpp": "src",
     "wallet_base.h": "src", "wallet_base.cpp": "src",
     "wallet_cmd.h": "src", "wallet_cmd.cpp": "src",
+    "commercial_bank.h": "src", "commercial_bank.cpp": "src", "commercial_bank_math.h": "src",
     "central_bank.h": "src", "central_bank.cpp": "src",
     "tax.h": "src", "tax.cpp": "src", "zone_market.h": "src", "zone_market.cpp": "src", "zone_market_math.h": "src", "town_wallet.h": "src", "town_wallet.cpp": "src", "town_wallet_math.h": "src", "zone_map_gui.h": "src", "zone_borders.h": "src", "zone_borders.cpp": "src", "hq_gate.h": "src", "hq_gate.cpp": "src", "zone_permit.h": "src", "zone_permit.cpp": "src", "zone_permit_math.h": "src", "zone_map_gui.cpp": "src",
     "cargo_market.h": "src", "cargo_market.cpp": "src", "CargoMarketMath.h": "src",
@@ -74,13 +75,15 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_GOLD_SELL", "sell gold of the reserve"),
     ("CMD_ZONE_EXCHANGE", "exchange cash for banknotes of a money zone, or back"),
     ("CMD_ZONE_PERMIT", "buy a building permit for a foreign money zone"),
+    ("CMD_CBANK_BORROW", "borrow from the commercial bank of a town"),
+    ("CMD_CBANK_REPAY", "repay the commercial bank of a town"),
 ]
-NEW_SOURCES = ["km_system.cpp", "km_math.h", "town_wallet.cpp", "town_wallet.h", "town_wallet_math.h", "zone_borders.cpp", "zone_borders.h", "hq_gate.cpp", "hq_gate.h", "zone_permit.cpp", "zone_permit.h", "zone_map_gui.cpp", "zone_map_gui.h", "zone_market.cpp", "zone_market.h", "zone_market_math.h", "wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "oil_market_math.h", "oil_market_gui.cpp", "oil_market_gui.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "firs_desert_cargo.cpp", "custom_cargo_icons.cpp", "custom_cargo_icons.h", "custom_industry_gfx.cpp", "custom_industry_gfx.h", "desert_industries.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "company_info_gui.cpp", "company_info_gui.h", "company_info_math.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
+NEW_SOURCES = ["commercial_bank.cpp", "commercial_bank.h", "commercial_bank_math.h", "km_system.cpp", "km_math.h", "town_wallet.cpp", "town_wallet.h", "town_wallet_math.h", "zone_borders.cpp", "zone_borders.h", "hq_gate.cpp", "hq_gate.h", "zone_permit.cpp", "zone_permit.h", "zone_map_gui.cpp", "zone_map_gui.h", "zone_market.cpp", "zone_market.h", "zone_market_math.h", "wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "oil_market_math.h", "oil_market_gui.cpp", "oil_market_gui.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "firs_desert_cargo.cpp", "custom_cargo_icons.cpp", "custom_cargo_icons.h", "custom_industry_gfx.cpp", "custom_industry_gfx.h", "desert_industries.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "company_info_gui.cpp", "company_info_gui.h", "company_info_math.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
                "RetailMath.h", "RetailMarketManager.h", "RetailMarketManager.cpp",
                "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]
 REPLACE_KEYS = {"STR_STOCK_TIP_TOOLBOX", "STR_STOCK_TIP_SUMMARY", "STR_STOCK_ORDER_INFO", "STR_STOCK_TIP_DEPOSIT", "STR_STOCK_TIP_WITHDRAW"}
-STRING_FILES = ["english_stock_strings.txt", "english_wallet_strings.txt", "english_round8_strings.txt", "english_timeframe_strings.txt", "english_central_bank_strings.txt", "english_gold_strings.txt", "english_firs_strings.txt", "english_desert_industries_strings.txt", "english_town_finance_strings.txt", "english_company_info_strings.txt", "english_valuables_strings.txt", "english_news_strings.txt", "english_zone_permit_strings.txt"]
+STRING_FILES = ["english_stock_strings.txt", "english_wallet_strings.txt", "english_round8_strings.txt", "english_timeframe_strings.txt", "english_central_bank_strings.txt", "english_gold_strings.txt", "english_firs_strings.txt", "english_desert_industries_strings.txt", "english_town_finance_strings.txt", "english_company_info_strings.txt", "english_valuables_strings.txt", "english_news_strings.txt", "english_zone_permit_strings.txt", "english_commercial_bank_strings.txt"]
 THAI_STRING_FILES = ["thai_firs_strings.txt", "thai_desert_industries_strings.txt"]  # Thai texts of the new strings, appended to lang/thai.txt
 ANCHORS = ["STR_STOCK_ERROR_NO_ORDER", "STR_STOCK_NEWS_ORDER_EXPIRED"]
 
@@ -757,6 +760,39 @@ def patch_zone_permit(tree):
     t = ensure_include(t, '#include "zone_permit.h" /* ZONE_PERMIT_PATCH */', ['#include "command_func.h"', '#include "stdafx.h"'])
     _write_like(p, t, crlf)
     print("command.cpp: zone permit hook added")
+
+
+ZONE_PERMIT_BLOCK_MARKER = "ZONE_PERMIT_BLOCK_PATCH"
+
+
+def patch_zone_permit_block(tree):
+    """The permit GATE (zone_permit.cpp ZonePermitCheckTest): a human company without a permit cannot BUILD in a foreign zone (before: only 5x the price).
+    Two edits in src/command_func.h (OpenTTD 15.3, template CommandHelper<...>::Execute):
+      1. a declaration of ZonePermitCheckTest after the declaration of GetCommandName (no new #include, so no include cycle);
+      2. one call right after the TEST run:   Tret res = std::apply(...proc..., flags, args);   ->   the same line followed by
+         ZonePermitCheckTest(Tcmd, tile, ExtractCommandCost(res));
+    The result becomes an error, so InternalExecuteValidateTestAndPrepExec returns before anything is built, sent over the network or paid.
+    Both anchors must exist exactly once, otherwise only a WARNING is printed, nothing is written and the build goes on (permits stay a price rule)."""
+    p = tree / "src" / "command_func.h"
+    if not p.is_file():
+        print("WARNING: command_func.h not found, the permit gate is not hooked")
+        return
+    t, crlf = _read_lf(p)
+    if ZONE_PERMIT_BLOCK_MARKER in t:
+        print("command_func.h: permit gate already there")
+        return
+    decl_anchor = "std::string_view GetCommandName(Commands cmd);\n"
+    call_anchor = re.compile(r"(\n([ \t]*)Tret res = std::apply\(CommandTraits<Tcmd>::proc, std::tuple_cat\(std::make_tuple\(flags\), args\)\);\n)")
+    calls = list(call_anchor.finditer(t))
+    if t.count(decl_anchor) != 1 or len(calls) != 1:
+        print("WARNING: command_func.h has a different layout (GetCommandName declaration once, the test run of Execute once), the permit gate is not hooked")
+        return
+    c = calls[0]
+    ind = c.group(2)
+    t = t[:c.end()] + f"{ind}ZonePermitCheckTest(Tcmd, tile, ExtractCommandCost(res)); /* {ZONE_PERMIT_BLOCK_MARKER} */\n" + t[c.end():]
+    t = t.replace(decl_anchor, decl_anchor + f"void ZonePermitCheckTest(Commands cmd, TileIndex tile, CommandCost &res); /* {ZONE_PERMIT_BLOCK_MARKER} */\n", 1)
+    _write_like(p, t, crlf)
+    print("command_func.h: permit gate added")
 
 
 VEHICLE_TIME_MARKER = "GAME_VEHICLE_TIME_PATCH"
@@ -1505,6 +1541,19 @@ def patch_company_info(tree):
     print(f"{p.name}: company window patch: " + ", ".join(changed))
 
 
+COMMERCIAL_BANK_MARKER = "COMMERCIAL_BANK_PATCH"
+
+
+def patch_commercial_bank_commands(tree):
+    """CMD_CBANK_BORROW / CMD_CBANK_REPAY (commercial_bank.h): command.cpp must see their DEF_CMD_TRAIT, like the traits of wallet_cmd.h and central_bank.h
+    (the base patch includes those two). A hard error when no place is found: without it the command table of OpenTTD does not build."""
+    p = tree / "src" / "command.cpp"
+    t, crlf = _read_lf(p)
+    t = ensure_include(t, f'#include "commercial_bank.h" /* {COMMERCIAL_BANK_MARKER} */', ['#include "central_bank.h"', '#include "wallet_cmd.h"', '#include "stdafx.h"'])
+    _write_like(p, t, crlf)
+    print("command.cpp: commercial bank commands included")
+
+
 def main(tree):
     patch_graph_files(tree)
     patch_town_gui(tree)
@@ -1519,6 +1568,8 @@ def main(tree):
     patch_town_wallet(tree)
     patch_order_km(tree)
     patch_zone_permit(tree)
+    patch_commercial_bank_commands(tree)
+    # patch_zone_permit_block(tree)  # OFF: needs ZonePermitCheckTest (zone_permit.h/.cpp) and thai_zone_permit_strings.txt, missing in the upload stockhoge_zones_update
     patch_zone_borders(tree)
     patch_zone_status(tree)
     patch_vat(tree)
@@ -1989,7 +2040,102 @@ def main(tree):
             cpp.write_text(c, encoding="utf-8")
             print("script_company: BorrowFromCentralBank and RepayCentralBank added to the script API")
 
+    patch_script_zones(tree)
+
     print("overlay applied")
+
+
+SCRIPT_ZONES_MARKER = "GetZoneOfTile"
+
+
+def patch_script_zones(tree):
+    """Script API: the money zones, building permits and taxes (OpenTTD-Stock mod), so that AIs such as StockHoge can plan with them. Same anchors and style as the
+    central bank functions: all are static functions of ScriptCompany, added after GetLoanAmount (nothing is written when an anchor is missing, only a WARNING).
+      GetZoneCount(), GetZoneOfTile(tile) (-1 = outside), GetHomeZone(company) (-1 = no HQ), GetZoneTaxPercent(zone), GetZoneBorderFeePermille(from, to),
+      GetPermitDaysLeft(company, zone), GetPermitFee(zone), BuyBuildingPermit(zone), GetUnborrowedCash(company),
+      GetTransportTaxPerYear(vehicle_type) (0 rail, 1 road, 2 water, 3 air; zone level 100%, price index included), GetLandTaxPerTileYear() (a plain tile, price index included)."""
+    hpp = tree / "src" / "script" / "api" / "script_company.hpp"
+    cpp = tree / "src" / "script" / "api" / "script_company.cpp"
+    if not hpp.exists() or not cpp.exists():
+        print("WARNING: src/script/api/script_company.hpp/.cpp not found, the script API has no zone functions")
+        return
+    h = hpp.read_text(encoding="utf-8")
+    c = cpp.read_text(encoding="utf-8")
+    decl_rx = r"^([ \t]*)static Money GetLoanAmount\(\);[ \t]*\n"
+    if SCRIPT_ZONES_MARKER in h and SCRIPT_ZONES_MARKER in c:
+        print("script_company: zone functions already present")
+        return
+    if not re.search(decl_rx, h, re.M):
+        print("WARNING: ScriptCompany::GetLoanAmount not found in script_company.hpp, the script API has no zone functions")
+        return
+    decls = (
+        "\n\t/**\n\t * Get the number of money zones of the game (OpenTTD-Stock mod).\n\t * @return The number of zones, 0 while they are not made yet.\n\t */\n"
+        "\tstatic SQInteger GetZoneCount();\n"
+        "\n\t/**\n\t * Get the money zone of a tile (OpenTTD-Stock mod).\n\t * @param tile The tile.\n\t * @return The zone (0 based), or -1 when the tile is in no zone or the zones are not made yet.\n\t */\n"
+        "\tstatic SQInteger GetZoneOfTile(TileIndex tile);\n"
+        "\n\t/**\n\t * Get the zone of the headquarters of a company (OpenTTD-Stock mod). The company builds at the normal price in this zone.\n"
+        "\t * @param company The company.\n\t * @pre ResolveCompanyID(company) != COMPANY_INVALID.\n\t * @return The zone, or -1 when the company has no headquarters.\n\t */\n"
+        "\tstatic SQInteger GetHomeZone(CompanyID company);\n"
+        "\n\t/**\n\t * Get the tax level of a zone in percent of the base rates (OpenTTD-Stock mod, 100 = the base).\n\t * @param zone The zone.\n\t * @return The tax level, or -1 for a zone that does not exist.\n\t */\n"
+        "\tstatic SQInteger GetZoneTaxPercent(SQInteger zone);\n"
+        "\n\t/**\n\t * Get the exchange fee of a delivery across a zone border, in parts per thousand of the income (OpenTTD-Stock mod).\n"
+        "\t * @param from_zone The zone of the source station.\n\t * @param to_zone The zone of the destination station.\n\t * @return The fee in permille, 0 inside one zone or for a zone that does not exist.\n\t */\n"
+        "\tstatic SQInteger GetZoneBorderFeePermille(SQInteger from_zone, SQInteger to_zone);\n"
+        "\n\t/**\n\t * Get the game days that the building permit of a company for a zone still holds (OpenTTD-Stock mod).\n"
+        "\t * @param company The company.\n\t * @param zone The zone.\n\t * @pre ResolveCompanyID(company) != COMPANY_INVALID.\n\t * @return The days left, 0 = no permit (also for the home zone, which needs none).\n\t */\n"
+        "\tstatic SQInteger GetPermitDaysLeft(CompanyID company, SQInteger zone);\n"
+        "\n\t/**\n\t * Get the one-time fee of a building permit for a zone (OpenTTD-Stock mod).\n\t * @param zone The zone.\n\t * @return The fee, or -1 for a zone that does not exist.\n\t */\n"
+        "\tstatic Money GetPermitFee(SQInteger zone);\n"
+        "\n\t/**\n\t * Buy or renew the building permit for a zone (OpenTTD-Stock mod). Without a permit a construction in a foreign zone costs 5 times as much.\n"
+        "\t * @param zone The zone.\n\t * @return True when the permit was bought. It is refused in the home zone, without a headquarters and without enough unborrowed cash.\n\t */\n"
+        "\tstatic bool BuyBuildingPermit(SQInteger zone);\n"
+        "\n\t/**\n\t * Get the cash of a company that is not borrowed (OpenTTD-Stock mod): what a permit and the exchange can be paid with.\n"
+        "\t * @param company The company.\n\t * @pre ResolveCompanyID(company) != COMPANY_INVALID.\n\t * @return The money, or -1 when the company is not valid.\n\t */\n"
+        "\tstatic Money GetUnborrowedCash(CompanyID company);\n"
+        "\n\t/**\n\t * Get the transport tax of one vehicle for a year, at the tax level 100% and the price index of today (OpenTTD-Stock mod).\n"
+        "\t * @param vehicle_type 0 = train (a whole consist), 1 = road vehicle, 2 = ship, 3 = aircraft.\n\t * @return The tax per year, 0 for another type.\n\t */\n"
+        "\tstatic Money GetTransportTaxPerYear(SQInteger vehicle_type);\n"
+        "\n\t/**\n\t * Get the land tax of one plain tile for a year, at the tax level 100% and the price index of today (OpenTTD-Stock mod). A station tile counts 4 times, a tile near a town more.\n"
+        "\t * @return The tax per tile and year.\n\t */\n"
+        "\tstatic Money GetLandTaxPerTileYear();\n"
+    )
+    m = re.search(decl_rx, h, re.M)
+    h = h[:m.end()] + decls + h[m.end():]
+    impl = (
+        "\n/* static */ SQInteger ScriptCompany::GetZoneCount()\n{\n\treturn ::_zone_market.count;\n}\n"
+        "\n/* static */ SQInteger ScriptCompany::GetZoneOfTile(TileIndex tile)\n{\n"
+        "\tif (!::IsValidTile(tile) || ::_zone_market.count <= 0) return -1;\n\treturn ::_zone_market.ZoneOfTile(tile);\n}\n"
+        "\n/* static */ SQInteger ScriptCompany::GetHomeZone(ScriptCompany::CompanyID company)\n{\n"
+        "\tcompany = ResolveCompanyID(company);\n\tif (company == ScriptCompany::COMPANY_INVALID) return -1;\n\n"
+        "\treturn ::_zone_market.ZoneOfCompany(ScriptCompany::FromScriptCompanyID(company));\n}\n"
+        "\n/* static */ SQInteger ScriptCompany::GetZoneTaxPercent(SQInteger zone)\n{\n"
+        "\tif (zone < 0 || zone >= ::_zone_market.count) return -1;\n\treturn static_cast<SQInteger>(::_zone_market.zones[zone].tax_percent);\n}\n"
+        "\n/* static */ SQInteger ScriptCompany::GetZoneBorderFeePermille(SQInteger from_zone, SQInteger to_zone)\n{\n"
+        "\tif (from_zone < 0 || to_zone < 0) return 0;\n\treturn static_cast<SQInteger>(::_zone_market.FeePpmBetween(static_cast<int>(from_zone), static_cast<int>(to_zone)) / 1000);\n}\n"
+        "\n/* static */ SQInteger ScriptCompany::GetPermitDaysLeft(ScriptCompany::CompanyID company, SQInteger zone)\n{\n"
+        "\tcompany = ResolveCompanyID(company);\n\tif (company == ScriptCompany::COMPANY_INVALID) return 0;\n\n"
+        "\treturn static_cast<SQInteger>(::_zone_permits.DaysLeft(ScriptCompany::FromScriptCompanyID(company), static_cast<int>(zone)));\n}\n"
+        "\n/* static */ Money ScriptCompany::GetPermitFee(SQInteger zone)\n{\n"
+        "\tif (zone < 0 || zone >= ::_zone_market.count) return -1;\n\treturn Money(::permitmath::Fee(::_zone_market.zones[zone].tax_percent));\n}\n"
+        "\n/* static */ bool ScriptCompany::BuyBuildingPermit(SQInteger zone)\n{\n"
+        "\tEnforceCompanyModeValid(false);\n\tEnforcePrecondition(false, zone >= 0 && zone < ::_zone_market.count);\n\n"
+        "\treturn ScriptObject::Command<CMD_ZONE_PERMIT>::Do(static_cast<uint8_t>(zone));\n}\n"
+        "\n/* static */ Money ScriptCompany::GetUnborrowedCash(ScriptCompany::CompanyID company)\n{\n"
+        "\tcompany = ResolveCompanyID(company);\n\tif (company == ScriptCompany::COMPANY_INVALID) return -1;\n\n"
+        "\treturn Money(::GetUnborrowedLiquidCash(ScriptCompany::FromScriptCompanyID(company)));\n}\n"
+        "\n/* static */ Money ScriptCompany::GetTransportTaxPerYear(SQInteger vehicle_type)\n{\n"
+        "\tint64_t rate = 0;\n\tswitch (vehicle_type) {\n"
+        "\t\tcase 0: rate = TAX_TRAIN_DAY; break;\n\t\tcase 1: rate = TAX_ROADVEH_DAY; break;\n\t\tcase 2: rate = TAX_SHIP_DAY; break;\n\t\tcase 3: rate = TAX_AIRCRAFT_DAY; break;\n\t\tdefault: break;\n\t}\n"
+        "\treturn Money(rate * 365 * ::GetPriceIndexPpm() / 1'000'000);\n}\n"
+        "\n/* static */ Money ScriptCompany::GetLandTaxPerTileYear()\n{\n"
+        "\treturn Money(TAX_LAND_PER_UNIT_DAY * 365 * ::GetPriceIndexPpm() / 1'000'000);\n}\n"
+    )
+    for inc in ('#include "../../tax.h"', '#include "../../zone_permit_math.h"', '#include "../../zone_permit.h"', '#include "../../zone_market.h"', '#include "../../central_bank.h"'):
+        c = ensure_include(c, inc, ['#include "../../company_base.h"', '#include "../../company_func.h"', '#include "script_company.hpp"', '#include "../../stdafx.h"'])
+    c = c.rstrip("\n") + "\n" + impl
+    hpp.write_text(h, encoding="utf-8")
+    cpp.write_text(c, encoding="utf-8")
+    print("script_company: zone, permit and tax functions added to the script API")
 
 
 if __name__ == "__main__":

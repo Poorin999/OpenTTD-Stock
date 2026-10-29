@@ -178,6 +178,26 @@ int main()
 		}
 		CHECK(with_w > without_w && without_w >= 0);
 	}
+	/* Living cash: a group trades only what is above its reserve, the reserve scales with the town, its share and the price index, and nothing overflows. */
+	{
+		CHECK(SpendableCash(1000, 300) == 700 && SpendableCash(300, 300) == 0 && SpendableCash(100, 300) == 0 && SpendableCash(-5, 0) == 0 && SpendableCash(500, -9) == 500);
+		CHECK(GroupReserve(1000, 250'000, 1'000'000) == 1000 * CITIZEN_RESERVE_PER_CAPITA / 4);
+		CHECK(GroupReserve(1000, 250'000, 2'000'000) == 2 * GroupReserve(1000, 250'000, 1'000'000));
+		CHECK(GroupReserve(0, 250'000, 1'000'000) == 0 && GroupReserve(1000, 0, 1'000'000) == 0 && GroupReserve(1000, 250'000, 0) == 0 && GroupReserve(-3, 250'000, 1'000'000) == 0);
+		int64_t sum = 0;
+		for (int64_t s : std::initializer_list<int64_t>{250'000, 200'000, 150'000, 400'000}) sum += GroupReserve(1000, s, 1'000'000);
+		CHECK(sum == 1000 * CITIZEN_RESERVE_PER_CAPITA);
+		CHECK(GroupReserve(5'000'000, 1'000'000, 100'000'000) > 0);
+		/* A group that buys gold every hour (0.6% of the spendable cash) and gets a daily income never goes under its reserve, and its cash stays above it. */
+		const int64_t reserve = GroupReserve(1461, 250'000, 5'415'000);
+		int64_t cash = reserve; bool ok = true;
+		for (int day = 0; day < 365; day++) {
+			cash += 100;
+			for (int h = 0; h < 24; h++) cash -= SpendableCash(cash, reserve) * 6'000 / PPM;
+			if (cash < reserve) ok = false;
+		}
+		CHECK(ok);
+	}
 	std::printf("%d checks, %d failed\n", g_checks, g_fail);
 	return g_fail == 0 ? 0 : 1;
 }

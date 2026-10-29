@@ -21,6 +21,21 @@ refused); the only lender is the central bank, driven by the bot in `src/stock_a
   `_IsRich()` counts only the company's own money (cash minus the debt at the central bank), and the log of every turn shows the debt and the own money.
   On a build of the mod without these functions the AI logs a warning once and works with the cash only.
 
+## Money zones, building permits and taxes (version 116)
+New file `zones.nut` (class `StockZones`) and a few small hooks. All of it uses the script API that `apply_overlay.py` adds to `AICompany`
+(`GetZoneCount`, `GetZoneOfTile`, `GetHomeZone`, `GetZoneTaxPercent`, `GetZoneBorderFeePermille`, `GetPermitDaysLeft`, `GetPermitFee`, `BuyBuildingPermit`,
+`GetUnborrowedCash`, `GetTransportTaxPerYear`, `GetLandTaxPerTileYear`). On a build without them the AI logs one warning and plays as before.
+- **Permits (main.nut, `_ScanPlaces`)**: every route candidate goes through `StockZones.PrepareCandidate(t)` before it is built. The AI looks at both ends and a point
+  every 8 tiles on the line between them. For every zone that is not the zone of its headquarters and where the permit has fewer than 45 game days left, it buys the
+  permit (`AICompany.BuyBuildingPermit`, paid with unborrowed cash) BEFORE building, so it never pays the 400% price of a build without a permit. The fee and the 50%
+  surcharge of the zone are added to `estimate.buildingCost`. A route is skipped when the permits cannot be paid, or when fees plus surcharge are more than half of the project.
+- **Zone border**: a delivery across a border pays an exchange fee. The value of the route is lowered by that fee, and a route whose fee is 30% or more of the income is skipped.
+- **Taxes**: `HogeAI.GetFullRunningCost(engine)` = running cost + transport tax of the vehicle (used where estimator.nut judged a vehicle by its running cost);
+  `InfrastructureCost.GetCostPerDistanceRail/Road` add the land tax of one tile per distance unit.
+- The game clock needs nothing new here: the AI already measures time in game days (`GetDayLengthFactor`), and the zones, permits and taxes run on the same game days.
+- Tested: the 17 files compile (the Squirrel compiler of OpenTTD 15.3), `StockZones` passes a test with a mock API (buys, skips, no double work), the C++ side compiles
+  against OpenTTD 15.3 with the overlay. NOT tested in a running game.
+
 ## Where it lives
 This folder is part of the OpenTTD-Stock repository (`ai/StockHoge`), so one push updates the game and the AI together. The CI build copies it into the
 build output (`ai/StockHoge` next to `openttd.exe`), so the AI is ready to use after unpacking the build. `src/stock_ai.cpp` is the bot of the mod
