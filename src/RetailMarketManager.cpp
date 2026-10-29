@@ -16,6 +16,7 @@
 #include "company_func.h"
 #include "town.h"
 #include "market_events.h"
+#include "settings_type.h"
 #include "openttd.h"
 #include "game_time/game_time_manager.h"
 #include "stock_cmd.h"
@@ -114,7 +115,7 @@ int64_t RetailMarketManager::GetHoldingsValue() const
 	return sum;
 }
 
-/** Shares of a company that the retail investors own, both groups together. */
+/** Shares of a company that the retail investors own, all groups together. */
 int64_t RetailMarketManager::GetHeldShares(CompanyID company) const
 {
 	if (company.base() >= MAX_COMPANIES) return 0;
@@ -179,7 +180,7 @@ void RetailMarketManager::UpdateCompanyRecords()
 
 /**
  * Step 1: the capital pool. The towns say how much money they want to hold in the market (population, prosperity, transport coverage);
- * what the retail investors do not own yet comes in as new savings, a little each day, and is shared between the two groups.
+ * what the retail investors do not own yet comes in as new savings, a little each day, and is shared between the groups.
  */
 void RetailMarketManager::RefreshCapital([[maybe_unused]] const GameTimeSnapshot &now)
 {
@@ -258,16 +259,27 @@ retail::CompanySignals RetailMarketManager::GatherSignals(CompanyID company) con
 		if (static_cast<int64_t>(e.income) + static_cast<int64_t>(e.expenses) <= 0) all_profitable = false;
 	}
 	s.dividend_consistent = known >= retail::MIN_DIVIDEND_QUARTERS && all_profitable;
+
+	/* The bargain hunters: the model value (the goal that the price glides to) against the price. Limited to +-50%. */
+	if (_stock_market.base_fp[i] > 0) {
+		s.has_value = true;
+		s.value_gap_ppm = std::clamp<int64_t>((_stock_market.base_fp[i] - _stock_market.price_fp[i]) * retail::PPM / _stock_market.price_fp[i], -retail::PPM / 2, retail::PPM / 2);
+	}
+	/* The small gamblers: the mood of the news (market and company) and a tip that changes every NOISE_DAYS days. Nobody but them reads it. */
+	s.mood_ppm = _market_events.SentimentPpm(i);
+	const int64_t day = static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes()) / (24 * 60);
+	s.noise_ppm = retail::BotTip(static_cast<uint64_t>(_settings_game.game_creation.generation_seed) ^ 0x5E71, 0, static_cast<int>(i), day / retail::NOISE_DAYS);
 	return s;
 }
 
 /**
- * Steps 2 and 3: opinions, orders, order matching and the injection into the trading terminal.
+ * Steps 2 and 3: opinions, orders, routing and the injection into the trading terminal.
  *
  *   Pass 1: the opinion about every company; a panic starts a cool-down in which nobody buys it.
- *   Pass 2: the orders of the two groups (buys limited by the cash and by the 40% holding limit, sells by the holdings).
- *   Pass 3: per company the buy orders and sell orders meet each other at the mid price. Only the difference is sent to the terminal:
- *           StockMarket::ApplyImpact() moves the price, adds the volume to the candles, and fades away over the next days like every other order.
+ *   Pass 2: the orders of the five groups (buys limited by the cash and by the 40% holding limit, sells by the holdings).
+ *   Pass 3: the orders are kept for the day and carried out hour by hour (#ExecuteSlice): a part of the buys and sells that meet is crossed
+ *           (no effect on the price), everything else goes to the terminal group by group (StockMarket::ApplyImpact), so the terminal
+ *           sees the real two-sided flow and not one net number.
  */
 void RetailMarketManager::TradeDay()
 {
@@ -313,9 +325,9 @@ void RetailMarketManager::TradeDay()
 		CompanyRecord &rec = this->companies[i];
 		const Sentiment &sentiment = rec.report.sentiment;
 
-		int64_t planned_buy = 0; // Together, the two groups may not pass the holding limit either.
+		int64_t planned_buy = 0; // Together, the groups may not pass the holding limit either.
 		for (int k = 0; k < COHORT_COUNT; k++) {
-			plan[i].sell[k] = SellShares(rec.held[k], sentiment.cohort_score[k], sentiment.panic_ppm);
+			plan[i].sell[k] = SellShares(rec.held[k], sentiment.cohort_score[k], sentiment.panic_ppm, COHORT_PANIC_SELL_PERCENT[k]);
 			if (rec.panic_cooldown > 0) continue;
 			const int64_t budget = BuyBudget(this->cash[k], sentiment.cohort_score[k], score_sum[k]);
 			plan[i].buy[k] = BuyShares(budget, plan[i].price, this->GetHeldShares(CompanyID{i}) + planned_buy, STOCK_SHARES_PER_COMPANY);
@@ -336,8 +348,8 @@ void RetailMarketManager::TradeDay()
 
 /**
  * Carry out one hour's part of the day's orders: the part of hour h is plan * (h + 1) / 24 - plan * h / 24, so the 24 parts add up to the whole order.
- * The buyers and sellers of this hour meet at the price of this hour. The matched shares are volume without effect on the price;
- * the difference goes to the terminal (StockMarket::ApplyImpact), which moves the price and adds that volume too.
+ * A part of the meeting buy and sell orders is crossed (volume without effect on the price); everything else is sent to the terminal
+ * (StockMarket::ApplyImpact) as the orders of the groups, on both sides, so the price moves by what is not balanced and the candles show the real flow.
  * @param hour Game hour of the day, 0 .. 23.
  */
 void RetailMarketManager::ExecuteSlice(int hour)
@@ -356,24 +368,28 @@ void RetailMarketManager::ExecuteSlice(int hour)
 
 		std::array<int64_t, COHORT_COUNT> want_buy{};
 		std::array<int64_t, COHORT_COUNT> want_sell{};
-		RetailOrder order;
+		int64_t any = 0;
 		for (int k = 0; k < COHORT_COUNT; k++) {
 			want_buy[k] = part(this->day_plan[i].buy[k]);
 			want_sell[k] = std::min(rec.held[k], part(this->day_plan[i].sell[k]));
-			order.buy_shares += want_buy[k];
-			order.sell_shares += want_sell[k];
+			any += want_buy[k] + want_sell[k];
 		}
-		if (order.buy_shares == 0 && order.sell_shares == 0) continue;
+		if (any == 0) continue;
 
-		const MatchResult match = MatchOrders(order, STOCK_SHARES_PER_COMPANY, static_cast<int>(H));
-		const int64_t filled_buy = match.matched + match.net_buy;   // What could be done of the buy orders; the rest of the orders is dropped.
-		const int64_t filled_sell = match.matched + match.net_sell;
+		/* Part of the meeting orders is crossed inside; the rest goes to the terminal, one order per group and side. */
+		const Routing route = RouteOrders(want_buy, want_sell, STOCK_SHARES_PER_COMPANY, static_cast<int>(H));
+		int64_t sent_buy = 0;
+		int64_t sent_sell = 0;
+		for (int k = 0; k < COHORT_COUNT; k++) {
+			sent_buy += route.market_buy[k];
+			sent_sell += route.market_sell[k];
+		}
 
 		int64_t bought = 0;
 		int64_t sold = 0;
 		for (int k = 0; k < COHORT_COUNT; k++) {
 			/* Sells first: the proceeds and the gain. A part of every gain is spent in the towns, the rest stays in the cash of the group. */
-			const int64_t s = std::min(rec.held[k], ProRata(want_sell[k], order.sell_shares, filled_sell));
+			const int64_t s = std::min(rec.held[k], route.cross_sell[k] + route.market_sell[k]);
 			if (s > 0) {
 				const int64_t proceeds = s * price;
 				const int64_t cost = CostOfShares(rec.basis[k], rec.held[k], s);
@@ -386,7 +402,7 @@ void RetailMarketManager::ExecuteSlice(int hour)
 			}
 
 			/* Then the buys, paid from the cash of the group. */
-			int64_t b = ProRata(want_buy[k], order.buy_shares, filled_buy);
+			int64_t b = route.cross_buy[k] + route.market_buy[k];
 			b = std::min(b, this->cash[k] / price);
 			if (b > 0) {
 				rec.held[k] += b;
@@ -395,6 +411,11 @@ void RetailMarketManager::ExecuteSlice(int hour)
 				bought += b;
 			}
 		}
+		/* What a group could not pay for or sell never reached the market: the report and the terminal only see what was done. */
+		const int64_t crossed = std::min({route.crossed, bought, sold});
+		const int64_t net_buy_sent = std::max<int64_t>(0, std::min(sent_buy, bought - crossed));
+		const int64_t net_sell_sent = std::max<int64_t>(0, std::min(sent_sell, sold - crossed));
+		const MatchResult match{crossed, net_buy_sent, net_sell_sent};
 
 		if (hour == 0) rec.report.bought = rec.report.sold = rec.report.matched = rec.report.net_pressure = 0;
 		rec.report.bought += bought;
@@ -403,10 +424,10 @@ void RetailMarketManager::ExecuteSlice(int hour)
 		rec.report.net_pressure += match.net_buy - match.net_sell;
 		rec.report.held_shares = this->GetHeldShares(CompanyID{i});
 
-		/* Volume without effect on the price: the shares that the two groups traded between themselves. */
+		/* Volume without effect on the price: the shares that the groups traded between themselves. */
 		_stock_market.AddTradedVolume(CompanyID{i}, static_cast<uint32_t>(std::min<int64_t>(match.matched, UINT32_MAX)));
 
-		/* The injection: the terminal moves the price by the imbalance (and adds that volume). */
+		/* The injection: both sides go to the terminal as the orders that they are (volume on both sides, wicks of the candles); the price moves by what is not balanced. */
 		if (match.net_buy > 0) _stock_market.ApplyImpact(CompanyID{i}, true, static_cast<uint32_t>(match.net_buy));
 		if (match.net_sell > 0) _stock_market.ApplyImpact(CompanyID{i}, false, static_cast<uint32_t>(match.net_sell));
 	}

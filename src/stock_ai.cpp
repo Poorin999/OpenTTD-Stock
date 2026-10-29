@@ -26,6 +26,13 @@
  *                 STOCK_AI_MAX_EXPOSURE_PERCENT (1x, while the terminal allows 10x). Positions are closed when the target price is
  *                 reached, when they are held too long, and when the margin warning shows up.
  *
+ * Styles:      the AI companies are NOT one trader with the same rule. Every company has a style that is decided by the seed of the game and its
+ *                 number (retail::BotStyleOf, nothing is saved): value (30%, buys below ITS OWN idea of the value: the model value plus a private error
+ *                 that it does not share with the others), momentum (25%, follows the trend, makes bubbles and crashes), contrarian (15%, buys what fell
+ *                 far below its average), noise (10%, trades on tips and the mood of the news) and growth (20%, buys rising earnings, long only). The
+ *                 limits (entry score, stops, holding time, risk) differ a little from company to company (retail::BotParamsOf). So the market has
+ *                 disagreement: while one bot buys, another one sells, and bubbles and crashes are possible. The valuables keep the single rule below.
+ *
  * Valuables: gold, silver, platinum and diamonds are traded by the same rule as the shares. Their fair price is the price of the price model
  *                 (StockMarket::base_fp), there are no earnings to look at, the edge that is needed is smaller (STOCK_AI_VALUABLE_MIN_EDGE_PPM),
  *                 and at most STOCK_AI_MAX_VALUABLE_POSITIONS positions are open in them. Switch off with STOCK_AI_TRADE_VALUABLES.
@@ -53,6 +60,9 @@
 #include "company_func.h"
 #include "core/backup_type.hpp"
 #include "game_time/game_time_manager.h"
+#include "RetailMath.h"
+#include "market_events.h"
+#include "settings_type.h"
 
 #include <algorithm>
 #include <vector>
@@ -203,6 +213,59 @@ static int64_t TrendPpm(CompanyID target)
 	return Ppm(GetStockPrice(target) - old_close, old_close);
 }
 
+/** The seed of the bots: the same on every client of a network game. */
+static uint64_t BotSeed()
+{
+	return static_cast<uint64_t>(_settings_game.game_creation.generation_seed) ^ 0xB07B07ULL;
+}
+
+/** The style and the numbers of an AI company. */
+static retail::BotParams ParamsOf(CompanyID owner)
+{
+	return retail::BotParamsOf(BotSeed(), owner.base());
+}
+
+/** What one AI company sees of one share. */
+static retail::BotInputs InputsOf(CompanyID owner, CompanyID target, const retail::BotParams &params)
+{
+	retail::BotInputs in;
+	const size_t t = target.base();
+	if (!Company::IsValidID(target) || _stock_market.price_fp[t] <= 0) return in;
+	const int64_t price_fp = _stock_market.price_fp[t];
+	const int64_t price = std::max<int64_t>(1, GetStockPrice(target));
+	in.valid = true;
+
+	const StockSummary summary = GetStockSummary(target);
+	const int64_t drift = EarningsDriftPpm(target);
+	in.in_default = CentralBank::accounts[t].in_default;
+	in.can_long = !in.in_default && !(summary.has_earnings && summary.eps <= 0) && drift >= STOCK_AI_BAD_DRIFT_PPM;
+	in.earnings_drift_ppm = drift;
+
+	const int64_t fair = FairFixed(target);
+	if (fair > 0) in.value_gap_ppm = std::clamp<int64_t>((fair - price_fp) * STOCK_PPM / price_fp, -STOCK_PPM / 2, STOCK_PPM / 2);
+
+	/* The trend: the running monthly candle opened at the price of the month start; the daily candles (when they are recorded) give 30 days. */
+	const auto &candles = _stock_market.candles[t];
+	if (!candles.empty() && candles.back().open > 0) in.trend_month_ppm = Ppm(price - candles.back().open, candles.back().open);
+	const auto &daily = _stock_market.daily[t];
+	if (daily.size() >= 30 && daily[daily.size() - 30].close > 0) {
+		in.has_trend30 = true;
+		in.trend30_ppm = Ppm(price - daily[daily.size() - 30].close, daily[daily.size() - 30].close);
+	}
+	if (candles.size() >= 2) {
+		int64_t sum = 0;
+		int64_t n = 0;
+		for (size_t i = candles.size() - 1; i > 0 && n < 3; i--, n++) sum += candles[i - 1].close;
+		if (n > 0 && sum > 0) in.avg_dev_ppm = Ppm(price * n - sum, sum);
+	}
+
+	in.mood_ppm = _market_events.SentimentPpm(t);
+	const int64_t days = static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes()) / (24 * 60);
+	in.value_error_ppm = retail::BotValueError(BotSeed(), owner.base(), static_cast<int>(t), days / 90, params.value_sigma_ppm);
+	in.tip_ppm = retail::BotTip(BotSeed(), owner.base(), static_cast<int>(t), days / 7);
+	return in;
+}
+
 /* ------------------------------------------------------------------------------------------------------------------ */
 /* 1 + 2 + 3: the money                                                                                               */
 /* ------------------------------------------------------------------------------------------------------------------ */
@@ -273,6 +336,34 @@ static bool ClosePositionNow(CompanyID owner, uint32_t id)
 	return TryRun([&](DoCommandFlags f) { return CmdStockClose(f, id, volume); });
 }
 
+static void ReviewPosition(CompanyID owner, uint32_t id);
+
+/**
+ * A position of a bot that is not a value trader: the target is a distance from the entry (set when the position was opened), not the valuation.
+ * It is closed when its own opinion turns (the score crosses the exit level), when it is held too long or when the company turned bad; the
+ * trailing stop is switched on and the Take Profit stays where it was.
+ */
+static void ReviewStyledPosition(CompanyID owner, const StockOrder &p, const retail::BotParams &params)
+{
+	const CompanyID target{p.target};
+	const bool buy = IsStockBuy(p.type);
+	const retail::BotView view = retail::BotOpinion(params, InputsOf(owner, target, params));
+	const bool turned = view.valid && (buy ? view.score < -params.exit_ppm : view.score > params.exit_ppm);
+	const bool too_old = p.open_ym != 0 && GetStockCurrentMonth() - p.open_ym >= params.max_hold_months;
+	const StockSummary summary = GetStockSummary(target);
+	const bool turned_bad = buy && params.style != retail::BotStyle::Noise && summary.has_earnings && summary.eps < 0;
+	if (turned || too_old || turned_bad || !view.valid) {
+		ClosePositionNow(owner, p.id);
+		return;
+	}
+	const int64_t trail = std::max<int64_t>(1, p.price * params.stop_ppm / STOCK_PPM);
+	if (p.trail == trail) return;
+	const uint32_t id = p.id;
+	const int64_t sl = p.sl;
+	const int64_t tp = p.tp;
+	TryRun([&](DoCommandFlags f) { return CmdStockModify(f, id, Money(sl), Money(tp), Money(0), Money(trail)); });
+}
+
 /**
  * Look at one open position: close it when the target is reached, when it is held too long or when the company turned bad,
  * otherwise bring the Take Profit to the (moved) valuation and switch the trailing stop on.
@@ -287,6 +378,13 @@ static void ReviewPosition(CompanyID owner, uint32_t id)
 	if ((!valuable && !Company::IsValidID(target)) || _stock_market.price_fp[target.base()] <= 0) return;
 
 	const bool buy = IsStockBuy(p->type);
+	if (!valuable) {
+		const retail::BotParams params = ParamsOf(owner);
+		if (params.style != retail::BotStyle::Value) {
+			ReviewStyledPosition(owner, *p, params);
+			return;
+		}
+	}
 	const int64_t bid = GetStockBid(target);
 	const int64_t ask = GetStockAsk(target);
 	const int64_t fair_fixed = FairFixed(target);
@@ -336,7 +434,8 @@ struct Candidate {
 	CompanyID target{};
 	bool buy = true;
 	int64_t score = 0;       ///< Net edge plus a small tilt for the earnings, in ppm.
-	int64_t fair_fixed = 0;  ///< Valuation price times #STOCK_PRICE_SCALE.
+	int64_t fair_fixed = 0;  ///< Valuation price times #STOCK_PRICE_SCALE (the own idea of it for a value trader).
+	bool styled = false;     ///< A bot that is not a value trader: no valuation target, a Take Profit and a Stop Loss at a distance from the entry.
 };
 
 /** Net gain in ppm of the entry price for a trade at the execution price @p exec, after the exit spread, commission and swap. */
@@ -395,12 +494,14 @@ static void OpenBestTrade(CompanyID owner, uint8_t wallet)
 		if (IsValuableSymbol(p.target)) valuable_positions++;
 		exposure += p.price * static_cast<int64_t>(p.volume);
 	}
-	if (open_positions >= STOCK_AI_MAX_POSITIONS || _stock_market.CountOrders(owner) >= STOCK_MAX_ORDERS_PER_COMPANY) return;
+	const retail::BotParams params = ParamsOf(owner);
+	if (open_positions >= std::min<size_t>(STOCK_AI_MAX_POSITIONS, static_cast<size_t>(params.max_positions)) || _stock_market.CountOrders(owner) >= STOCK_MAX_ORDERS_PER_COMPANY) return;
 
 	const int64_t equity = GetStockEquity(owner, wallet);
 	if (equity <= 0) return;
 	const int64_t room = equity * STOCK_AI_MAX_EXPOSURE_PERCENT / 100 - exposure;
-	const int64_t notional = std::min(room, equity * STOCK_AI_MAX_POSITION_PERCENT / 100);
+	/* The size of one position is part of the style: a noise trader plays small, a momentum trader big. */
+	const int64_t notional = std::min(room, equity * std::min<int64_t>(STOCK_AI_MAX_POSITION_PERCENT, params.risk_percent) / 100);
 	if (notional < STOCK_AI_MIN_NOTIONAL) return;
 
 	Candidate best;
@@ -422,27 +523,50 @@ static void OpenBestTrade(CompanyID owner, uint8_t wallet)
 		for (const StockOrder &p : _stock_market.pending) held = held || (p.owner == owner.base() && p.target == target.base());
 		if (held) continue;
 
-		const int64_t fair_fixed = FairFixed(target);
-		const int64_t drift = valuable ? 0 : EarningsDriftPpm(target);
-		const int64_t trend = TrendPpm(target);
-		const StockSummary summary = valuable ? StockSummary{} : GetStockSummary(target);
-		const int64_t min_edge = valuable ? STOCK_AI_VALUABLE_MIN_EDGE_PPM : STOCK_AI_MIN_EDGE_PPM;
+		if (!valuable) {
+			/* A share: every style has its own opinion (retail::BotOpinion). The strongest conviction is traded. */
+			const retail::BotInputs in = InputsOf(owner, target, params);
+			const retail::BotView view = retail::BotOpinion(params, in);
+			if (!view.valid) continue;
+			const bool value_style = params.style == retail::BotStyle::Value;
+			/* A value trader aims at ITS value: the model value changed by its private error. Others have no price target. */
+			const int64_t own_fair = FairFixed(target) * (STOCK_PPM + in.value_error_ppm) / STOCK_PPM;
+			for (int side = 0; side < 2; side++) {
+				const bool buy = side == 0;
+				if (buy ? (!view.can_long || view.score < params.buy_ppm) : (!STOCK_AI_ALLOW_SHORTS || !view.can_short || view.score > -params.short_ppm)) continue;
+				const int64_t strength = buy ? view.score : -view.score;
+				int64_t score = strength;
+				if (value_style) {
+					const int64_t exec = GetStockExecutionPrice(target, buy, STOCK_AI_MIN_VOLUME);
+					if (exec <= 0 || NetEdgePpm(owner, target, buy, exec, own_fair) < STOCK_AI_MIN_EDGE_PPM) continue;
+				}
+				if (!found || score > best.score) {
+					best = {target, buy, score, own_fair, !value_style};
+					found = true;
+				}
+			}
+			continue;
+		}
 
-		/* The price at which a small order would be executed shows how far the price is from the valuation. */
+		/* A valuable: the single rule. */
+		const int64_t fair_fixed = FairFixed(target);
+		const int64_t drift = 0;
+		const int64_t trend = TrendPpm(target);
+		const int64_t min_edge = STOCK_AI_VALUABLE_MIN_EDGE_PPM;
+
 		for (int side = 0; side < 2; side++) {
 			const bool buy = side == 0;
 			if (!buy && !STOCK_AI_ALLOW_SHORTS) continue;
-			if (buy && ((summary.has_earnings && summary.eps <= 0) || drift < STOCK_AI_BAD_DRIFT_PPM || trend < -STOCK_AI_FALLING_KNIFE_PPM)) continue;
-			if (!buy && (drift > -STOCK_AI_BAD_DRIFT_PPM || trend > STOCK_AI_FALLING_KNIFE_PPM)) continue; // Do not short a share that is about to rise.
+			if (buy && trend < -STOCK_AI_FALLING_KNIFE_PPM) continue;
+			if (!buy && (drift > -STOCK_AI_BAD_DRIFT_PPM || trend > STOCK_AI_FALLING_KNIFE_PPM)) continue;
 
 			const int64_t exec = GetStockExecutionPrice(target, buy, STOCK_AI_MIN_VOLUME);
 			if (exec <= 0) continue;
 			const int64_t edge = NetEdgePpm(owner, target, buy, exec, fair_fixed);
 			if (edge < min_edge) continue;
 
-			const int64_t score = edge + (buy ? drift : -drift) / 4;
-			if (!found || score > best.score) {
-				best = {target, buy, score, fair_fixed};
+			if (!found || edge > best.score) {
+				best = {target, buy, edge, fair_fixed, false};
 				found = true;
 			}
 		}
@@ -456,16 +580,29 @@ static void OpenBestTrade(CompanyID owner, uint8_t wallet)
 	const int64_t best_min_edge = IsValuableSymbol(best.target.base()) ? STOCK_AI_VALUABLE_MIN_EDGE_PPM : STOCK_AI_MIN_EDGE_PPM;
 	while (volume >= STOCK_AI_MIN_VOLUME) {
 		exec = GetStockExecutionPrice(best.target, best.buy, volume);
-		if (exec > 0 && NetEdgePpm(owner, best.target, best.buy, exec, best.fair_fixed) >= best_min_edge) break;
+		if (exec <= 0) { volume /= 2; continue; }
+		if (best.styled) {
+			/* No valuation to protect: only keep the order small enough that its own impact stays under half of the stop distance. */
+			const int64_t move = best.buy ? exec - start_price : start_price - exec;
+			if (move * STOCK_PPM <= start_price * params.stop_ppm / 2) break;
+		} else if (NetEdgePpm(owner, best.target, best.buy, exec, best.fair_fixed) >= best_min_edge) {
+			break;
+		}
 		volume /= 2;
 	}
 	if (volume < STOCK_AI_MIN_VOLUME || exec <= 0) return;
 
-	/* Stop Loss on the wrong side, Take Profit at the valuation (rounded so that it is a real gain). */
-	const int64_t stop_distance = std::max<int64_t>(1, exec * STOCK_AI_STOP_LOSS_PPM / STOCK_PPM);
+	/* Stop Loss on the wrong side. Take Profit: at the valuation for a value trader and for the valuables, at a distance from the entry for the others. */
+	const bool valuable_target = IsValuableSymbol(best.target.base());
+	const int64_t stop_ppm = best.styled ? params.stop_ppm : STOCK_AI_STOP_LOSS_PPM;
+	const int64_t stop_distance = std::max<int64_t>(1, exec * stop_ppm / STOCK_PPM);
 	const int64_t sl = best.buy ? exec - stop_distance : exec + stop_distance;
-	const int64_t tp = best.buy ? best.fair_fixed / STOCK_PRICE_SCALE : (best.fair_fixed + STOCK_PRICE_SCALE - 1) / STOCK_PRICE_SCALE;
-	if (sl <= 0 || (best.buy ? tp <= exec : tp >= exec)) return;
+	int64_t tp = best.buy ? best.fair_fixed / STOCK_PRICE_SCALE : (best.fair_fixed + STOCK_PRICE_SCALE - 1) / STOCK_PRICE_SCALE;
+	if (best.styled && !valuable_target) {
+		const int64_t take_distance = std::max<int64_t>(1, exec * params.take_ppm / STOCK_PPM);
+		tp = best.buy ? exec + take_distance : exec - take_distance;
+	}
+	if (sl <= 0 || tp <= 0 || (best.buy ? tp <= exec : tp >= exec)) return;
 
 	const uint32_t new_id = _stock_market.next_id;
 	const StockOrderType type = best.buy ? StockOrderType::Buy : StockOrderType::Sell;

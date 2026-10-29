@@ -11,8 +11,8 @@
  * Once per game day, at 00:00, the manager
  *   1. counts the savings that the towns put in the market (more when the transport of a town works),
  *   2. forms an opinion about every company: trend following (FOMO) and recent IPOs, dividend yield with a strong balance sheet, and panic,
- *   3. turns the opinions into buy and sell orders of two groups of investors, matches them against each other,
- *      and sends only what is left over to the trading terminal as pressure on the price (StockMarket::ApplyImpact),
+ *   3. turns the opinions into buy and sell orders of FIVE groups of investors (trend chasers, income seekers, bargain hunters, small gamblers,
+ *      passive savers), crosses a part of the meeting orders and sends the rest to the trading terminal group by group (StockMarket::ApplyImpact),
  *   4. pays the dividends of the shares that the retail investors own (the company pays, from its cash),
  *   5. gives the dividends and capital gains back to the towns: they grow faster and want more transport.
  *
@@ -33,10 +33,10 @@
 /** What the retail investors did with one company on the last day. For a later UI, and for tuning. */
 struct RetailCompanyReport {
 	retail::Sentiment sentiment{};    ///< The opinion.
-	int64_t held_shares = 0;          ///< Shares that both groups own together.
+	int64_t held_shares = 0;          ///< Shares that all groups own together.
 	int64_t bought = 0;               ///< Shares bought on the last day (matched ones included).
 	int64_t sold = 0;                 ///< Shares sold on the last day (matched ones included).
-	int64_t matched = 0;              ///< Shares that were bought and sold between the two groups, without any effect on the price.
+	int64_t matched = 0;              ///< Shares that were bought and sold between the groups, without any effect on the price.
 	int64_t net_pressure = 0;         ///< Shares sent to the trading terminal: positive = buying pressure, negative = selling pressure.
 };
 
