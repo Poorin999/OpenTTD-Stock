@@ -150,10 +150,7 @@ void ZoneMarket::UpdateDaily()
 		this->zones[i].parts = fz[i].parts;
 	}
 
-	/* Banknotes earn the policy rate of their zone every game day. */
-	for (auto &row : this->holdings) {
-		for (int i = 0; i < this->count; i++) row[i] += zonemath::DailyInterest(row[i], this->zones[i].policy_ppm);
-	}
+	/* Banknotes earn NO interest (owner 2026-10-29): they are cash. A holder gains or loses only through the exchange rate. The policy rate still moves the rate (capital flows). */
 }
 
 void ZoneRateTrade(int zone, bool buy, uint32_t volume)

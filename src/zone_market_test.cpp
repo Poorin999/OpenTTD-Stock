@@ -326,7 +326,8 @@ int main()
 		CHECK(AfterSpread(1'000'000) == 997'000 && AfterSpread(-1) == 0);
 		const int64_t notes = AfterSpread(NotesForMoney(1'000'000, 1'250'000)), back = AfterSpread(MoneyForNotes(notes, 1'250'000));
 		CHECK(back < 1'000'000 && back > 990'000);                    // a round trip costs about 0.6%
-		CHECK(RateAfterTrade(PPM, true, 10) > PPM && RateAfterTrade(PPM, false, 10) < PPM && RateAfterTrade(PPM, true, 1'000'000'000) == PPM + PPM / 50);
+		CHECK(RateAfterTrade(PPM, true, 10) > PPM && RateAfterTrade(PPM, false, 10) < PPM && RateAfterTrade(PPM, true, 1'000'000'000) == PPM + PPM / 1000 && RateAfterTrade(PPM, false, 1'000'000'000) == PPM - PPM / 1000);
+		CHECK(RateAfterTrade(PPM, true, 100) - PPM <= 200 && RateAfterTrade(PPM, true, 100) > PPM); // 100 units: 0.02%, one player does not move a currency
 		CHECK(RateAfterTrade(RATE_MAX_PPM, true, 1000) == RATE_MAX_PPM);
 	}
 	std::printf("%d checks, %d failed\n", g_checks, g_fail);

@@ -48,10 +48,10 @@ static constexpr int64_t POLICY_MIN_PPM = 0;            ///< The yearly policy r
 static constexpr int64_t POLICY_MAX_PPM = 350'000;      ///< ... and 35%.
 static constexpr int64_t POLICY_START_PPM = 30'000;     ///< A new zone starts with 3% a year.
 static constexpr int64_t POLICY_OVER_INFL_PPM = 10'000; ///< The bank aims for the inflation + 1.0%.
-static constexpr int64_t DAYS_PER_YEAR = 365;           ///< Banknotes earn the policy rate / this every game day.
+static constexpr int64_t DAYS_PER_YEAR = 365;           ///< Days of a year for DailyInterest (banknotes themselves earn NO interest since 2026-10-29: cash does not).
 static constexpr int64_t EXCHANGE_SPREAD_PPM = 3'000;   ///< Buying or selling banknotes costs 0.3%.
-static constexpr int64_t TRADE_STEP_PPM_PER_UNIT = 100; ///< A terminal trade of banknotes moves the rate by this much per unit of volume ...
-static constexpr int64_t TRADE_STEP_MAX_PPM = 20'000;   ///< ... but never more than 2% in one trade.
+static constexpr int64_t TRADE_STEP_PPM_PER_UNIT = 2;   ///< A terminal trade of banknotes moves the rate by this much per unit of volume (0.0002%: the real currency market is deep, one player barely moves it) ...
+static constexpr int64_t TRADE_STEP_MAX_PPM = 1'000;    ///< ... but never more than 0.1% in one trade (was 2%, far too much for a currency market).
 
 struct Pt {
 	int64_t x = 0;
@@ -126,7 +126,7 @@ inline int64_t NextInflation(uint64_t seed, int zone, int64_t day, int64_t infl)
 	return std::clamp<int64_t>(v, INFL_MIN_PPM, INFL_MAX_PPM);
 }
 
-/** What banknotes earn in one game day: notes x policy / DAYS_PER_YEAR, without overflow. */
+/** What a deposit at the policy rate would earn in one game day: notes x policy / DAYS_PER_YEAR, without overflow. Not used for banknotes any more (cash earns nothing); kept for tests and a future deposit product. */
 inline int64_t DailyInterest(int64_t notes, int64_t policy_ppm)
 {
 	if (notes <= 0 || policy_ppm <= 0) return 0;

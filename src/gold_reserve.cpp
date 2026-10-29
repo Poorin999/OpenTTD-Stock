@@ -157,7 +157,7 @@ CreditTier GoldReserveManager::GetCreditTier() const
 }
 
 /**
- * The total spread now, in ppm of the base price: SPREAD_MIN_PPM (0.2%) in a calm market up to SPREAD_MAX_PPM (0.5%).
+ * The total spread now, in ppm of the base price: SPREAD_MIN_PPM (1.5%) in a calm market up to SPREAD_MAX_PPM (4%).
  * Stress = 60% the demand pressure of the companies (heavy buying or selling) + 40% the inflation of the game. Integer maths only.
  */
 int64_t GoldReserveManager::ComputeSpreadPpm() const

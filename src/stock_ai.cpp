@@ -340,13 +340,15 @@ struct Candidate {
 };
 
 /** Net gain in ppm of the entry price for a trade at the execution price @p exec, after the exit spread, commission and swap. */
-static int64_t NetEdgePpm(CompanyID target, bool buy, int64_t exec, int64_t fair_fixed)
+static int64_t NetEdgePpm(CompanyID owner, CompanyID target, bool buy, int64_t exec, int64_t fair_fixed)
 {
 	const int64_t spread_fixed = std::max<int64_t>(0, GetStockAsk(target) - GetStockBid(target)) * STOCK_PRICE_SCALE;
 	const int64_t exec_fixed = exec * STOCK_PRICE_SCALE;
 	/* A long position is closed at the Bid, which is half a spread below the valuation; a short one at the Ask, half a spread above it. */
 	const int64_t gain_fixed = buy ? (fair_fixed - spread_fixed / 2 - exec_fixed) : (exec_fixed - fair_fixed - spread_fixed / 2);
-	return Ppm(gain_fixed, exec_fixed) - STOCK_COMMISSION_PPM - STOCK_SWAP_PPM_PER_DAY * STOCK_AI_EXPECTED_HOLD_DAYS;
+	/* The swap follows the central bank (a long position) or the borrow fee of the shares (a short position): ask the market what it costs now. */
+	const int64_t swap_ppm_per_day = GetStockSwapBpNow(owner, target.base(), buy) * STOCK_PPM / BANK_INTEREST_DIVISOR;
+	return Ppm(gain_fixed, exec_fixed) - STOCK_COMMISSION_PPM - swap_ppm_per_day * STOCK_AI_EXPECTED_HOLD_DAYS;
 }
 
 /** Real gold in the company vault: sell half when the price is high, buy up to a target share of the own capital when it is low. */
@@ -435,7 +437,7 @@ static void OpenBestTrade(CompanyID owner, uint8_t wallet)
 
 			const int64_t exec = GetStockExecutionPrice(target, buy, STOCK_AI_MIN_VOLUME);
 			if (exec <= 0) continue;
-			const int64_t edge = NetEdgePpm(target, buy, exec, fair_fixed);
+			const int64_t edge = NetEdgePpm(owner, target, buy, exec, fair_fixed);
 			if (edge < min_edge) continue;
 
 			const int64_t score = edge + (buy ? drift : -drift) / 4;
@@ -454,7 +456,7 @@ static void OpenBestTrade(CompanyID owner, uint8_t wallet)
 	const int64_t best_min_edge = IsValuableSymbol(best.target.base()) ? STOCK_AI_VALUABLE_MIN_EDGE_PPM : STOCK_AI_MIN_EDGE_PPM;
 	while (volume >= STOCK_AI_MIN_VOLUME) {
 		exec = GetStockExecutionPrice(best.target, best.buy, volume);
-		if (exec > 0 && NetEdgePpm(best.target, best.buy, exec, best.fair_fixed) >= best_min_edge) break;
+		if (exec > 0 && NetEdgePpm(owner, best.target, best.buy, exec, best.fair_fixed) >= best_min_edge) break;
 		volume /= 2;
 	}
 	if (volume < STOCK_AI_MIN_VOLUME || exec <= 0) return;

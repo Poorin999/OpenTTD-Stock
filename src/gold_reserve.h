@@ -62,8 +62,8 @@ struct GoldReserveManager {
 	static constexpr int64_t START_BACKING_PERCENT = 80;    ///< The central bank starts with gold worth 80% of the notes in circulation (US 1950: gold 22.7 bn against 27.7 bn money in circulation, about 82%; was 8%).
 	static constexpr bool BACKING_COUNTS_COMPANY_GOLD = false; ///< false: only the gold of the central bank backs the notes (a company cannot buy a better credit standing for everybody); true: the old rule, the gold of the companies counts too.
 	static constexpr int64_t MARKET_STOCK_START = 1000 * OUNCES_PER_TON; ///< Ounces that the market has for sale at the start: 1000 metric tons (32,151,000 oz). Buying takes from it, selling gives back.
-	static constexpr int64_t SPREAD_MIN_PPM = 2000;         ///< Smallest total spread: 0.2% of the base price (calm market, low inflation).
-	static constexpr int64_t SPREAD_MAX_PPM = 5000;         ///< Largest total spread: 0.5% (heavy buying or selling, high inflation).
+	static constexpr int64_t SPREAD_MIN_PPM = 15000;        ///< Smallest total spread: 1.5% of the base price (calm market, low inflation). Was 0.2% until 2026-10-29: real gold in a vault (bars, coins) is bought from a dealer at a premium over the spot price and sold back at a discount, far wider than a trading screen.
+	static constexpr int64_t SPREAD_MAX_PPM = 40000;        ///< Largest total spread: 4.0% (heavy buying or selling, high inflation). Was 0.5%.
 	static constexpr int64_t COMMISSION_PPM = 1000;         ///< Commission: 0.1% of the value of the order.
 	static constexpr int64_t COMMISSION_MIN = 100;          ///< Smallest commission of one order, in money units (applies to small orders).
 	static constexpr int64_t OUNCES_PER_DELIVERED_UNIT = 800;  ///< Gold or valuables delivered to a station: one unit of cargo (one bag) adds at most this many ounces to the market stock (was 5 with a start stock of 200,000 oz; scaled 160x with the 1000 ton start stock). The real yield falls as the stock fills, see MineYieldPpm.

@@ -34,6 +34,7 @@
 #include <optional>
 #include <string>
 #include "command_func.h"
+#include "wallet_cmd.h" /* CMD_ZONE_EXCHANGE (buy / sell banknotes) */
 #include "company_base.h"
 #include "company_cmd.h"
 #include "company_func.h"
@@ -74,6 +75,7 @@ bool _company_info_use_original = false;
 /* ------------------------------------------------------------------------------------------------------------------------------------ */
 
 void ShowCompanyPermitWindow(CompanyID company); /* below: the permits tab */
+void ShowCompanyBanknoteWindow(CompanyID company); /* below: the banknotes tab */
 
 namespace {
 
@@ -163,15 +165,16 @@ int InfoRow()
 }
 
 /** The texts of the tabs and of the buttons (Thai / English). Shared by the size calculation and by the drawing. */
-const char *const TAB_TH[5] = {"ข้อมูลบริษัท", "การเงิน", "ยานพาหนะ", "โครงสร้างพื้นฐาน", "ใบอนุญาต"};
-const char *const TAB_EN[5] = {"Company", "Finance", "Vehicles", "Infrastructure", "Permits"};
+constexpr int NUM_TABS = 6; ///< Company, Finance, Vehicles, Infrastructure, Permits, Banknotes.
+const char *const TAB_TH[NUM_TABS] = {"ข้อมูลบริษัท", "การเงิน", "ยานพาหนะ", "โครงสร้างพื้นฐาน", "ใบอนุญาต", "ซื้อธนบัตร"};
+const char *const TAB_EN[NUM_TABS] = {"Company", "Finance", "Vehicles", "Infrastructure", "Permits", "Banknotes"};
 const char *const BTN_TH[4] = {"เปลี่ยนชื่อบริษัท", "ชื่อประธาน", "ซื้อหุ้น", "IPO บริษัท"};
 const char *const BTN_EN[4] = {"Rename company", "President name", "Stocks", "Company IPO"};
 constexpr int BTN_IPO = 3; ///< Index of the IPO button (orange).
 
 /** All the rectangles of the window, from the rectangle of the panel. Draw and click use the same numbers. */
 struct InfoLayout {
-	Rect tabs[5];
+	Rect tabs[NUM_TABS];
 	Rect date;
 	Rect profile, ops, chart, colours;
 	Rect face, face_btn, hq_btn, net_box;
@@ -208,9 +211,9 @@ InfoLayout MakeInfoLayout(const Rect &r, int net_text_w)
 
 	/* The tabs (as wide as their text) and the date. */
 	const int tab_h = std::max(ScaleGUITrad(22), fh + ScaleGUITrad(10));
-	const int tab_min[5] = {92, 72, 86, 116, 86};
+	const int tab_min[NUM_TABS] = {92, 72, 86, 116, 86, 100};
 	int x = left;
-	for (int i = 0; i < 5; i++) {
+	for (int i = 0; i < NUM_TABS; i++) {
 		const int w = std::max(ScaleGUITrad(tab_min[i]), static_cast<int>(GetStringBoundingBox(CiText(TAB_TH[i], TAB_EN[i])).width) + ScaleGUITrad(24));
 		l.tabs[i] = {x, y, x + w, y + tab_h};
 		x += w + ScaleGUITrad(4);
@@ -255,7 +258,7 @@ InfoLayout MakeInfoLayout(const Rect &r, int net_text_w)
 	const int footer_h = fh + ScaleGUITrad(6);
 
 	/* The smallest size. */
-	l.needed_w = 2 * pad + std::max({tabs_w, pad + face_col + pad + mid_min_w + pad + net_w + pad, 8 * sw_min_w + 7 * sw_gap + 2 * pad, 4 * btn_min_w + 3 * btn_gap, ScaleGUITrad(640)});
+	l.needed_w = 2 * pad + std::max({tabs_w, pad + face_col + pad + mid_min_w + pad + net_w + pad, 8 * sw_min_w + 7 * sw_gap + 2 * pad, 4 * btn_min_w + 3 * btn_gap, ScaleGUITrad(780)});
 	l.needed_h = pad + tab_h + gap + profile_h + gap + row2_min + gap + col_h + gap + btn_h + ScaleGUITrad(6) + footer_h + pad;
 
 	/* The rest of the height (when the window is bigger) goes to the row of the chart. */
@@ -424,7 +427,7 @@ struct CompanyInfoWindow : Window {
 		const PixelColour box_fill = GetColourGradient(COLOUR_GREY, SHADE_NORMAL);
 
 		/* Tabs and date. */
-		for (int i = 0; i < 5; i++) {
+		for (int i = 0; i < NUM_TABS; i++) {
 			DrawButton(l.tabs[i], CiText(TAB_TH[i], TAB_EN[i]), i == 0 ? GetColourGradient(COLOUR_YELLOW, SHADE_DARK) : box_fill, i == 0 ? TC_BLACK : TC_WHITE);
 		}
 		DrawString(l.date.left, l.date.right, l.date.top + (l.date.bottom - l.date.top + 1 - GetCharacterHeight(FS_NORMAL)) / 2, GetString(STR_JUST_DATE_LONG, TimerGameCalendar::date), TC_WHITE, SA_RIGHT);
@@ -668,6 +671,7 @@ struct CompanyInfoWindow : Window {
 		if (InRect(l.tabs[2], pt)) { this->OpenVehicleList(); return; }
 		if (InRect(l.tabs[3], pt)) { ShowCompanyInfrastructureOfMod(this->company); return; }
 		if (InRect(l.tabs[4], pt)) { ShowCompanyPermitWindow(this->company); return; }
+		if (InRect(l.tabs[5], pt)) { ShowCompanyBanknoteWindow(this->company); return; }
 
 		/* Face and headquarters: only the original window can do these. */
 		if (InRect(l.face_btn, pt)) {
@@ -761,7 +765,7 @@ constexpr std::initializer_list<NWidgetPart> _nested_company_info_widgets = {
 		NWidget(WWT_SHADEBOX, COLOUR_GREY),
 		NWidget(WWT_STICKYBOX, COLOUR_GREY),
 	EndContainer(),
-	NWidget(WWT_PANEL, COLOUR_GREY, WID_CIW_PANEL), SetMinimalSize(640, 520), SetFill(1, 1), SetResize(1, 1),
+	NWidget(WWT_PANEL, COLOUR_GREY, WID_CIW_PANEL), SetMinimalSize(780, 520), SetFill(1, 1), SetResize(1, 1),
 	EndContainer(),
 	NWidget(NWID_HORIZONTAL),
 		NWidget(WWT_PANEL, COLOUR_GREY), SetFill(1, 0), SetResize(1, 0),
@@ -783,7 +787,7 @@ constexpr int CI_PERMIT_WINDOW_BASE = 200100;
 
 /** The rectangles of the permit window. Same tabs and same card style as the company window. */
 struct PermitLayout {
-	Rect tabs[5];
+	Rect tabs[NUM_TABS];
 	Rect date;
 	Rect card;
 	Rect rows[zonemath::MAX_ZONES];
@@ -807,9 +811,9 @@ PermitLayout MakePermitLayout(const Rect &r)
 	int y = r.top + pad;
 
 	const int tab_h = std::max(ScaleGUITrad(22), fh + ScaleGUITrad(10));
-	const int tab_min[5] = {92, 72, 86, 116, 86};
+	const int tab_min[NUM_TABS] = {92, 72, 86, 116, 86, 100};
 	int x = left;
-	for (int i = 0; i < 5; i++) {
+	for (int i = 0; i < NUM_TABS; i++) {
 		const int w = std::max(ScaleGUITrad(tab_min[i]), static_cast<int>(GetStringBoundingBox(CiText(TAB_TH[i], TAB_EN[i])).width) + ScaleGUITrad(24));
 		l.tabs[i] = {x, y, x + w, y + tab_h};
 		x += w + ScaleGUITrad(4);
@@ -881,7 +885,7 @@ struct CompanyPermitWindow : Window {
 		const int row = InfoRow();
 
 		/* Tabs and date: the same as the company window, the permits tab is the lit one. */
-		for (int i = 0; i < 5; i++) {
+		for (int i = 0; i < NUM_TABS; i++) {
 			CompanyInfoWindow::DrawButton(l.tabs[i], CiText(TAB_TH[i], TAB_EN[i]), i == 4 ? GetColourGradient(COLOUR_YELLOW, SHADE_DARK) : box_fill, i == 4 ? TC_BLACK : TC_WHITE);
 		}
 		DrawString(l.date.left, l.date.right, l.date.top + (l.date.bottom - l.date.top + 1 - GetCharacterHeight(FS_NORMAL)) / 2, GetString(STR_JUST_DATE_LONG, TimerGameCalendar::date), TC_WHITE, SA_RIGHT);
@@ -947,6 +951,7 @@ struct CompanyPermitWindow : Window {
 			return;
 		}
 		if (InRect(l.tabs[3], pt)) { ShowCompanyInfrastructureOfMod(this->company); return; }
+		if (InRect(l.tabs[5], pt)) { ShowCompanyBanknoteWindow(this->company); return; }
 		/* tabs[4] is this window. */
 
 		if (!this->IsMine() || CompanyNeedsHq(this->company)) return;
@@ -968,6 +973,232 @@ WindowDesc _company_permit_desc(
 	_nested_company_info_widgets
 );
 
+
+/** The window number of the banknote window of a company inside WC_CENTRAL_BANK (company windows 200000 +, permit windows 200100 +, banknote windows 200200 + the company). */
+constexpr int CI_BANKNOTE_WINDOW_BASE = 200200;
+constexpr int BN_BUTTONS = 4; ///< Per zone: buy 10%, buy 50%, sell 50%, sell all.
+
+/** The rectangles of the banknote window. Same tabs and same card style as the company window. */
+struct BanknoteLayout {
+	Rect tabs[NUM_TABS];
+	Rect date;
+	Rect card;
+	Rect rows[zonemath::MAX_ZONES];
+	Rect btns[zonemath::MAX_ZONES][BN_BUTTONS];
+	Rect footer;
+	int hdr = 0;
+	int pad = 0;
+};
+
+BanknoteLayout MakeBanknoteLayout(const Rect &r)
+{
+	BanknoteLayout l;
+	const int pad = ScaleGUITrad(8);
+	const int gap = ScaleGUITrad(8);
+	const int fh = GetCharacterHeight(FS_NORMAL);
+	const int row = InfoRow();
+	l.pad = pad;
+	l.hdr = std::max(ScaleGUITrad(18), fh + ScaleGUITrad(6));
+	const int left = r.left + pad;
+	const int right = r.right - pad;
+	int y = r.top + pad;
+
+	const int tab_h = std::max(ScaleGUITrad(22), fh + ScaleGUITrad(10));
+	const int tab_min[NUM_TABS] = {92, 72, 86, 116, 86, 100};
+	int x = left;
+	for (int i = 0; i < NUM_TABS; i++) {
+		const int w = std::max(ScaleGUITrad(tab_min[i]), static_cast<int>(GetStringBoundingBox(CiText(TAB_TH[i], TAB_EN[i])).width) + ScaleGUITrad(24));
+		l.tabs[i] = {x, y, x + w, y + tab_h};
+		x += w + ScaleGUITrad(4);
+	}
+	const int date_w = std::max<int>(ScaleGUITrad(170), GetStringBoundingBox(GetString(STR_JUST_DATE_LONG, TimerGameCalendar::date)).width + ScaleGUITrad(8));
+	l.date = {std::max(x, right - date_w), y, right, y + tab_h};
+	y += tab_h + gap;
+
+	/* One row per zone: three text lines on the left, four buttons (two by two) on the right. */
+	const int btn_h = std::max(ScaleGUITrad(26), fh + ScaleGUITrad(10));
+	const int btn_w = ScaleGUITrad(116);
+	const int bgap = ScaleGUITrad(6);
+	const int row_h = std::max(2 * btn_h + 3 * bgap, 3 * row + ScaleGUITrad(10));
+	const int card_h = l.hdr + pad + zonemath::MAX_ZONES * (row_h + ScaleGUITrad(4)) + pad;
+	l.card = {left, y, right, y + card_h};
+	int ry = l.card.top + l.hdr + pad;
+	for (int i = 0; i < zonemath::MAX_ZONES; i++) {
+		l.rows[i] = {l.card.left + pad, ry, l.card.right - pad, ry + row_h};
+		const int bx2 = l.rows[i].right - ScaleGUITrad(6) - btn_w;
+		const int bx1 = bx2 - bgap - btn_w;
+		const int by1 = ry + (row_h - (2 * btn_h + bgap)) / 2;
+		const int by2 = by1 + btn_h + bgap;
+		l.btns[i][0] = {bx1, by1, bx1 + btn_w, by1 + btn_h}; // buy 10%
+		l.btns[i][1] = {bx2, by1, bx2 + btn_w, by1 + btn_h}; // buy 50%
+		l.btns[i][2] = {bx1, by2, bx1 + btn_w, by2 + btn_h}; // sell 50%
+		l.btns[i][3] = {bx2, by2, bx2 + btn_w, by2 + btn_h}; // sell all
+		ry += row_h + ScaleGUITrad(4);
+	}
+	y += card_h + gap;
+	l.footer = {left, y, right, y + 3 * row};
+	return l;
+}
+
+/** The price of one banknote as text: 1.0234 (the rate is in ppm). */
+std::string BnRateText(int64_t rate_ppm)
+{
+	return fmt::format("{}.{:04}", rate_ppm / zonemath::PPM, (rate_ppm % zonemath::PPM) / 100);
+}
+
+/** A yearly rate in ppm as a percent with two decimals: 3.00%. */
+std::string BnPercentText(int64_t ppm)
+{
+	const int64_t a = ppm < 0 ? -ppm : ppm;
+	return fmt::format("{}{}.{:02}%", ppm < 0 ? "-" : "", a / 10000, (a % 10000) / 100);
+}
+
+/** The banknotes tab: for every zone the price of a note, what the company holds and what it is worth, and buttons to buy (10% / 50% of the unborrowed cash) or sell (50% / all). */
+struct CompanyBanknoteWindow : Window {
+	CompanyID company;
+
+	const IntervalTimer<TimerWindow> redraw_interval = {std::chrono::milliseconds(250), [this](auto) {
+		if (!Company::IsValidID(this->company)) {
+			this->Close();
+			return;
+		}
+		this->SetDirty();
+	}};
+
+	CompanyBanknoteWindow(WindowDesc &desc, CompanyID c) : Window(desc), company(c)
+	{
+		this->InitNested(CI_BANKNOTE_WINDOW_BASE + static_cast<int>(c.base()));
+	}
+
+	bool IsMine() const
+	{
+		return Company::IsValidID(this->company) && this->company == _local_company;
+	}
+
+	/** The notes that this company holds of a zone. */
+	int64_t Held(int zone) const
+	{
+		if (zone < 0 || zone >= zonemath::MAX_ZONES) return 0;
+		return _zone_market.holdings[this->company.base()][zone];
+	}
+
+	std::string GetWidgetString(WidgetID widget, StringID stringid) const override
+	{
+		if (widget == WID_CIW_CAPTION) {
+			if (!Company::IsValidID(this->company)) return std::string();
+			return fmt::format("{} ({} {}) - {}", GetString(STR_STOCK_SYMBOL, this->company), CiText("บริษัท", "Company"), this->company.base() + 1, CiText("ซื้อธนบัตร", "Banknotes"));
+		}
+		return this->Window::GetWidgetString(widget, stringid);
+	}
+
+	void OnInvalidateData([[maybe_unused]] int data = 0, [[maybe_unused]] bool gui_scope = true) override
+	{
+		this->SetDirty();
+	}
+
+	void DrawWidget(const Rect &r, WidgetID widget) const override
+	{
+		if (widget != WID_CIW_PANEL) return;
+		if (!Company::IsValidID(this->company)) return;
+		const BanknoteLayout l = MakeBanknoteLayout(r);
+		const PixelColour box_fill = GetColourGradient(COLOUR_GREY, SHADE_NORMAL);
+		const int row = InfoRow();
+
+		/* Tabs and date: the same as the company window, the banknotes tab is the lit one. */
+		for (int i = 0; i < NUM_TABS; i++) {
+			CompanyInfoWindow::DrawButton(l.tabs[i], CiText(TAB_TH[i], TAB_EN[i]), i == 5 ? GetColourGradient(COLOUR_YELLOW, SHADE_DARK) : box_fill, i == 5 ? TC_BLACK : TC_WHITE);
+		}
+		DrawString(l.date.left, l.date.right, l.date.top + (l.date.bottom - l.date.top + 1 - GetCharacterHeight(FS_NORMAL)) / 2, GetString(STR_JUST_DATE_LONG, TimerGameCalendar::date), TC_WHITE, SA_RIGHT);
+
+		const int home = _zone_market.ZoneOfCompany(this->company);
+		const int64_t cash = std::max<int64_t>(0, GetUnborrowedLiquidCash(this->company));
+		CompanyInfoWindow::DrawCard(l.card, l.hdr, CiText("ซื้อ-ขายธนบัตรของแต่ละโซน", "Buy and sell banknotes of each zone"),
+			fmt::format("{} {}", CiText("เงินสดที่ใช้ได้", "Usable cash"), CiMoney(cash)));
+
+		for (int i = 0; i < zonemath::MAX_ZONES; i++) {
+			const Rect &rw = l.rows[i];
+			GfxFillRect(rw.left, rw.top, rw.right, rw.bottom, GetColourGradient(COLOUR_GREY, SHADE_DARK));
+			const int tx = rw.left + ScaleGUITrad(8);
+			if (i >= _zone_market.count) {
+				DrawString(tx, rw.right - ScaleGUITrad(8), rw.top + ScaleGUITrad(5), fmt::format("{} {}", CiText("โซน", "Zone"), i + 1), TC_GREY, SA_LEFT);
+				DrawString(tx, rw.right - ScaleGUITrad(8), rw.top + ScaleGUITrad(5) + row, CiText("ยังไม่มีโซนนี้", "This zone does not exist"), TC_GREY, SA_LEFT);
+				continue;
+			}
+			const ZoneState &z = _zone_market.zones[i];
+			const int64_t held = this->Held(i);
+			const int64_t value = zonemath::AfterSpread(zonemath::MoneyForNotes(held, z.rate_ppm)); // what a sale would pay now
+			const int tr = l.btns[i][0].left - ScaleGUITrad(8);
+
+			DrawString(tx, tr, rw.top + ScaleGUITrad(5), fmt::format("{} {} · {} · {} = {}{}", CiText("โซน", "Zone"), i + 1, ZoneCurrencyName(i),
+				CiText("ราคา 1 ใบ", "1 note"), BnRateText(z.rate_ppm), i == home ? CiText(" · โซนบ้าน", " · home zone") : std::string()), TC_YELLOW, SA_LEFT);
+			DrawString(tx, tr, rw.top + ScaleGUITrad(5) + row, fmt::format("{} {} {} · {} {}", CiText("ถืออยู่", "Held"), GetString(STR_JUST_COMMA, held), CiText("ใบ", "notes"), CiText("ขายได้ประมาณ", "worth about"), CiMoney(value)), held > 0 ? TC_WHITE : TC_GREY, SA_LEFT);
+			DrawString(tx, tr, rw.top + ScaleGUITrad(5) + 2 * row, fmt::format("{} {} · {} {}", CiText("ดอกเบี้ยนโยบาย", "Policy rate"), BnPercentText(z.policy_ppm), CiText("เงินเฟ้อ", "Inflation"), BnPercentText(z.inflation_ppm)), TC_GREY, SA_LEFT);
+
+			const bool can_buy = this->IsMine() && cash > 0;
+			const bool can_sell = this->IsMine() && held > 0;
+			CompanyInfoWindow::DrawButton(l.btns[i][0], CiText("ซื้อ 10%", "Buy 10%"), box_fill, TC_WHITE, can_buy);
+			CompanyInfoWindow::DrawButton(l.btns[i][1], CiText("ซื้อ 50%", "Buy 50%"), box_fill, TC_WHITE, can_buy);
+			CompanyInfoWindow::DrawButton(l.btns[i][2], CiText("ขาย 50%", "Sell 50%"), box_fill, TC_WHITE, can_sell);
+			CompanyInfoWindow::DrawButton(l.btns[i][3], CiText("ขายทั้งหมด", "Sell all"), box_fill, TC_WHITE, can_sell);
+		}
+
+		DrawString(l.footer.left, l.footer.right, l.footer.top, CiText("ซื้อด้วยเงินสดที่ไม่ได้กู้เท่านั้น (% คิดจากเงินสดที่ใช้ได้) · ค่าธรรมเนียมซื้อหรือขาย 0.3%", "Bought with unborrowed cash only (% of the usable cash) · 0.3% spread on a buy or a sell"), TC_WHITE, SA_LEFT);
+		DrawString(l.footer.left, l.footer.right, l.footer.top + row, CiText("ธนบัตรไม่มีดอกเบี้ย กำไรหรือขาดทุนมาจากราคาที่เปลี่ยนเท่านั้น", "Banknotes pay no interest: you gain or lose only when the price moves"), TC_GREY, SA_LEFT);
+		DrawString(l.footer.left, l.footer.right, l.footer.top + 2 * row, CiText("ราคาตามอัตราแลกเปลี่ยนจริงของโซน (ดอกเบี้ยธนาคารกลาง เงินเฟ้อ การค้า ข่าว) ซื้อขายหนึ่งครั้งขยับราคาได้น้อยมาก", "The price follows the real rate of the zone (policy rates, inflation, trade, news); one trade barely moves it"), TC_GREY, SA_LEFT);
+	}
+
+	void OnClick(Point pt, WidgetID widget, [[maybe_unused]] int click_count) override
+	{
+		if (widget != WID_CIW_PANEL) return;
+		if (!Company::IsValidID(this->company)) return;
+		const BanknoteLayout l = MakeBanknoteLayout(this->GetWidget<NWidgetBase>(WID_CIW_PANEL)->GetCurrentRect());
+
+		if (InRect(l.tabs[0], pt)) { ShowCompanyInfoWindow(this->company); return; }
+		if (InRect(l.tabs[1], pt)) { ShowCompanyFinances(this->company); return; }
+		if (InRect(l.tabs[2], pt)) {
+			const VehicleStats vs = CollectVehicles(this->company);
+			VehicleType type = VEH_ROAD;
+			if (vs.count[1] == 0) {
+				if (vs.count[0] > 0) type = VEH_TRAIN;
+				else if (vs.count[2] > 0) type = VEH_SHIP;
+				else if (vs.count[3] > 0) type = VEH_AIRCRAFT;
+			}
+			ShowVehicleListWindow(this->company, type);
+			return;
+		}
+		if (InRect(l.tabs[3], pt)) { ShowCompanyInfrastructureOfMod(this->company); return; }
+		if (InRect(l.tabs[4], pt)) { ShowCompanyPermitWindow(this->company); return; }
+		/* tabs[5] is this window. */
+
+		if (!this->IsMine()) return;
+		for (int i = 0; i < _zone_market.count && i < zonemath::MAX_ZONES; i++) {
+			for (int b = 0; b < BN_BUTTONS; b++) {
+				if (!InRect(l.btns[i][b], pt)) continue;
+				const bool sell = b >= 2;
+				int64_t amount = 0;
+				if (!sell) {
+					const int64_t cash = std::max<int64_t>(0, GetUnborrowedLiquidCash(this->company));
+					amount = cash / 100 * (b == 0 ? 10 : 50) + cash % 100 * (b == 0 ? 10 : 50) / 100;
+				} else {
+					const int64_t held = this->Held(i);
+					amount = b == 3 ? held : std::max<int64_t>(1, held / 2);
+				}
+				if (amount <= 0) return;
+				Command<CMD_ZONE_EXCHANGE>::Post(STR_ZONE_EXCHANGE_ERROR, static_cast<uint8_t>(i), sell, Money(amount));
+				this->SetDirty();
+				return;
+			}
+		}
+	}
+};
+
+WindowDesc _company_banknote_desc(
+	WDP_AUTO, "company_banknote", 0, 0,
+	WC_CENTRAL_BANK, WC_NONE,
+	{},
+	_nested_company_info_widgets
+);
+
 } // namespace
 
 void ShowCompanyPermitWindow(CompanyID company)
@@ -975,6 +1206,13 @@ void ShowCompanyPermitWindow(CompanyID company)
 	if (!Company::IsValidID(company)) return;
 	if (BringWindowToFrontById(WC_CENTRAL_BANK, CI_PERMIT_WINDOW_BASE + static_cast<int>(company.base())) != nullptr) return;
 	new CompanyPermitWindow(_company_permit_desc, company);
+}
+
+void ShowCompanyBanknoteWindow(CompanyID company)
+{
+	if (!Company::IsValidID(company)) return;
+	if (BringWindowToFrontById(WC_CENTRAL_BANK, CI_BANKNOTE_WINDOW_BASE + static_cast<int>(company.base())) != nullptr) return;
+	new CompanyBanknoteWindow(_company_banknote_desc, company);
 }
 
 void ShowCompanyInfoWindow(CompanyID company)

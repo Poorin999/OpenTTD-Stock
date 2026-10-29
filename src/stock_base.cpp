@@ -315,6 +315,49 @@ int64_t GetStockCommission(int64_t value)
 	return (value * STOCK_COMMISSION_PPM + STOCK_PPM - 1) / STOCK_PPM;
 }
 
+/* At the neutral policy rate the swap that follows the central bank is the old fixed swap: the balance of the game does not change until the rate moves. */
+static_assert((POLICY_NEUTRAL_RATE_BP + STOCK_SWAP_MARKUP_BP) * STOCK_PPM / BANK_INTEREST_DIVISOR == STOCK_SWAP_PPM_PER_DAY, "stock_base.h: swap markup does not match the neutral policy rate");
+
+/**
+ * What it costs to keep a position open for a year, in basis points of its value (the daily charge is this / BANK_INTEREST_DIVISOR of the value).
+ * - A long position in shares, and every position in a valuable (a CFD is financed in both directions): the policy rate of the central bank of
+ *   the owner plus #STOCK_SWAP_MARKUP_BP. When the bank raises the rate, holding positions becomes dearer.
+ * - A short position in shares: a borrow fee, #STOCK_BORROW_BASE_BP plus more the larger the part of the company that is sold short (all players
+ *   together), at most #STOCK_BORROW_MAX_BP. Heavily shorted shares are hard to borrow.
+ * Integer maths only, the same on every client.
+ * @param owner Company that holds the position (its central bank sets the rate).
+ * @param symbol Symbol that is traded.
+ * @param long_position True for a long position.
+ * @param short_volume Shares of this symbol that all players together have sold short (only used for a short position in shares).
+ * @return Basis points a year, 0 or more.
+ */
+static int64_t StockSwapBp(CompanyID owner, size_t symbol, bool long_position, int64_t short_volume)
+{
+	if (!long_position && !IsValuableSymbol(symbol)) {
+		const int64_t extra = short_volume * 100 * STOCK_BORROW_BP_PER_SHORT_PERCENT / STOCK_SHARES_PER_COMPANY;
+		return std::min<int64_t>(STOCK_BORROW_MAX_BP, STOCK_BORROW_BASE_BP + extra);
+	}
+	return std::max<int64_t>(0, PolicyUpperBp(BankOfCompany(owner).ShiftBp())) + STOCK_SWAP_MARKUP_BP;
+}
+
+/**
+ * The swap of a position that would be opened now, in basis points a year (for the AI traders, which count the cost of holding).
+ * @param owner Company that would hold the position.
+ * @param symbol Symbol that is traded.
+ * @param long_position True for a long position.
+ * @return Basis points a year.
+ */
+int64_t GetStockSwapBpNow(CompanyID owner, size_t symbol, bool long_position)
+{
+	int64_t short_volume = 0;
+	if (!long_position && !IsValuableSymbol(symbol)) {
+		for (const StockOrder &p : _stock_market.positions) {
+			if (p.target == symbol && !IsStockBuy(p.type)) short_volume += p.volume;
+		}
+	}
+	return StockSwapBp(owner, symbol, long_position, short_volume);
+}
+
 /**
  * Floating profit or loss of a position, if it would be closed now.
  * @param position The position.
@@ -764,7 +807,7 @@ std::vector<StockRankEntry> GetStockRanking(StockRankSort sort)
 
 /**
  * Close positions that have reached their Stop Loss or Take Profit.
- * The position is closed exactly at the level that was reached, not at the price the market has moved to since.
+ * A Stop Loss is filled at the market of the moment (it can be worse than the level: slippage and gaps), a Take Profit at its level or better.
  */
 void StockMarket::CheckPositions()
 {
@@ -798,9 +841,18 @@ void StockMarket::CheckPositions()
 			continue;
 		}
 
+		/*
+		 * A Stop Loss that is reached becomes a market order: it is filled at the market of the moment, moved by half of the impact of its own
+		 * size, so it is never better than the level and worse when the price has gapped past it. A Take Profit is a limit order: it is filled
+		 * at its level or better (at the quote, when the price has jumped over the level).
+		 */
+		const bool long_position = IsStockBuy(p.type);
+		const int64_t level = hit_sl ? p.sl : p.tp;
+		const int64_t fill = hit_sl ? GetStockExecutionPrice(target, !long_position, p.volume) : (long_position ? bid : ask);
+
 		/* The position is removed, so the index stays the same for the next one. */
-		this->ClosePosition(i, p.volume, hit_sl ? p.sl : p.tp, hit_sl ? StockCloseReason::StopLoss : StockCloseReason::TakeProfit);
-		NotifyStockEvent(owner, fmt::format("Stock Market: [{}] closed Position #{} at {} price.", GetStockSymbolName(p.target), p.id, hit_sl ? "SL" : "TP"));
+		this->ClosePosition(i, p.volume, fill, hit_sl ? StockCloseReason::StopLoss : StockCloseReason::TakeProfit);
+		NotifyStockEvent(owner, fmt::format("Stock Market: [{}] closed Position #{} at {} (level {}, filled at {}).", GetStockSymbolName(p.target), p.id, hit_sl ? "SL" : "TP", level, fill));
 	}
 }
 
@@ -864,7 +916,8 @@ void StockMarket::CheckMarginCall()
 
 /**
  * Turn pending orders into positions when their price has been reached.
- * The position is opened exactly at the price of the order. The commission is charged now.
+ * A limit order is filled at its price or better (at the quote, when the price has jumped over it); a stop order becomes a market order and is
+ * filled at the market of the moment, moved by half of the impact of its size, so it can be worse than its price. The commission is charged now.
  */
 void StockMarket::CheckPending()
 {
@@ -897,6 +950,13 @@ void StockMarket::CheckPending()
 		this->pending.erase(this->pending.begin() + i);
 
 		const bool buy = IsStockBuy(o.type);
+		switch (o.type) {
+			case StockOrderType::BuyLimit:  o.price = ask; break;  // ask <= the limit: the limit or better.
+			case StockOrderType::SellLimit: o.price = bid; break;  // bid >= the limit: the limit or better.
+			case StockOrderType::BuyStop:
+			case StockOrderType::SellStop:  o.price = GetStockExecutionPrice(target, buy, o.volume); break; // The market of the moment: the stop price or worse.
+			default: break;
+		}
 		o.type = buy ? StockOrderType::Buy : StockOrderType::Sell;
 		o.expiry = 0;
 		o.open_ym = GetStockCurrentMonth();
@@ -922,15 +982,23 @@ void StockMarket::CheckExecutions()
 }
 
 /**
- * Swap (overnight financing): every open position pays a small part of its value every day.
- * The fee of a company is collected and paid at once.
+ * Swap (overnight financing): every open position pays a part of its value every day.
+ * Since 2026-10-29 the rate follows the central bank: a long position pays the policy rate plus a markup, a short position in shares pays a
+ * borrow fee that grows with the part of the company that is sold short (see #StockSwapBp). The fee of a company is collected and paid at once.
  */
 void StockMarket::ChargeSwap()
 {
+	/* Shares that are sold short, per symbol, by all players together: the borrow fee depends on it. */
+	std::array<int64_t, STOCK_SYMBOLS> short_volume{};
+	for (const StockOrder &p : this->positions) {
+		if (p.target < STOCK_SYMBOLS && !IsStockBuy(p.type)) short_volume[p.target] += p.volume;
+	}
+
 	for (const StockOrder &p : this->positions) {
 		if (!Company::IsValidID(CompanyID{p.owner}) || !IsStockSymbolValid(p.target)) continue;
 		const int64_t value = GetStockPrice(CompanyID{p.target}) * static_cast<int64_t>(p.volume);
-		PayStockProfit(CompanyID{p.owner}, p.wallet, -(value * STOCK_SWAP_PPM_PER_DAY / STOCK_PPM), LedgerItem::MarginSwap);
+		const int64_t bp = StockSwapBp(CompanyID{p.owner}, p.target, IsStockBuy(p.type), short_volume[p.target]);
+		PayStockProfit(CompanyID{p.owner}, p.wallet, -(value * bp / BANK_INTEREST_DIVISOR), LedgerItem::MarginSwap);
 	}
 }
 

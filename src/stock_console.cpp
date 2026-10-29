@@ -217,7 +217,7 @@ static bool ConTownWallet(std::span<std::string_view> argv)
 static bool ConZoneExchange(std::span<std::string_view> argv, bool sell)
 {
 	if (argv.size() < 3) {
-		IConsolePrint(CC_HELP, sell ? "Sell banknotes of a money zone for cash. Usage: 'zone_sell <zone 1-4> <notes|all>' (0.3% spread)." : "Buy banknotes of a money zone with cash. Usage: 'zone_buy <zone 1-4> <money>' (0.3% spread). Notes earn the policy rate of the zone every game day.");
+		IConsolePrint(CC_HELP, sell ? "Sell banknotes of a money zone for cash. Usage: 'zone_sell <zone 1-4> <notes|all>' (0.3% spread)." : "Buy banknotes of a money zone with cash. Usage: 'zone_buy <zone 1-4> <money>' (0.3% spread). Notes earn no interest: you gain or lose only by the exchange rate.");
 		return true;
 	}
 	if (!Company::IsValidID(_local_company)) { IConsolePrint(CC_ERROR, "You need a company."); return true; }

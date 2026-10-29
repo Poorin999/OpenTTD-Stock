@@ -26,8 +26,8 @@ static constexpr int64_t STOCK_SHARES_PER_COMPANY = 100'000;
 /** One LOT is this many shares. Volumes are stored in hundredths of a LOT, so one volume unit is exactly one share. */
 static constexpr int64_t STOCK_SHARES_PER_LOT = 100;
 
-/** Largest size of a single order, as a percentage of the shares of a company. */
-static constexpr int64_t STOCK_MAX_ORDER_PERCENT = 100;
+/** Largest size of a single order, as a percentage of the shares of a company. It was 100 by mistake (the comment below and the error text always said 10%): one order could take the whole company. */
+static constexpr int64_t STOCK_MAX_ORDER_PERCENT = 10;
 
 /** Largest volume of a single order, in hundredths of a LOT. 10% of 100,000 shares is 10,000 (100.00 LOT). */
 static constexpr uint32_t STOCK_MAX_VOLUME = static_cast<uint32_t>(STOCK_SHARES_PER_COMPANY * STOCK_MAX_ORDER_PERCENT / 100);
@@ -76,6 +76,22 @@ static constexpr int64_t STOCK_COMMISSION_PPM = 1'000;
 
 /** Swap (overnight financing), charged every game day (24 real minutes) for every open position: parts per million of the value of the position (0.01%). */
 static constexpr int64_t STOCK_SWAP_PPM_PER_DAY = 100;
+
+/**
+ * Swap that follows the central bank (since 2026-10-29). A long position (and every position in a valuable) pays the policy rate of the
+ * central bank of its owner plus this markup, per year in basis points. At the neutral policy rate (3.50%) the sum is 3.65% a year, which is
+ * exactly #STOCK_SWAP_PPM_PER_DAY, so the old balance is kept when the rate has not moved (checked by a static_assert in stock_base.cpp).
+ */
+static constexpr int64_t STOCK_SWAP_MARKUP_BP = 15;
+
+/** Borrow fee of a SHORT position in the shares of a company (it replaces the swap for it): this many basis points a year when nobody else is short ... */
+static constexpr int64_t STOCK_BORROW_BASE_BP = 100;
+
+/** ... plus this many basis points a year for every percent of the shares of the company that all players together have sold short (shares are harder to borrow), ... */
+static constexpr int64_t STOCK_BORROW_BP_PER_SHORT_PERCENT = 50;
+
+/** ... but never more than this (50% a year). */
+static constexpr int64_t STOCK_BORROW_MAX_BP = 5000;
 
 /** Market impact: an order of the full size of the company moves the price by this many times its share of the company. 2 means that an order for 10% of the shares moves the price by 20%. */
 static constexpr int64_t STOCK_IMPACT_FACTOR = 2;
@@ -306,6 +322,7 @@ int64_t GetStockBid(CompanyID company);
 int64_t GetStockAsk(CompanyID company);
 int64_t GetStockExecutionPrice(CompanyID company, bool buy, uint32_t volume);
 int64_t GetStockCommission(int64_t value);
+int64_t GetStockSwapBpNow(CompanyID owner, size_t symbol, bool long_position);
 
 int32_t GetStockCurrentMonth();
 int64_t GetStockReferencePrice(CompanyID company);
