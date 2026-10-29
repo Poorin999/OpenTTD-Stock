@@ -34,6 +34,7 @@
 #include "table/strings.h"
 
 #include <algorithm>
+#include <climits>
 #include <optional>
 #include <set>
 #include <variant>
@@ -140,6 +141,30 @@ int64_t CBankAvailable(uint32_t town, CompanyID company)
 	const int64_t exposure = cbank::LargeExposureLimit(equity) - GetCommercialDebtAt(town, company);
 	const int64_t penalty_pct = lit != _commercial_banks.loans.end() ? BankCreditPercentForPenalty(lit->second.penalty_level) : 100;
 	return std::max<int64_t>(0, std::min({GetCreditPoolRoom(company) * penalty_pct / 100, cbank::Capacity(bit->second.sheet, equity, loans), exposure}));
+}
+
+std::optional<uint32_t> CBankNearestToHQ(CompanyID company)
+{
+	if (!Company::IsValidID(company)) return std::nullopt;
+	const TileIndex hq = Company::Get(company)->location_of_HQ;
+	if (hq == INVALID_TILE) return std::nullopt;
+	const auto zone = BankOfCompany(company).zone;
+	std::optional<uint32_t> best;
+	uint best_dist = 0;
+	for (const auto &[key, b] : _commercial_banks.banks) { // map order: on a tie the lower town index wins, the same on every client
+		const Town *t = TownOf(key);
+		if (t == nullptr || BankOfTile(t->xy).zone != zone) continue;
+		const uint d = DistanceManhattan(hq, t->xy);
+		if (!best.has_value() || d < best_dist) { best = key; best_dist = d; }
+	}
+	return best;
+}
+
+BankAccount CBankAccountOf(uint32_t town, CompanyID company)
+{
+	if (company.base() >= MAX_COMPANIES) return BankAccount{};
+	const auto it = _commercial_banks.loans.find(CBankLoanKey(town, company.base()));
+	return it == _commercial_banks.loans.end() ? BankAccount{} : it->second;
 }
 
 /** The commercial bank lends to its town (see the header). */
@@ -261,12 +286,18 @@ static bool BuildBankBuilding(const Town *t, IndustryType type, int64_t day)
 			for (int dx = -r; dx <= r; dx++) {
 				if (std::max(std::abs(dx), std::abs(dy)) != r || !IsBankSite(cx + dx, cy + dy)) continue;
 				const TileIndex tile = TileXY(cx + dx, cy + dy);
+				if (ClosestTownFromTile(tile, UINT_MAX) != t) continue; // The game would give this bank to the nearer town.
 				const uint32_t seed = static_cast<uint32_t>(t->index.base() * 2654435761u) ^ static_cast<uint32_t>(day * 40503);
 				Backup<CompanyID> cur_company(_current_company, OWNER_DEITY);
+				/* The temperate bank is refused by the game in towns under 1200 people. Every town gets one here, so the population is
+				 * lifted for the check and restored at once (same on every client, nothing else runs in between). */
+				Town *mt = const_cast<Town *>(t);
+				const auto real_population = mt->cache.population;
+				if (mt->cache.population < 1200) mt->cache.population = 1200;
 				const CommandCost test = Command<CMD_BUILD_INDUSTRY>::Do({}, tile, type, 0, true, seed);
-				if (test.Failed()) continue;
-				const CommandCost done = Command<CMD_BUILD_INDUSTRY>::Do(DoCommandFlag::Execute, tile, type, 0, true, seed);
-				if (done.Succeeded()) return true;
+				const bool ok = test.Succeeded() && Command<CMD_BUILD_INDUSTRY>::Do(DoCommandFlag::Execute, tile, type, 0, true, seed).Succeeded();
+				mt->cache.population = real_population;
+				if (ok) return true;
 			}
 		}
 	}

@@ -14,6 +14,7 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include "command_type.h"
 #include "company_type.h"
 #include "economy_type.h"
@@ -57,6 +58,11 @@ int64_t CBankEquity(uint32_t town);                     ///< Assets minus liabil
 int CBankRating(uint32_t town);                         ///< 0 = C ... 4 = AAA.
 int64_t CBankLoanRateBp(uint32_t town, CompanyID company); ///< The rate that the company would pay now.
 int64_t CBankAvailable(uint32_t town, CompanyID company);  ///< How much the company could borrow there now.
+
+/** The commercial bank that a company uses: the one whose town is nearest to its headquarters, inside the money zone of the headquarters. Nothing without a headquarters. */
+std::optional<uint32_t> CBankNearestToHQ(CompanyID company);
+/** The loan account of a company at the bank of a town (an empty account when there is no loan). */
+BankAccount CBankAccountOf(uint32_t town, CompanyID company);
 
 struct TownAccount;
 /**

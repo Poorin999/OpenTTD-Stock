@@ -1,4 +1,4 @@
-STR_CENTRAL_BANK_CAPTION                                        :ธนาคารกลาง (CENTRAL BANK)
+STR_CENTRAL_BANK_CAPTION                                        :ธนาคารพาณิชย์ (COMMERCIAL BANK)
 STR_CENTRAL_BANK_BORROW                                         :กู้ (Borrow)
 STR_CENTRAL_BANK_REPAY                                          :ชำระ (Repay)
 STR_CENTRAL_BANK_REPAY_ALL                                      :ชำระทั้งหมด

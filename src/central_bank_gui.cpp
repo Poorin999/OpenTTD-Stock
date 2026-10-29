@@ -14,6 +14,8 @@
 #include "central_bank.h"
 #include "gold_reserve.h"
 #include "central_bank_gui.h"
+#include "commercial_bank.h"
+#include "town.h"
 #include "tax.h"
 #include "zone_market.h"
 #include "wallet_base.h"
@@ -409,7 +411,7 @@ struct CentralBankWindow : Window {
 		Repay,
 	};
 
-	static constexpr int SUMMARY_ROWS = 11; ///< Rows of the left panel, with room for the two penalty lines.
+	static constexpr int SUMMARY_ROWS = 13; ///< Rows of the left panel, with room for the two penalty lines.
 	static constexpr int SEPARATORS = 4;    ///< Lines between the groups of the left panel.
 	static constexpr int LOG_ROWS = 8;      ///< Lines of the account log that are shown.
 
@@ -453,7 +455,9 @@ struct CentralBankWindow : Window {
 	int64_t GetRepayable() const
 	{
 		if (!Company::IsValidID(_local_company)) return 0;
-		return std::max<int64_t>(0, std::min<int64_t>(GetWalletBalance(_local_company, WALLET_CASH), GetCentralBankDebt(_local_company)));
+		const std::optional<uint32_t> bank = CBankNearestToHQ(_local_company);
+		const int64_t debt = bank.has_value() ? GetCommercialDebtAt(*bank, _local_company) : 0;
+		return std::max<int64_t>(0, std::min<int64_t>(GetWalletBalance(_local_company, WALLET_CASH), debt));
 	}
 
 	void OnPaint() override
@@ -525,10 +529,20 @@ struct CentralBankWindow : Window {
 		}
 
 		const Company *c = Company::Get(_local_company);
-		const BankAccount &a = CentralBank::accounts[_local_company.base()];
-		const int64_t limit = GetCentralBankCreditLimit(_local_company);
-		const int64_t rate_bp = GetCentralBankAnnualRateBp(_local_company);
+		/* The bank of this window is the commercial bank nearest to the headquarters. */
+		const std::optional<uint32_t> bank = CBankNearestToHQ(_local_company);
+		if (!bank.has_value()) {
+			DrawStringMultiLine(left, right, y, r.bottom - ScaleGUITrad(2),
+					CbText("ยังไม่มีธนาคารให้ใช้: สร้างสำนักงานใหญ่ (HQ) ในโซนที่มีธนาคารก่อน", "No bank to use: build a headquarters (HQ) in a zone that has a bank first"), TC_ORANGE, SA_TOP | SA_LEFT);
+			return;
+		}
+		const Town *bank_town = Town::Get(TownID{static_cast<uint16_t>(*bank)});
+		const BankAccount a = CBankAccountOf(*bank, _local_company);
+		const int64_t available = CBankAvailable(*bank, _local_company);
+		const int64_t limit = a.debt + available;
+		const int64_t rate_bp = CBankLoanRateBp(*bank, _local_company);
 		const int64_t per_day = BankDailyInterest(a.debt, rate_bp, a.carry).interest;
+		const int64_t central_debt = GetCentralBankDebt(_local_company);
 
 		auto money = [](int64_t v) { return GetString(STR_JUST_CURRENCY_LONG, v); };
 		auto row = [&](const std::string &label, const std::string &value, TextColour colour = TC_WHITE) {
@@ -541,6 +555,10 @@ struct CentralBankWindow : Window {
 			y += sep_h;
 		};
 
+		/* Group 0: which bank. */
+		row(CbText("ธนาคารพาณิชย์ (ใกล้ HQ)", "Commercial bank (nearest HQ)"), GetString(STR_TOWN_NAME, bank_town->index), TC_LIGHT_BLUE);
+		separator();
+
 		/* Group 1: the cash. */
 		row(CbText("เงินสด", "Cash"), money(static_cast<int64_t>(c->money)), c->money < 0 ? TC_RED : TC_GREEN);
 		separator();
@@ -548,11 +566,12 @@ struct CentralBankWindow : Window {
 		/* Group 2: the money in the trading wallets and the debt. */
 		row(CbText("ยอดเงินฝาก (กระเป๋าเทรด)", "Deposits (trading wallets)"), money(GetWalletsTotal(_local_company)));
 		row(CbText("ยอดเงินกู้คงค้าง", "Outstanding loan"), money(a.debt), a.debt > limit ? TC_RED : TC_ORANGE);
+		if (central_debt > 0) row(CbText("หนี้ธนาคารกลาง (เดิม)", "Central bank loan (old)"), money(central_debt), TC_ORANGE);
 		separator();
 
 		/* Group 3: the credit. */
-		row(CbText("วงเงินสินเชื่อ", "Credit limit"), money(limit));
-		row(CbText("กู้เพิ่มได้อีก", "Can still borrow"), money(GetCentralBankAvailable(_local_company)), TC_GREEN);
+		row(CbText("วงเงินสินเชื่อที่ธนาคารนี้", "Credit limit at this bank"), money(limit));
+		row(CbText("กู้เพิ่มได้อีก", "Can still borrow"), money(available), TC_GREEN);
 		separator();
 
 		/* Group 4: the interest. */
@@ -729,7 +748,14 @@ struct CentralBankWindow : Window {
 
 			case WID_CB_REPAY_ALL: {
 				const int64_t amount = this->GetRepayable();
-				if (amount > 0) Command<CMD_BANK_REPAY>::Post(STR_BANK_ERROR_CANT_REPAY, WALLET_CASH, Money(amount));
+				const std::optional<uint32_t> bank = CBankNearestToHQ(_local_company);
+				if (amount > 0 && bank.has_value()) {
+					Command<CMD_CBANK_REPAY>::Post(STR_CBANK_ERROR_CAPTION, static_cast<uint16_t>(*bank), Money(amount));
+				} else if (!bank.has_value() || GetCommercialDebtAt(*bank, _local_company) == 0) {
+					/* Only an old central bank loan is left: repay it from the cash. */
+					const int64_t old_debt = std::min<int64_t>(GetWalletBalance(_local_company, WALLET_CASH), GetCentralBankDebt(_local_company));
+					if (old_debt > 0) Command<CMD_BANK_REPAY>::Post(STR_BANK_ERROR_CANT_REPAY, WALLET_CASH, Money(old_debt));
+				}
 				break;
 			}
 
@@ -746,11 +772,13 @@ struct CentralBankWindow : Window {
 		double amount = 0;
 		if (!ParseStockNumber(*str, amount) || amount <= 0) return;
 
-		/* Loan money only ever goes to, and is only repaid from, the company cash. */
+		/* Loan money only ever goes to, and is only repaid from, the company cash. The bank is the commercial bank nearest to the headquarters. */
+		const std::optional<uint32_t> bank = CBankNearestToHQ(_local_company);
+		if (!bank.has_value()) return;
 		if (kind == QueryKind::Borrow) {
-			Command<CMD_BANK_BORROW>::Post(STR_BANK_ERROR_CANT_BORROW, WALLET_CASH, Money(StockDisplayToMoney(amount)));
+			Command<CMD_CBANK_BORROW>::Post(STR_CBANK_ERROR_CAPTION, static_cast<uint16_t>(*bank), Money(StockDisplayToMoney(amount)));
 		} else {
-			Command<CMD_BANK_REPAY>::Post(STR_BANK_ERROR_CANT_REPAY, WALLET_CASH, Money(StockDisplayToMoney(amount)));
+			Command<CMD_CBANK_REPAY>::Post(STR_CBANK_ERROR_CAPTION, static_cast<uint16_t>(*bank), Money(StockDisplayToMoney(amount)));
 		}
 	}
 };
