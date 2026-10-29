@@ -7,6 +7,8 @@
  * @file town_wallet_math.h City wallet: a closed money loop for towns (integer maths only, no game headers, so that town_wallet_test.cpp can test it alone).
  *
  * Money of a town comes from four channels and goes out through two:
+ *   WAGES (new): a part of every payment for passengers, mail and consumer cargo flows back into the cash of the citizens (WAGE_SHARE_PERCENT); TAX BACK (new): a part of the land and transport tax
+ *   that is paid for what stands or runs near a town comes from the bank of the zone into its treasury (TAX_BACK_PERCENT). Both keep the money inside the town instead of letting it leave.
  *   IN   1. taxes: the income tax of the citizens (town_treasury.cpp) and a BUSINESS TAX that the town takes from the payment for industrial cargo delivered into it;
  *        2. consumer spending is an OUT: the town PAYS the company for Goods / Food / Water cargo from its treasury (the company gets no more than the town can pay);
  *        3. credit: when the treasury is too small the town sells MUNICIPAL BONDS (bought by the saving citizens, from their cash) and then borrows from the central
@@ -28,6 +30,8 @@ static constexpr int64_t PPM = 1'000'000;
 static constexpr int64_t FARE_CASH_CAP_PERCENT = 25;      ///< One payment for passengers can take at most 25% of the cash of the citizens of the town of origin (they keep the rest; the cash grows again every day).
 static constexpr int64_t MAIL_TREASURY_CAP_PERCENT = 25;  ///< One payment for mail can take at most 25% of the treasury of the town of origin.
 static constexpr int64_t BUSINESS_TAX_PERCENT = 6;        ///< The town takes 6% of the payment for industrial cargo delivered into it (paid by the company, goes to the treasury).
+static constexpr int64_t WAGE_SHARE_PERCENT = 35;         ///< Of every payment that a town makes for passengers, mail or Goods / Food / Water, this share goes back to the citizens as WAGES (drivers, mechanics, station staff); the company keeps the rest. Change here and build again.
+static constexpr int64_t TAX_BACK_PERCENT = 30;           ///< Of the land tax and the transport tax that companies pay for land and vehicles NEAR a town (inside the zone of the tax), this share goes from the bank of the zone to the treasury of that town.
 static constexpr int64_t LOAN_LIMIT_PER_CAPITA = 40;      ///< A town can owe the central bank at most 40 per citizen (money units at price index 1.0).
 static constexpr int64_t BOND_LIMIT_PER_CAPITA = 60;      ///< ... and the citizens at most 60 per citizen in bonds.
 static constexpr int64_t BOND_BUY_PERCENT_OF_CASH = 60;   ///< The saving citizens put at most 60% of their cash into the bonds of their town.
@@ -89,6 +93,11 @@ inline Payment PayIndustrial(int64_t income)
 	p.paid = income - p.tax;
 	return p;
 }
+
+/** The wages inside a payment that the town made (the company is paid `paid - WageOf(paid)`). */
+inline int64_t WageOf(int64_t paid) { return Percent(paid, WAGE_SHARE_PERCENT); }
+/** The part of a land / transport tax that comes back to the treasury of the town. */
+inline int64_t TaxBackOf(int64_t tax) { return Percent(tax, TAX_BACK_PERCENT); }
 
 inline int64_t LoanLimit(int64_t population) { return std::max<int64_t>(0, population) * LOAN_LIMIT_PER_CAPITA; }
 inline int64_t BondLimit(int64_t population) { return std::max<int64_t>(0, population) * BOND_LIMIT_PER_CAPITA; }

@@ -70,6 +70,19 @@ static TownAccount *AccountOfStation(StationID station)
 	return &it->second;
 }
 
+/** Wages: the citizens of the town that paid get a part of the payment back as cash (split by the usual shares of the four groups; the last group takes the rest). */
+static void PayWages(TownAccount &a, int64_t wage)
+{
+	if (wage <= 0) return;
+	int64_t given = 0;
+	for (size_t i = 0; i < citizengold::STYLE_COUNT; i++) {
+		const int64_t part = i + 1 == citizengold::STYLE_COUNT ? wage - given : wage * citizengold::BASE_SHARE_PPM[i] / citizengold::PPM;
+		a.books[i].cash += part;
+		given += part;
+	}
+	a.wages_back += wage;
+}
+
 int64_t TownPayForDelivery(CargoType cargo, StationID source, StationID dest, int64_t income)
 {
 	if (income <= 0 || !IsValidCargoType(cargo) || !Station::IsValidID(dest)) return income;
@@ -84,7 +97,9 @@ int64_t TownPayForDelivery(CargoType cargo, StationID source, StationID dest, in
 			src->treasury -= p.from_town;
 			src->mail_paid += p.paid;
 			src->fare_shortfall += p.shortfall;
-			return p.paid;
+			const int64_t wage = townwallet::WageOf(p.paid); // the company gets the rest, the citizens of the town of origin get the wages
+			PayWages(*src, wage);
+			return p.paid - wage;
 		}
 		int64_t cash = 0;
 		for (const citizengold::Book &b : src->books) cash += std::max<int64_t>(b.cash, 0);
@@ -106,7 +121,9 @@ int64_t TownPayForDelivery(CargoType cargo, StationID source, StationID dest, in
 		const int64_t paid = p.from_town - left;
 		src->fares_paid += paid;
 		src->fare_shortfall += income - paid;
-		return paid;
+		const int64_t wage = townwallet::WageOf(paid);
+		PayWages(*src, wage);
+		return paid - wage;
 	}
 	const Town *t = Station::Get(dest)->town;
 	TownAccount *dst = AccountOfStation(dest); // a village without a treasury: the base game pays
@@ -119,7 +136,9 @@ int64_t TownPayForDelivery(CargoType cargo, StationID source, StationID dest, in
 		a.treasury -= p.from_town;
 		a.goods_paid += p.paid;
 		a.shortfall += p.shortfall;
-		return p.paid;
+		const int64_t wage = townwallet::WageOf(p.paid);
+		PayWages(a, wage);
+		return p.paid - wage;
 	}
 	const townwallet::Payment p = townwallet::PayIndustrial(income);
 	a.treasury += p.tax;

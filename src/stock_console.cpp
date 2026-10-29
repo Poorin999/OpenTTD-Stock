@@ -207,7 +207,7 @@ static bool ConTownWallet(std::span<std::string_view> argv)
 		shown++;
 		const TownID id{static_cast<uint16_t>(key)};
 		const std::string name = Town::IsValidID(id) ? GetString(STR_TOWN_NAME, id) : std::string("-");
-		IConsolePrint(CC_DEFAULT, "{}  treasury {}  loan {}  bonds {}  paid for goods {}  could not pay {}  business tax {}  grants {}  interest paid {}  fares {}  mail {}  unpaid fares/mail {}", name, a.treasury, a.loan_debt, a.bond_debt, a.goods_paid, a.shortfall, a.business_tax, a.grants, a.interest_paid, a.fares_paid, a.mail_paid, a.fare_shortfall);
+		IConsolePrint(CC_DEFAULT, "{}  treasury {}  loan {}  bonds {}  paid for goods {}  could not pay {}  business tax {}  grants {}  interest paid {}  fares {}  mail {}  unpaid fares/mail {}  wages back {}  tax back {}", name, a.treasury, a.loan_debt, a.bond_debt, a.goods_paid, a.shortfall, a.business_tax, a.grants, a.interest_paid, a.fares_paid, a.mail_paid, a.fare_shortfall, a.wages_back, a.tax_back);
 	}
 	IConsolePrint(CC_DEFAULT, "all {} towns: treasuries {}  loans {}  bonds {}  paid for goods {}  could not pay {}  business tax {}  grants {}", order.size(), _town_treasury.GetTotalTreasury(), loans, bonds, paid, lacked, tax, grants);
 	return true;

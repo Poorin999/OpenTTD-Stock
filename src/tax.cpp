@@ -25,6 +25,9 @@
 #include "town.h"
 #include "vehicle_base.h"
 #include "zone_market.h"
+#include "town_treasury.h"
+#include "town_wallet_math.h"
+#include <map>
 #include <vector>
 
 #include "safeguards.h"
@@ -106,7 +109,7 @@ int64_t TakeInvestorTax(CompanyID company, LedgerItem item, int64_t profit)
 }
 
 /** Weight of a tile for the land tax, in 1/100 of a unit; 0 for a tile that the tax does not touch. A town of 10,000 people next to the tile adds +500%. */
-static int64_t LandWeight(Tile tile)
+static int64_t LandWeight(Tile tile, const Town **town_out = nullptr)
 {
 	int64_t base;
 	switch (GetTileType(tile)) {
@@ -117,6 +120,7 @@ static int64_t LandWeight(Tile tile)
 	}
 	int64_t percent = 100;
 	const Town *t = ClosestTownFromTile(static_cast<TileIndex>(tile), 12);
+	if (town_out != nullptr) *town_out = t;
 	if (t != nullptr) percent += std::min<int64_t>(t->cache.population / 20, 500);
 	return base * percent;
 }
@@ -141,6 +145,9 @@ static const GameTimeSubscription _tax_daily(GameTimeEvent::Day, [](const GameTi
 
 	/* Land: the weight of all tiles of every company, per zone, in one pass over the map. */
 	std::array<PerZone, MAX_COMPANIES> land{};
+	/* Tax back to the towns (town_wallet_math.h TAX_BACK_PERCENT): per (town, zone) the weight x tax level of the land near the town, and the same for the vehicles. An ordered map: every client walks it in the same order. */
+	using TownZone = std::pair<uint32_t, int>;
+	std::map<TownZone, int64_t> town_land_raw, town_transport_raw;
 	for (const auto tile : Map::Iterate()) {
 		switch (GetTileType(tile)) {
 			case MP_CLEAR: case MP_RAILWAY: case MP_ROAD: case MP_TUNNELBRIDGE: case MP_WATER: case MP_STATION: case MP_OBJECT: break;
@@ -148,7 +155,11 @@ static const GameTimeSubscription _tax_daily(GameTimeEvent::Day, [](const GameTi
 		}
 		const Owner owner = GetTileOwner(tile);
 		if (!Company::IsValidID(owner)) continue;
-		land[owner.base()][zone_of(static_cast<TileIndex>(tile))] += LandWeight(tile);
+		const Town *near_town = nullptr;
+		const int tile_zone = zone_of(static_cast<TileIndex>(tile));
+		const int64_t weight = LandWeight(tile, &near_town);
+		land[owner.base()][tile_zone] += weight;
+		if (near_town != nullptr && weight > 0 && tile_zone < _zone_market.count) town_land_raw[{near_town->index.base(), tile_zone}] += weight * _zone_market.zones[tile_zone].tax_percent;
 	}
 
 	/* Vehicles: every primary vehicle that is not stopped in a depot; the transport tax counts in the zone where the vehicle is now. */
@@ -164,7 +175,12 @@ static const GameTimeSubscription _tax_daily(GameTimeEvent::Day, [](const GameTi
 			case VEH_AIRCRAFT: rate = TAX_AIRCRAFT_DAY; fuel = cargomarket::FUEL_AIRCRAFT_DAY; break;
 			default: break;
 		}
-		transport[v->owner.base()][zone_of(v->tile)] += rate;
+		const int vehicle_zone = zone_of(v->tile);
+		transport[v->owner.base()][vehicle_zone] += rate;
+		if (vehicle_zone < _zone_market.count) {
+			const Town *vt = ClosestTownFromTile(v->tile, 12);
+			if (vt != nullptr) town_transport_raw[{vt->index.base(), vehicle_zone}] += rate * _zone_market.zones[vehicle_zone].tax_percent;
+		}
 		fuel_base[v->owner.base()] += fuel;
 	}
 
@@ -188,6 +204,21 @@ static const GameTimeSubscription _tax_daily(GameTimeEvent::Day, [](const GameTi
 				_zone_market.zones[z].transport_tax += transport_z;
 			}
 		}
+	}
+
+	/* Tax back: a part of the land and transport tax that was just paid comes from the bank of the zone into the treasury of the town near the land / the vehicles. */
+	std::map<TownZone, int64_t> tax_money;
+	for (const auto &[key, raw] : town_land_raw) tax_money[key] += ScaleByPriceIndex(raw * TAX_LAND_PER_UNIT_DAY / 10'000);
+	for (const auto &[key, raw] : town_transport_raw) tax_money[key] += ScaleByPriceIndex(raw / 100);
+	for (const auto &[key, amount] : tax_money) {
+		auto acc = _town_treasury.accounts.find(key.first);
+		if (acc == _town_treasury.accounts.end() || !acc->second.started) continue; // a village without a treasury: the tax stays with the bank
+		CentralBank &bank = BankOfZone(key.second);
+		const int64_t back = std::min(townwallet::TaxBackOf(amount), std::max<int64_t>(0, bank.trading_revenue_cents / 100));
+		if (back <= 0) continue;
+		bank.trading_revenue_cents -= back * 100;
+		acc->second.treasury += back;
+		acc->second.tax_back += back;
 	}
 });
 

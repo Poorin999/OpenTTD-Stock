@@ -155,6 +155,29 @@ int main()
 		for (int i = 0; i < 1000; i++) { p = PayCapped(50'000, purse, FARE_CASH_CAP_PERCENT); purse -= p.from_town; CHECK(purse >= 0 && p.paid + p.shortfall == 50'000); }
 		CHECK(purse >= 0);
 	}
+	/* Wages and tax back: the shares are as set, they never take more than the payment, and the money is conserved (company + wages = payment). */
+	{
+		CHECK(WageOf(1000) == 350 && WageOf(0) == 0 && WageOf(-5) == 0 && WageOf(1) == 0);
+		CHECK(TaxBackOf(1000) == 300 && TaxBackOf(0) == 0 && TaxBackOf(-5) == 0);
+		int64_t purse = 1'000'000, company = 0, wages = 0;
+		for (int i = 0; i < 1000; i++) {
+			const Payment p = PayCapped(50'000, purse, FARE_CASH_CAP_PERCENT);
+			const int64_t w = WageOf(p.paid);
+			CHECK(w >= 0 && w <= p.paid);
+			purse -= p.from_town; purse += w; company += p.paid - w; wages += w;
+			CHECK(purse >= 0);
+		}
+		/* Citizens + company together hold what they had: nothing is made or lost by the wages. */
+		CHECK(purse + company == 1'000'000);
+		CHECK(wages > 0 && company > 0);
+		/* With the wages the purse drains more slowly than without them (the same 30 payments from the same purse, no income in between). */
+		int64_t with_w = 1'000'000, without_w = 1'000'000;
+		for (int i = 0; i < 30; i++) {
+			Payment p = PayCapped(50'000, with_w, FARE_CASH_CAP_PERCENT); with_w += WageOf(p.paid) - p.from_town;
+			p = PayCapped(50'000, without_w, FARE_CASH_CAP_PERCENT); without_w -= p.from_town;
+		}
+		CHECK(with_w > without_w && without_w >= 0);
+	}
 	std::printf("%d checks, %d failed\n", g_checks, g_fail);
 	return g_fail == 0 ? 0 : 1;
 }
