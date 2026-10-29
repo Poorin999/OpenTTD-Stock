@@ -1552,6 +1552,14 @@ def patch_commercial_bank_commands(tree):
     t = ensure_include(t, f'#include "commercial_bank.h" /* {COMMERCIAL_BANK_MARKER} */', ['#include "central_bank.h"', '#include "wallet_cmd.h"', '#include "stdafx.h"'])
     _write_like(p, t, crlf)
     print("command.cpp: commercial bank commands included")
+    # network/network_command.cpp builds a table of every command too (CommandTraits<CMD_CBANK_BORROW> must be defined there).
+    p = tree / "src" / "network" / "network_command.cpp"
+    if not p.is_file():
+        sys.exit("ERROR: src/network/network_command.cpp not found (commercial bank commands)")
+    t, crlf = _read_lf(p)
+    t = ensure_include(t, f'#include "../commercial_bank.h" /* {COMMERCIAL_BANK_MARKER} */', ['#include "../central_bank.h"', '#include "../wallet_cmd.h"', '#include "../stdafx.h"', '#include "../command_func.h"'])
+    _write_like(p, t, crlf)
+    print("network_command.cpp: commercial bank commands included")
 
 
 def main(tree):

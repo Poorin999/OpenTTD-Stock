@@ -520,7 +520,7 @@ int64_t GetCentralBankDebt(CompanyID company)
  * central bank. A loan raises the cash and the debt by the same amount, so borrowing does not make the equity bigger.
  * @param company The company; 0 for a company that does not exist.
  */
-static int64_t GetCentralBankEquity(CompanyID company)
+int64_t GetCentralBankEquity(CompanyID company)
 {
 	const Company *c = Company::GetIfValid(company);
 	if (c == nullptr) return 0;

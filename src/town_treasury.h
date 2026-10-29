@@ -67,6 +67,9 @@ struct TownAccount {
 	int64_t fare_shortfall = 0;  ///< Fares and mail pay that the town could not make, total.
 	int64_t wages_back = 0;      ///< Wages that flowed back to the citizens from payments for passengers, mail and consumer cargo, total. Saved in SRK_TOWN_WALLET b = 3.
 	int64_t tax_back = 0;        ///< Land and transport tax that came back from the bank of the zone into the treasury, total. Saved in SRK_TOWN_WALLET b = 3.
+	int64_t cb_debt = 0;         ///< What the town owes to its commercial bank (commercial_bank.cpp). NOT saved yet.
+	int64_t cb_carry = 0;        ///< Rest of the interest on that loan (1/(10000*365) units). NOT saved yet.
+	int64_t cb_interest = 0;     ///< Interest that the town has paid to its commercial bank, total. NOT saved yet.
 	std::vector<citizengold::TermPos> positions{}; ///< Open Trading Terminal positions of the speculators and the overtraders (citizen_terminal.h). Saved (SRK_TOWN_POS).
 
 	int64_t GoldCz() const { int64_t t = 0; for (const auto &b : this->books) t += b.gold_cz; return t; }

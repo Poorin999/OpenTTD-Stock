@@ -233,6 +233,12 @@ inline int64_t BankShiftedRateBp(int64_t base_bp, int64_t shift_bp)
 	return std::clamp<int64_t>(base_bp + shift_bp, BANK_RATE_FLOOR_BP, ceiling);
 }
 
+/** The risk rate of a loan: the curve rate + the news spread + the margin of the lender (signed; a commercial bank, commercial_bank.cpp), moved by the policy shift. */
+inline int64_t BankRiskRateBp(int64_t annual_bp, int64_t news_spread_bp, int64_t margin_bp, int64_t policy_shift_bp)
+{
+	return BankShiftedRateBp(annual_bp + std::max<int64_t>(0, news_spread_bp) + margin_bp, policy_shift_bp);
+}
+
 /**
  * The shift that the rule wants (the speed limit is applied by the caller).
  * @param inflation_bp Yearly change of the price index in bp.
@@ -455,7 +461,7 @@ struct BankDayResult {
  * @param news_spread_bp Extra rate from the news about the company (0 .. 150 bp, see MarketEvents::CreditSpreadBp); only the risk rate, not the penalty rate.
  * @return What to book; all 0 when the day was already charged.
  */
-inline BankDayResult BankSettleDay(BankAccount &a, int64_t cash, int64_t equity, int64_t day, int64_t policy_shift_bp = 0, int64_t news_spread_bp = 0)
+inline BankDayResult BankSettleDay(BankAccount &a, int64_t cash, int64_t equity, int64_t day, int64_t policy_shift_bp = 0, int64_t news_spread_bp = 0, int64_t margin_bp = 0)
 {
 	BankDayResult out;
 	if (day <= a.last_charged_day) return out; // Once per day, whatever the callers do.
@@ -467,7 +473,7 @@ inline BankDayResult BankSettleDay(BankAccount &a, int64_t cash, int64_t equity,
 		a.carry = 0;
 		a.in_default = false;
 	} else {
-		const int64_t risk_bp = BankShiftedRateBp(BankAnnualRateBp(BankDebtToEquityPpm(a.debt, equity)) + std::max<int64_t>(0, news_spread_bp), policy_shift_bp);
+		const int64_t risk_bp = BankRiskRateBp(BankAnnualRateBp(BankDebtToEquityPpm(a.debt, equity)), news_spread_bp, margin_bp, policy_shift_bp); // margin_bp: signed spread of the lender (0 = central bank)
 		out.rate_bp = a.in_default ? BankPenaltyRateBp(std::max<int>(1, a.penalty_level), policy_shift_bp) : risk_bp;
 		BankInterestResult r = BankDailyInterest(a.debt, out.rate_bp, a.carry);
 
@@ -731,6 +737,8 @@ void SnapshotYearlyExpenses();
 int64_t GetCentralBankDebt(CompanyID company);
 int64_t GetCentralBankAnnualRateBp(CompanyID company);
 int64_t GetCentralBankCreditLimit(CompanyID company);
+/** Company value plus wallets minus the debt at the central bank (the equity of the risk curve). Also used by the commercial banks. */
+int64_t GetCentralBankEquity(CompanyID company);
 int64_t GetCentralBankTierCreditPercent(CompanyID company);
 int64_t GetCentralBankAvailable(CompanyID company);
 int64_t GetUnborrowedLiquidCash(CompanyID company);

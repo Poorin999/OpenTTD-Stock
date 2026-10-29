@@ -17,6 +17,7 @@
 #include "zone_permit.h"
 #include "stock_gui.h"
 #include "central_bank.h"
+#include "commercial_bank.h"
 #include "gold_reserve.h"
 #include "valuables.h"
 #include "economy_news.h"
@@ -61,6 +62,7 @@ void StockMarket::Reset()
 	_valuables.Reset();
 	_payroll_news.Reset();
 	_town_treasury.Reset();
+	_commercial_banks.Reset();
 	_cargo_market.Reset();
 	_zone_market.Reset();
 	_zone_permits.Reset();

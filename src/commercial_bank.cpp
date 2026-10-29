@@ -125,7 +125,7 @@ int64_t CBankLoanRateBp(uint32_t town, CompanyID company)
 	if (it != _commercial_banks.loans.end()) a = it->second;
 	if (a.in_default) return BankPenaltyRateBp(std::max<int>(1, a.penalty_level), cb.ShiftBp());
 	const int64_t news_bp = _market_events.CreditSpreadBp(company.base(), static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes()));
-	return BankRiskRateBp(BankAnnualRateBp(BankDebtToEquityPpm(a.debt, GetCompanyNetEquity(company))), news_bp, MarginOf(town), cb.ShiftBp());
+	return BankRiskRateBp(BankAnnualRateBp(BankDebtToEquityPpm(a.debt, GetCentralBankEquity(company))), news_bp, MarginOf(town), cb.ShiftBp());
 }
 
 int64_t CBankAvailable(uint32_t town, CompanyID company)
@@ -327,7 +327,7 @@ static void SettleFirmLoans(uint32_t town, CommercialBank &bank, int64_t day)
 		if (c == nullptr) continue;
 		BankAccount &a = it->second;
 		const int64_t news_bp = _market_events.CreditSpreadBp(company.base(), day * GameTimeManager::MINUTES_PER_DAY);
-		const BankDayResult r = BankSettleDay(a, static_cast<int64_t>(c->money), GetCompanyNetEquity(company), day, BankOfCompany(company).ShiftBp(), news_bp, margin);
+		const BankDayResult r = BankSettleDay(a, static_cast<int64_t>(c->money), GetCentralBankEquity(company), day, BankOfCompany(company).ShiftBp(), news_bp, margin);
 		if (r.paid_from_cash > 0) {
 			AutoRestoreBackup cur_company(_current_company, company);
 			SubtractMoneyFromCompany(CommandCost(EXPENSES_LOAN_INTEREST, Money(r.paid_from_cash)));
