@@ -672,8 +672,8 @@ TOWN_WALLET_MARKER = "TOWN_WALLET_PATCH"
 def patch_town_wallet(tree):
     """City wallet (town_wallet.cpp): the payment of a final delivery goes through the town of the destination station. One line in
     CargoPayment::PayFinalDelivery (economy.cpp), right BEFORE the line that adds the profit to route_profit:
-        profit = TownPayForDelivery(cargo, this->current_station, profit);
-    Goods / Food / Water are paid from the treasury of the town (the company gets what the town can pay); other industrial cargo pays a business tax to the town.
+        profit = TownPayForDelivery(cargo, cp->GetFirstStation(), this->current_station, profit);
+    Goods / Food / Water are paid from the treasury of the town (the company gets what the town can pay); other industrial cargo pays a business tax to the town; passengers are paid from the cash of the citizens of the town of origin and mail from its treasury.
     This is an extra: when an anchor is missing the build goes on without it (a WARNING, nothing is written)."""
     p = tree / "src" / "economy.cpp"
     t, crlf = _read_lf(p)
@@ -690,7 +690,7 @@ def patch_town_wallet(tree):
     if end < 0 or body.count(line) != 1 or "\tMoney profit = " not in body:
         print("WARNING: PayFinalDelivery has a different layout (route_profit / profit), the town wallet is not hooked")
         return
-    body = body.replace(line, f"\tprofit = static_cast<Money>(TownPayForDelivery(cargo, this->current_station, static_cast<int64_t>(profit))); /* {TOWN_WALLET_MARKER} */\n" + line, 1)
+    body = body.replace(line, f"\tprofit = static_cast<Money>(TownPayForDelivery(cargo, cp->GetFirstStation(), this->current_station, static_cast<int64_t>(profit))); /* {TOWN_WALLET_MARKER} */\n" + line, 1)
     t = t[:m.end()] + body + t[end:]
     t = ensure_include(t, '#include "town_wallet.h" /* TOWN_WALLET_PATCH */', ['#include "central_bank.h"', '#include "stdafx.h"'])
     _write_like(p, t, crlf)

@@ -59,17 +59,59 @@ static void TownBorrow(TownAccount &a, const Town *t, int64_t need)
 	}
 }
 
-int64_t TownPayForDelivery(CargoType cargo, StationID dest, int64_t income)
+/** The account of the town of a station, or nullptr (no treasury yet: the base game pays). */
+static TownAccount *AccountOfStation(StationID station)
+{
+	if (!Station::IsValidID(station)) return nullptr;
+	const Town *t = Station::Get(station)->town;
+	if (t == nullptr) return nullptr;
+	auto it = _town_treasury.accounts.find(t->index.base());
+	if (it == _town_treasury.accounts.end() || !it->second.started) return nullptr;
+	return &it->second;
+}
+
+int64_t TownPayForDelivery(CargoType cargo, StationID source, StationID dest, int64_t income)
 {
 	if (income <= 0 || !IsValidCargoType(cargo) || !Station::IsValidID(dest)) return income;
-	if (CargoMarketIsGoldCargo(cargo) || CargoMarketIsPeopleCargo(cargo)) return income; // the gold market and the people are not part of the wallet
+	if (CargoMarketIsGoldCargo(cargo)) return income; // the gold market prices gold
 	const TownAcceptanceEffect effect = CargoSpec::Get(cargo)->town_acceptance_effect;
-	if (effect == TAE_PASSENGERS || effect == TAE_MAIL) return income;
+	if (CargoMarketIsPeopleCargo(cargo) || effect == TAE_PASSENGERS || effect == TAE_MAIL) {
+		/* The town of ORIGIN pays: passengers from the cash of its citizens (all four groups, in proportion), mail from its treasury. */
+		TownAccount *src = AccountOfStation(source);
+		if (src == nullptr) return income;
+		if (effect == TAE_MAIL) {
+			const townwallet::Payment p = townwallet::PayCapped(income, src->treasury, townwallet::MAIL_TREASURY_CAP_PERCENT);
+			src->treasury -= p.from_town;
+			src->mail_paid += p.paid;
+			src->fare_shortfall += p.shortfall;
+			return p.paid;
+		}
+		int64_t cash = 0;
+		for (const citizengold::Book &b : src->books) cash += std::max<int64_t>(b.cash, 0);
+		const townwallet::Payment p = townwallet::PayCapped(income, cash, townwallet::FARE_CASH_CAP_PERCENT);
+		int64_t left = p.from_town;
+		for (size_t i = 0; i < citizengold::STYLE_COUNT && left > 0; i++) {
+			citizengold::Book &b = src->books[i];
+			const int64_t have = std::max<int64_t>(b.cash, 0);
+			const int64_t take = i + 1 == citizengold::STYLE_COUNT ? std::min(left, have) : std::min(left, have * p.from_town / std::max<int64_t>(cash, 1));
+			b.cash -= take;
+			left -= take;
+		}
+		for (size_t i = 0; i < citizengold::STYLE_COUNT && left > 0; i++) { // a rest from rounding: take it where there is cash
+			citizengold::Book &b = src->books[i];
+			const int64_t take = std::min(left, std::max<int64_t>(b.cash, 0));
+			b.cash -= take;
+			left -= take;
+		}
+		const int64_t paid = p.from_town - left;
+		src->fares_paid += paid;
+		src->fare_shortfall += income - paid;
+		return paid;
+	}
 	const Town *t = Station::Get(dest)->town;
-	if (t == nullptr) return income;
-	auto it = _town_treasury.accounts.find(t->index.base());
-	if (it == _town_treasury.accounts.end() || !it->second.started) return income; // a village without a treasury: the base game pays
-	TownAccount &a = it->second;
+	TownAccount *dst = AccountOfStation(dest); // a village without a treasury: the base game pays
+	if (t == nullptr || dst == nullptr) return income;
+	TownAccount &a = *dst;
 
 	if (IsConsumerCargo(cargo)) {
 		if (a.treasury < income) TownBorrow(a, t, income - std::max<int64_t>(a.treasury, 0));

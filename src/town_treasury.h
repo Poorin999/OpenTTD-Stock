@@ -62,6 +62,9 @@ struct TownAccount {
 	int64_t business_tax = 0;    ///< Business tax taken from the payment for industrial cargo delivered into the town, total.
 	int64_t interest_paid = 0;   ///< Loan interest and bond coupons paid, total.
 	int64_t grants = 0;          ///< Grants from the central bank, total.
+	int64_t fares_paid = 0;      ///< Fares that the citizens paid for passengers that left this town, total.
+	int64_t mail_paid = 0;       ///< Paid from the treasury for mail that left this town, total.
+	int64_t fare_shortfall = 0;  ///< Fares and mail pay that the town could not make, total.
 	std::vector<citizengold::TermPos> positions{}; ///< Open Trading Terminal positions of the speculators and the overtraders (citizen_terminal.h). Saved (SRK_TOWN_POS).
 
 	int64_t GoldCz() const { int64_t t = 0; for (const auto &b : this->books) t += b.gold_cz; return t; }

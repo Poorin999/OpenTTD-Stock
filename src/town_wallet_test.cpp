@@ -141,6 +141,20 @@ int main()
 			std::printf("pop %6lld: treasury %lld, loan %lld, bonds %lld, paid to companies in 20 years %lld (tax in %lld)\n", (long long)pop, (long long)treasury, (long long)loan, (long long)bonds, (long long)paid_out, (long long)tax_total);
 		}
 	}
+	/* Passengers and mail: the town of origin pays at most 25% of its purse in one payment, never more than the income. */
+	{
+		Payment p = PayCapped(1000, 100'000, FARE_CASH_CAP_PERCENT);
+		CHECK(p.paid == 1000 && p.shortfall == 0);
+		p = PayCapped(1000, 2'000, FARE_CASH_CAP_PERCENT); // 25% of 2000 = 500
+		CHECK(p.paid == 500 && p.from_town == 500 && p.shortfall == 500);
+		p = PayCapped(1000, 0, FARE_CASH_CAP_PERCENT); CHECK(p.paid == 0 && p.shortfall == 1000);
+		p = PayCapped(1000, -9, MAIL_TREASURY_CAP_PERCENT); CHECK(p.paid == 0 && p.shortfall == 1000);
+		p = PayCapped(0, 100, 25); CHECK(p.paid == 0 && p.shortfall == 0);
+		/* A purse that is paid out again and again falls geometrically and never goes below zero. */
+		int64_t purse = 1'000'000;
+		for (int i = 0; i < 1000; i++) { p = PayCapped(50'000, purse, FARE_CASH_CAP_PERCENT); purse -= p.from_town; CHECK(purse >= 0 && p.paid + p.shortfall == 50'000); }
+		CHECK(purse >= 0);
+	}
 	std::printf("%d checks, %d failed\n", g_checks, g_fail);
 	return g_fail == 0 ? 0 : 1;
 }

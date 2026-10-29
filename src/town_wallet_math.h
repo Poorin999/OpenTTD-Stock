@@ -25,6 +25,8 @@
 namespace townwallet {
 
 static constexpr int64_t PPM = 1'000'000;
+static constexpr int64_t FARE_CASH_CAP_PERCENT = 25;      ///< One payment for passengers can take at most 25% of the cash of the citizens of the town of origin (they keep the rest; the cash grows again every day).
+static constexpr int64_t MAIL_TREASURY_CAP_PERCENT = 25;  ///< One payment for mail can take at most 25% of the treasury of the town of origin.
 static constexpr int64_t BUSINESS_TAX_PERCENT = 6;        ///< The town takes 6% of the payment for industrial cargo delivered into it (paid by the company, goes to the treasury).
 static constexpr int64_t LOAN_LIMIT_PER_CAPITA = 40;      ///< A town can owe the central bank at most 40 per citizen (money units at price index 1.0).
 static constexpr int64_t BOND_LIMIT_PER_CAPITA = 60;      ///< ... and the citizens at most 60 per citizen in bonds.
@@ -62,6 +64,17 @@ inline Payment PayConsumer(int64_t income, int64_t treasury)
 	Payment p;
 	if (income <= 0) return p;
 	p.from_town = std::clamp<int64_t>(treasury, 0, income);
+	p.paid = p.from_town;
+	p.shortfall = income - p.from_town;
+	return p;
+}
+
+/** Passengers and mail: the town of ORIGIN pays from a purse (the cash of its citizens, or its treasury), at most `cap_percent` of it in one payment, never more than the income. */
+inline Payment PayCapped(int64_t income, int64_t purse, int64_t cap_percent)
+{
+	Payment p;
+	if (income <= 0) return p;
+	p.from_town = std::min(income, Percent(std::max<int64_t>(purse, 0), cap_percent));
 	p.paid = p.from_town;
 	p.shortfall = income - p.from_town;
 	return p;

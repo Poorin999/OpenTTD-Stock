@@ -135,7 +135,7 @@ struct TownFinanceWindow : Window {
 
 		/* The city wallet: what the town pays for consumer cargo, its debts, the business tax and the grants (town_wallet.cpp). */
 		{
-			if (y + row * 5 > bottom) return;
+			if (y + row * 6 > bottom) return;
 			const int64_t scaled_pop = std::max<int64_t>(1, static_cast<int64_t>(t->cache.population) * GetPriceIndexPpm() / 1'000'000);
 			const int64_t loan_room = std::max<int64_t>(0, townwallet::LoanLimit(scaled_pop) - a.loan_debt);
 			const int64_t bond_room = std::max<int64_t>(0, townwallet::BondLimit(scaled_pop) - a.bond_debt);
@@ -152,6 +152,9 @@ struct TownFinanceWindow : Window {
 			y += row;
 			pair(left, mid - pad, y, TfText("ดอกเบี้ยที่จ่ายแล้ว", "Interest paid"), TfMoney(a.interest_paid), TC_WHITE);
 			pair(mid + pad, right, y, TfText("วงเงินกู้ / พันธบัตรที่เหลือ", "Credit left (loan / bonds)"), fmt::format("{} / {}", TfMoney(loan_room), TfMoney(bond_room)), TC_WHITE);
+			y += row;
+			pair(left, mid - pad, y, TfText("ค่าโดยสารที่พลเมืองจ่าย", "Fares paid by the citizens"), TfMoney(a.fares_paid), TC_WHITE);
+			pair(mid + pad, right, y, TfText("ค่าไปรษณีย์ (จากคลัง) / จ่ายไม่ไหว", "Mail (treasury) / could not pay"), fmt::format("{} / {}", TfMoney(a.mail_paid), TfMoney(a.fare_shortfall)), a.fare_shortfall > 0 ? TC_RED : TC_WHITE);
 			y += row + ScaleGUITrad(6);
 		}
 
@@ -257,7 +260,7 @@ static constexpr std::initializer_list<NWidgetPart> _nested_town_finance_widgets
 		NWidget(WWT_DEFSIZEBOX, COLOUR_BROWN),
 		NWidget(WWT_STICKYBOX, COLOUR_BROWN),
 	EndContainer(),
-	NWidget(WWT_PANEL, COLOUR_BROWN, WID_TFN_PANEL), SetMinimalSize(560, 440), SetFill(1, 1), SetResize(1, 1),
+	NWidget(WWT_PANEL, COLOUR_BROWN, WID_TFN_PANEL), SetMinimalSize(560, 460), SetFill(1, 1), SetResize(1, 1),
 	EndContainer(),
 	NWidget(NWID_HORIZONTAL),
 		NWidget(NWID_SPACER), SetFill(1, 0), SetResize(1, 0),

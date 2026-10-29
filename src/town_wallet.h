@@ -15,9 +15,9 @@
 /**
  * Called for every final delivery (economy.cpp, hook TOWN_WALLET_PATCH) before the income is booked.
  * Goods / Food / Water: the town of the destination station pays from its treasury (it first sells bonds or borrows from the bank when the treasury is short);
- * the company gets what the town could pay. Other industrial cargo: the town takes a business tax. Passengers, mail and gold are not touched.
+ * the company gets what the town could pay. Other industrial cargo: the town takes a business tax. Passengers are paid from the cash of the citizens of the town of ORIGIN (source station), mail from its treasury, at most 25% of the purse per payment. Gold is not touched.
  * @return What the company is paid.
  */
-int64_t TownPayForDelivery(CargoType cargo, StationID dest, int64_t income);
+int64_t TownPayForDelivery(CargoType cargo, StationID source, StationID dest, int64_t income);
 
 #endif /* TOWN_WALLET_H */
