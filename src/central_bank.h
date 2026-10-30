@@ -226,6 +226,13 @@ inline int64_t BankTierCreditPercent(int tier)
 	return PERCENT[std::clamp(tier, 0, 4)];
 }
 
+/** Rate spread of a credit standing in bp (signed): C +1.00%, B +0.40%, A 0, AA -0.15%, AAA -0.30%. A weak money system (little gold behind the cash) lends dearer, a strong one cheaper. @param tier 0 = C ... 4 = AAA. */
+inline int64_t BankTierRateSpreadBp(int tier)
+{
+	static constexpr int64_t SPREAD[] = {100, 40, 0, -15, -30};
+	return SPREAD[std::clamp(tier, 0, 4)];
+}
+
 /** The rate of the risk curve moved by the policy shift, kept between the floor and the ceiling. */
 inline int64_t BankShiftedRateBp(int64_t base_bp, int64_t shift_bp)
 {
@@ -692,6 +699,7 @@ enum class LedgerItem : uint8_t {
 	ZoneFee,         ///< Exchange fee of a delivery that crossed a zone border (zone_market.cpp). Expense, paid to the central bank. Appended last: the index is saved.
 	ZonePermit,      ///< One-time fee of a building permit for a foreign zone (zone_permit.cpp). Expense, paid to the bank of that zone. Appended last: the index is saved.
 	ZoneExchange,    ///< Cash given for banknotes of a zone (expense) and cash got back for them (income): shown, not counted as earnings (zone_market.cpp). Appended last: the index is saved.
+	GoldStorage,     ///< Storage and insurance of the gold in the vault (tax.cpp, GOLD_STORAGE_BP_PER_YEAR of its value, daily). Expense. Appended last: the index is saved.
 	End,
 };
 static constexpr size_t LEDGER_ITEMS = static_cast<size_t>(LedgerItem::End);
@@ -737,6 +745,7 @@ void SnapshotYearlyExpenses();
 int64_t GetCentralBankDebt(CompanyID company);
 int64_t GetCentralBankAnnualRateBp(CompanyID company);
 int64_t GetCentralBankCreditLimit(CompanyID company);
+int64_t GetCentralBankTierRateSpreadBp(CompanyID company);
 /** Company value plus wallets minus the debt at the central bank (the equity of the risk curve). Also used by the commercial banks. */
 int64_t GetCentralBankEquity(CompanyID company);
 int64_t GetCentralBankTierCreditPercent(CompanyID company);

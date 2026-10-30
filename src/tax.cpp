@@ -15,6 +15,7 @@
 #include "CargoMarketMath.h"
 #include "market_events.h"
 #include "valuables.h"
+#include "gold_reserve.h"
 #include "command_func.h"
 #include "company_base.h"
 #include "company_func.h"
@@ -125,6 +126,25 @@ static int64_t LandWeight(Tile tile, const Town **town_out = nullptr)
 	return base * percent;
 }
 
+/** Storage and insurance of the gold in the vault: 0.50% of its value a year (a real vault charges 0.1% .. 1%), taken daily from the cash of the company. */
+static constexpr int64_t GOLD_STORAGE_BP_PER_YEAR = 50;
+
+/** The storage fee of one game day for gold worth `value` (money units). Integer, rounds down; a vault worth less than 7,300 pays nothing that day. */
+static int64_t GoldStorageFeeOfDay(int64_t value)
+{
+	return value <= 0 ? 0 : value * GOLD_STORAGE_BP_PER_YEAR / (10'000 * 365);
+}
+
+static void BookGoldStorage(CompanyID company, int64_t amount)
+{
+	if (amount <= 0 || !Company::IsValidID(company)) return;
+	{
+		AutoRestoreBackup cur_company(_current_company, company);
+		SubtractMoneyFromCompany(CommandCost(EXPENSES_OTHER, Money(amount)));
+	}
+	RecordLedger(company, LedgerItem::GoldStorage, -amount);
+}
+
 /** Land tax and transport tax, once per game day at 00:00. */
 static const GameTimeSubscription _tax_daily(GameTimeEvent::Day, [](const GameTimeSnapshot &)
 {
@@ -175,6 +195,8 @@ static const GameTimeSubscription _tax_daily(GameTimeEvent::Day, [](const GameTi
 			case VEH_AIRCRAFT: rate = TAX_AIRCRAFT_DAY; fuel = cargomarket::FUEL_AIRCRAFT_DAY; break;
 			default: break;
 		}
+		/* Fuel is burnt while the vehicle moves: one that stands (loading, waiting at a signal) at this moment burns none. The transport tax is per vehicle and does not care. */
+		if (v->cur_speed == 0) fuel = 0;
 		const int vehicle_zone = zone_of(v->tile);
 		transport[v->owner.base()][vehicle_zone] += rate;
 		if (vehicle_zone < _zone_market.count) {
@@ -190,6 +212,8 @@ static const GameTimeSubscription _tax_daily(GameTimeEvent::Day, [](const GameTi
 	for (const Company *c : Company::Iterate()) {
 		const size_t i = c->index.base();
 		BookFuel(c->index, ScaleByPriceIndex(cargomarket::FuelDailyCost(fuel_base[i], fuel_index)));
+		/* The gold in the vault costs storage and insurance (the value at the market price of now). */
+		if (_gold_reserve.GetPriceCents() > 0) BookGoldStorage(c->index, GoldStorageFeeOfDay(_gold_reserve.GetHoldings(c->index) * _gold_reserve.GetPriceCents() / 100));
 		/* Every zone has its own tax level (percent of the base rate); the tax of the company is the sum over the zones where it owns land and runs vehicles. */
 		for (int z = 0; z <= zonemath::MAX_ZONES; z++) {
 			const bool real = z < _zone_market.count;

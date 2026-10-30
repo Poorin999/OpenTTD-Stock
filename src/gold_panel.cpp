@@ -514,6 +514,10 @@ void GoldPanel::DrawInfo(const Rect &r) const
 	if (!alert.empty()) {
 		const Rect a = at(l.alert);
 		if (a.bottom - a.top >= GetCharacterHeight(FS_NORMAL)) DrawStringMultiLine(a.left, a.right, a.top, a.bottom, alert, TC_RED, SA_TOP | SA_LEFT);
+	} else {
+		/* No alert: say what the Trading Terminal does with gold. */
+		const Rect a = at(l.alert);
+		if (a.bottom - a.top >= GetCharacterHeight(FS_NORMAL)) DrawStringMultiLine(a.left, a.right, a.top, a.bottom, GpText("หมายเหตุ: ทองในคลังเป็นทองจริง ส่วนทองใน Trading Terminal เป็น CFD (ไม่ได้ถือทองจริง)", "Note: vault gold is physical gold; gold in the Trading Terminal is a CFD (no physical gold)."), TC_GREY, SA_TOP | SA_LEFT);
 	}
 }
 

@@ -550,6 +550,13 @@ int64_t GetCentralBankTierCreditPercent(CompanyID company)
 	return BankTierCreditPercent(BankCreditTierIndex(BankOfCompany(company)));
 }
 
+/** Rate spread (bp, signed) that the credit standing of the bank of the company adds to its loan rate. Not known before the gold market has started: then 0. */
+int64_t GetCentralBankTierRateSpreadBp(CompanyID company)
+{
+	if (_gold_reserve.GetPriceCents() <= 0) return 0;
+	return BankTierRateSpreadBp(BankCreditTierIndex(BankOfCompany(company)));
+}
+
 /**
  * The annual rate (in bp, 100 = 1%) that the company would be charged at the next midnight: the penalty rate while the
  * account is in default, otherwise the risk rate of its debt-to-equity ratio. For the future UI; 0 without debt.
@@ -561,7 +568,7 @@ int64_t GetCentralBankAnnualRateBp(CompanyID company)
 	if (a.debt <= 0) return 0;
 	if (a.in_default) return BankPenaltyRateBp(std::max<int>(1, a.penalty_level), BankOfCompany(company).ShiftBp());
 	const int64_t news_bp = _market_events.CreditSpreadBp(company.base(), static_cast<int64_t>(GameTimeManager::Get().GetTotalGameMinutes()));
-	return BankShiftedRateBp(BankAnnualRateBp(BankDebtToEquityPpm(a.debt, GetCentralBankEquity(company))) + news_bp, BankOfCompany(company).ShiftBp());
+	return BankShiftedRateBp(BankAnnualRateBp(BankDebtToEquityPpm(a.debt, GetCentralBankEquity(company))) + news_bp + GetCentralBankTierRateSpreadBp(company), BankOfCompany(company).ShiftBp());
 }
 
 /** How much more a company may borrow now. */
@@ -1163,7 +1170,7 @@ void CentralBank::UpdateDaily(int64_t day)
 
 		/* The news about the company (and a bank scare for everyone) adds to the risk rate; read from the news log at this midnight, so it is the same on every client. */
 		const int64_t news_bp = _market_events.CreditSpreadBp(company.base(), day * GameTimeManager::MINUTES_PER_DAY);
-		const BankDayResult r = BankSettleDay(a, static_cast<int64_t>(c->money), GetCentralBankEquity(company), day, this->ShiftBp(), news_bp);
+		const BankDayResult r = BankSettleDay(a, static_cast<int64_t>(c->money), GetCentralBankEquity(company), day, this->ShiftBp(), news_bp, GetCentralBankTierRateSpreadBp(company));
 
 		if (r.paid_from_cash > 0) {
 			/* The money leaves the cash and is an expense of the company (loan interest in the finances window).

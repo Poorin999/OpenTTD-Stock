@@ -197,6 +197,7 @@ static void DrawAccountStatement(const Rect &r, int offset)
 	booked("Gold Purchases (bought for the vault)", LedgerItem::GoldBuy);
 	booked("Gold Sales (sold from the vault)", LedgerItem::GoldSell);
 	booked("Bank Gold Operations (cash paid in / taken out)", LedgerItem::BankGoldOp);
+	booked("Gold Storage (vault, 0.5% a year)", LedgerItem::GoldStorage);
 
 	category("Taxes (paid to the Central Bank)");
 	booked("Land Tax (per tile owned, daily)", LedgerItem::TaxLand);
@@ -362,6 +363,7 @@ static void DrawArchiveStatement(const Rect &r, int age)
 	line("Gold Purchases (bought for the vault)", GetLedgerEntry(_local_company, LedgerItem::GoldBuy, year), true, false);
 	line("Gold Sales (sold from the vault)", GetLedgerEntry(_local_company, LedgerItem::GoldSell, year), true, false);
 	line("Bank Gold Operations (cash paid in / taken out)", GetLedgerEntry(_local_company, LedgerItem::BankGoldOp, year), true, false);
+	booked("Gold Storage (vault, 0.5% a year)", LedgerItem::GoldStorage);
 
 	category("Taxes (paid to the Central Bank)");
 	booked("Land Tax (per tile owned, daily)", LedgerItem::TaxLand);
@@ -644,6 +646,7 @@ struct CentralBankWindow : Window {
 			case LedgerItem::TaxDividend:     return CbText("ภาษีเงินปันผล", "Dividend tax");
 			case LedgerItem::TaxIncome:       return CbText("ภาษีเงินได้ไตรมาส", "Income tax");
 			case LedgerItem::TaxInterest:     return CbText("ภาษีดอกเบี้ยเงินสด (IORB)", "IORB tax");
+			case LedgerItem::GoldStorage:     return CbText("ค่าเก็บและประกันทองในคลัง", "Gold storage");
 			case LedgerItem::ZonePermit:      return CbText("ค่าใบอนุญาตก่อสร้างต่างโซน", "Building permit");
 			case LedgerItem::ZoneExchange:    return e.amount >= 0 ? CbText("ขายธนบัตร", "Banknote sale") : CbText("ซื้อธนบัตร", "Banknote buy");
 			case LedgerItem::ZoneFee:         return CbText("ค่าธรรมเนียมแลกเงินข้ามโซน", "Zone exchange fee");
@@ -994,13 +997,15 @@ static int DrawMonetaryPolicy(const Rect *r)
 	}
 	{
 		/* Column 2, card 3: the credit limit. 3 rows. */
-		const int n3 = 3;
+		const int n3 = 4;
 		card(cx[1], cx[1] + cw, col_top, n3, CbText("วงเงินกู้ (CREDIT)", "CREDIT"));
 		const int a0 = cx[1] + pad_h, a1 = cx[1] + cw - pad_h;
 		const int64_t share = BankPolicyCreditPercent(shift);
 		const int64_t tier_percent = GetCentralBankTierCreditPercent(_local_company);
 		row(a0, a1, CbText("วงเงินกู้ต่อส่วนของเจ้าของ", "Credit limit, share of equity"), fmt::format("{}%", share), share < CENTRAL_BANK_CREDIT_PERCENT ? CBP_WARN : (share > CENTRAL_BANK_CREDIT_PERCENT ? CBP_GOOD : CBP_TEXT));
 		row(a0, a1, CbText("ระดับเครดิตปรับวงเงิน", "Credit standing scales the limit"), fmt::format("{} x{}%", GetCreditTierName(static_cast<CreditTier>(BankCreditTierIndex(bank))), tier_percent), tier_percent < 100 ? CBP_WARN : (tier_percent > 100 ? CBP_GOOD : CBP_TEXT));
+		const int64_t tier_spread = BankTierRateSpreadBp(BankCreditTierIndex(bank));
+		row(a0, a1, CbText("ระดับเครดิตปรับดอกเบี้ย", "Credit standing adds to the rate"), fmt::format("{}{}.{:02}%", tier_spread < 0 ? "-" : (tier_spread > 0 ? "+" : ""), (tier_spread < 0 ? -tier_spread : tier_spread) / 100, (tier_spread < 0 ? -tier_spread : tier_spread) % 100), tier_spread > 0 ? CBP_WARN : (tier_spread < 0 ? CBP_GOOD : CBP_TEXT));
 		if (Company::IsValidID(_local_company)) {
 			row(a0, a1, CbText("วงเงินกู้ของบริษัทคุณตอนนี้", "Your credit limit now"), GetString(STR_JUST_CURRENCY_LONG, GetCentralBankCreditLimit(_local_company)), CBP_GOOD);
 		} else {

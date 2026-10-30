@@ -16,6 +16,7 @@
 #include "window_func.h"
 #include "central_bank.h"
 #include "valuables.h"
+#include "game_calendar.h"
 
 #include "table/strings.h"
 
@@ -59,6 +60,8 @@ CommandCost CmdStockOpen(DoCommandFlags flags, CompanyID target, StockOrderType 
 	if (owner == nullptr) return CMD_ERROR;
 	if (!IsStockSymbolValid(target.base())) return CMD_ERROR;
 	if (target == _current_company) return CommandCost(STR_STOCK_ERROR_OWN_COMPANY);
+	/* The stock exchange is closed on Saturday and Sunday: no NEW orders in the shares of companies. Gold, silver, platinum, diamonds, oil and banknotes are traded round the clock (CFD / forex style), and open trades keep running (stops and pending orders are checked by the market as before). */
+	if (!IsValuableSymbol(target.base()) && IsGameWeekend(GetCurrentGameWeekday())) return CommandCost(STR_STOCK_ERROR_MARKET_CLOSED);
 	if (GetStockPrice(target) <= 0) return CommandCost(STR_GOLD_ERROR_NO_MARKET); // A valuable has no price before the gold market has started.
 	if (type >= StockOrderType::End) return CMD_ERROR;
 	if (volume == 0 || volume > STOCK_MAX_VOLUME) return CommandCost(STR_STOCK_ERROR_BAD_VOLUME);

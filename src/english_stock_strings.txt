@@ -10,6 +10,7 @@ STR_STOCK_ORDER_LABEL_EXPIRY                                    :{BLACK}Expires 
 STR_STOCK_ORDER_HINT_EXPIRY                                     :never
 STR_STOCK_TIP_EXPIRY                                            :{BLACK}Number of game days (24 real minutes each) after which the pending order is cancelled automatically. Leave empty for an order that stays until you cancel it
 STR_STOCK_ERROR_CANT_MODIFY                                     :{WHITE}Can't change this trade...
+STR_STOCK_ERROR_MARKET_CLOSED                                   :{WHITE}The stock exchange is closed on Saturday and Sunday (valuables and banknotes trade every day)
 STR_STOCK_ERROR_BAD_EXPIRY                                      :{WHITE}Invalid expiration time (1 to 3650 days, or empty for none)
 STR_STOCK_NEWS_ORDER_EXPIRED                                    :{BLACK}Pending order #{NUM} ({STRING}) for {COMPANY} has expired
 
