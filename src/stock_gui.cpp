@@ -329,16 +329,30 @@ struct StockWindow : Window {
 	/** Make sure #selected is a symbol that exists. */
 	void EnsureValidSelection()
 	{
-		if (IsStockSymbolValid(this->selected.base())) return;
-		if (Company::IsValidID(_local_company)) {
+		/* A company that has not done its IPO is not in the Market Watch: it cannot be the selected symbol. */
+		if (IsStockSymbolListed(this->selected.base())) return;
+		if (Company::IsValidID(_local_company) && IsStockSymbolListed(_local_company.base())) {
 			this->selected = _local_company;
 			return;
 		}
 		for (const Company *c : Company::Iterate()) {
+			if (!IsStockSymbolListed(c->index.base())) continue;
 			this->selected = c->index;
 			return;
 		}
-		this->selected = INVALID_OWNER;
+		/* Nobody is listed: the valuables are always there. */
+		this->selected = CompanyID{static_cast<uint8_t>(STOCK_FIRST_VALUABLE)};
+		this->show_valuables = true; // The Market Watch shows the tab that the selected symbol belongs to.
+	}
+
+	/** The number of companies that are on the market (the rows of the company list of the Market Watch). */
+	static size_t CountListedCompanies()
+	{
+		size_t n = 0;
+		for (const Company *c : Company::Iterate()) {
+			if (IsStockSymbolListed(c->index.base())) n++;
+		}
+		return n;
 	}
 
 	/**
@@ -498,7 +512,7 @@ struct StockWindow : Window {
 		switch (this->view) {
 			case ToolView::History:   return this->GetHistoryRows().size();
 			case ToolView::Portfolio: return this->GetPortfolioMonths().size() + PORTFOLIO_FIXED_ROWS;
-			case ToolView::Ranking:   return Company::GetNumItems();
+			case ToolView::Ranking:   return CountListedCompanies();
 			default:                  return this->GetRows().size();
 		}
 	}
@@ -528,7 +542,7 @@ struct StockWindow : Window {
 	{
 		if (!gui_scope) return;
 		this->vscroll->SetCount(this->GetViewRowCount());
-		this->watch_scroll->SetCount(this->show_valuables ? VALUABLE_COUNT : Company::GetNumItems());
+		this->watch_scroll->SetCount(this->show_valuables ? VALUABLE_COUNT : CountListedCompanies());
 		this->SetDirty();
 	}
 
@@ -902,6 +916,7 @@ struct StockWindow : Window {
 				}
 				size_t n = 0;
 				for (const Company *c : Company::Iterate()) {
+					if (!IsStockSymbolListed(c->index.base())) continue; // Companies without an IPO are not in the list.
 					if (n++ == wanted) {
 						this->SelectSymbol(c->index);
 						break;
@@ -1121,6 +1136,7 @@ struct StockWindow : Window {
 		const size_t first = this->watch_scroll->GetPosition();
 		size_t n = 0;
 		for (const Company *c : Company::Iterate()) {
+			if (!IsStockSymbolListed(c->index.base())) continue; // Not on the market yet: not shown at all.
 			if (n++ < first) continue;
 			if (y + row_h > r.bottom) break;
 			if (c->index == this->selected) GfxFillRect(r.left + 1, y - 1, r.right - 1, y + row_h - 2, GREY_SCALE(4));

@@ -22,12 +22,14 @@ CommandCost CmdStockClose(DoCommandFlags flags, uint32_t id, uint32_t close_volu
 CommandCost CmdStockModify(DoCommandFlags flags, uint32_t id, Money sl, Money tp, Money price, Money trail);
 CommandCost CmdStockTransfer(DoCommandFlags flags, bool deposit, Money amount);
 CommandCost CmdStockEnableDaily(DoCommandFlags flags, bool enable);
+CommandCost CmdCompanyIpo(DoCommandFlags flags, bool confirm);
 
 DEF_CMD_TRAIT(CMD_STOCK_OPEN,   CmdStockOpen,   {}, CommandType::MoneyManagement)
 DEF_CMD_TRAIT(CMD_STOCK_CLOSE,  CmdStockClose,  {}, CommandType::MoneyManagement)
 DEF_CMD_TRAIT(CMD_STOCK_MODIFY, CmdStockModify, {}, CommandType::MoneyManagement)
 DEF_CMD_TRAIT(CMD_STOCK_TRANSFER, CmdStockTransfer, {}, CommandType::MoneyManagement)
 DEF_CMD_TRAIT(CMD_STOCK_ENABLE_DAILY, CmdStockEnableDaily, {}, CommandType::MoneyManagement)
+DEF_CMD_TRAIT(CMD_COMPANY_IPO, CmdCompanyIpo, {}, CommandType::MoneyManagement)
 
 #endif /* STOCK_CMD_H */
 

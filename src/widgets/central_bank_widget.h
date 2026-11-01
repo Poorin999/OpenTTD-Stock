@@ -63,6 +63,25 @@ enum CentralBankWidgets : WidgetID {
 	WID_ZM_PANEL,           ///< Panel of the zones map window: the map in coloured zones, the borders as lines and the legend.
 	WID_ZT_CAPTION,         ///< Caption of the zone tax window.
 	WID_ZT_PANEL,           ///< Panel of the zone tax window: the taxes collected in one zone and the tax rates.
+	WID_CT_CAPTION,         ///< Caption of the contracts window.
+	WID_CT_PANEL,           ///< Panel of the contracts window: the list of your contracts.
+	WID_CT_FORM,            ///< Panel of the contracts window: the industry, the terms and the reasons.
+	WID_CT_IND_PREV,        ///< Button of the contracts window: previous industry.
+	WID_CT_IND_NEXT,        ///< Button of the contracts window: next industry.
+	WID_CT_CARGO_PREV,      ///< Button of the contracts window: previous cargo.
+	WID_CT_CARGO_NEXT,      ///< Button of the contracts window: next cargo.
+	WID_CT_QTY_DOWN,        ///< Button of the contracts window: less units a month.
+	WID_CT_QTY_UP,          ///< Button of the contracts window: more units a month.
+	WID_CT_PRICE_DOWN,      ///< Button of the contracts window: price 5 percent lower.
+	WID_CT_PRICE_UP,        ///< Button of the contracts window: price 5 percent higher.
+	WID_CT_MONTHS_DOWN,     ///< Button of the contracts window: one month shorter.
+	WID_CT_MONTHS_UP,       ///< Button of the contracts window: one month longer.
+	WID_CT_OFFER,           ///< Button of the contracts window: make a new offer.
+	WID_CT_ACCEPT,          ///< Button of the contracts window: accept the selected contract.
+	WID_CT_COUNTER,         ///< Button of the contracts window: answer with the terms on the form.
+	WID_CT_REFUSE,          ///< Button of the contracts window: refuse the selected contract.
+	WID_CT_CANCEL,          ///< Button of the contracts window: withdraw the offer or end the contract.
+	WID_MN_CONTRACTS,       ///< Button of the market news window: opens the contracts window.
 };
 
 #endif /* WIDGETS_CENTRAL_BANK_WIDGET_H */

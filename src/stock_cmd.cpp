@@ -13,6 +13,7 @@
 #include "command_func.h"
 #include "company_base.h"
 #include "company_func.h"
+#include "hq_gate.h"
 #include "window_func.h"
 #include "central_bank.h"
 #include "valuables.h"
@@ -59,6 +60,7 @@ CommandCost CmdStockOpen(DoCommandFlags flags, CompanyID target, StockOrderType 
 	const Company *owner = Company::GetIfValid(_current_company);
 	if (owner == nullptr) return CMD_ERROR;
 	if (!IsStockSymbolValid(target.base())) return CMD_ERROR;
+	if (!IsStockSymbolListed(target.base())) return CommandCost(STR_STOCK_ERROR_NOT_LISTED); // No IPO yet: no new order, no pending order. Open positions keep running.
 	if (target == _current_company) return CommandCost(STR_STOCK_ERROR_OWN_COMPANY);
 	/* The stock exchange is closed on Saturday and Sunday: no NEW orders in the shares of companies. Gold, silver, platinum, diamonds, oil and banknotes are traded round the clock (CFD / forex style), and open trades keep running (stops and pending orders are checked by the market as before). */
 	if (!IsValuableSymbol(target.base()) && IsGameWeekend(GetCurrentGameWeekday())) return CommandCost(STR_STOCK_ERROR_MARKET_CLOSED);
@@ -301,3 +303,28 @@ CommandCost CmdStockEnableDaily(DoCommandFlags flags, bool enable)
 	return CommandCost();
 }
 
+/**
+ * Take the company public (IPO): its shares can be traded from now on. The first price is the price of the valuation of today.
+ * Nothing is sold and no money comes in: the shares of the game are positions on a price model, not shares that the company owns.
+ * The fee (STOCK_IPO_FEE_PERMILLE of the value of the company) is paid from unborrowed cash to the central bank of the zone.
+ * The command needs at least one argument (see CmdStockEnableDaily).
+ * @param flags Type of operation.
+ * @param confirm Must be true.
+ * @return The fee (booked inside the command, not through the cost), or an error.
+ */
+CommandCost CmdCompanyIpo(DoCommandFlags flags, bool confirm)
+{
+	if (!confirm || !Company::IsValidID(_current_company)) return CMD_ERROR;
+	if (_stock_market.listed[_current_company.base()]) return CommandCost(STR_COMPANY_IPO_ERROR_LISTED);
+	if (CompanyNeedsHq(_current_company)) return CommandCost(STR_COMPANY_IPO_ERROR_NO_HQ);
+	if (!CanCompanyIpo(_current_company)) return CommandCost(STR_COMPANY_IPO_ERROR_TOO_EARLY);
+
+	const int64_t fee = GetCompanyIpoFee(_current_company);
+	if (fee > 0 && GetUnborrowedLiquidCash(_current_company) < fee) return CommandCost(STR_COMPANY_IPO_ERROR_NO_CASH); // Nothing is paid with borrowed money.
+	if (flags.Test(DoCommandFlag::Execute)) {
+		/* Like the permit fee, the fee is taken here and not through the cost that the command returns. */
+		ChargeIpoFee(_current_company, fee);
+		_stock_market.ListCompany(_current_company);
+	}
+	return CommandCost(EXPENSES_OTHER);
+}

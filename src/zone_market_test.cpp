@@ -330,6 +330,42 @@ int main()
 		CHECK(RateAfterTrade(PPM, true, 100) - PPM <= 200 && RateAfterTrade(PPM, true, 100) > PPM); // 100 units: 0.02%, one player does not move a currency
 		CHECK(RateAfterTrade(RATE_MAX_PPM, true, 1000) == RATE_MAX_PPM);
 	}
+	/* One policy rate per zone: the REAL central bank decides, the FX model only reads it (external_policy_ppm). */
+	{
+		auto make = [](uint64_t) { std::array<FxZone, MAX_ZONES> z{}; for (int i = 0; i < 4; i++) { z[i].fx = FxInitState(i); z[i].policy_ppm = 35'000; z[i].fx.expected_policy_ppm = 35'000; } return z; };
+		auto z = make(1);
+		FxWorld w;
+		/* Day 1: the bank rate differs from the start rate of the model (3.5% against 3.0%), but there is no memory yet: no surprise, no jump. */
+		for (int i = 0; i < 4; i++) { z[i].policy_ppm = 30'000; z[i].external_policy_ppm = 35'000; z[i].external_expected_ppm = 35'000; }
+		FxStepDay(77, 1, z.data(), 4, w);
+		CHECK(z[0].parts.surprise_ppm == 0 && z[0].policy_ppm == 35'000);
+		for (int d = 2; d <= 40; d++) { for (int i = 0; i < 4; i++) { z[i].external_policy_ppm = 35'000; z[i].external_expected_ppm = 35'000; } FxStepDay(77, d, z.data(), 4, w); }
+		CHECK(z[1].policy_ppm == 35'000 && z[1].parts.surprise_ppm == 0);  // no meeting: nothing changes, no internal meeting runs
+		/* An EXPECTED hike (the market expected +0.25% the day before): no surprise. A hike that was NOT expected: the surprise is the difference. */
+		for (int i = 0; i < 4; i++) z[i].fx.expected_policy_ppm = 37'500;
+		z[0].external_policy_ppm = 37'500; z[0].external_expected_ppm = 37'500;
+		z[1].external_policy_ppm = 37'500; z[1].external_expected_ppm = 37'500; z[1].fx.expected_policy_ppm = 35'000; // not expected
+		for (int i = 2; i < 4; i++) { z[i].external_policy_ppm = 35'000; z[i].external_expected_ppm = 35'000; }
+		FxStepDay(77, 41, z.data(), 4, w);
+		CHECK(z[0].parts.surprise_ppm == 0 && z[0].policy_ppm == 37'500);
+		CHECK(z[1].parts.surprise_ppm == 2'500 && z[1].policy_ppm == 37'500);
+		/* A huge jump is capped (a savegame that joins an older rate, a hyper-inflation step is 1.5%). */
+		z[2].external_policy_ppm = 300'000; z[2].external_expected_ppm = 300'000; z[2].fx.expected_policy_ppm = 35'000;
+		FxStepDay(77, 42, z.data(), 4, w);
+		CHECK(z[2].parts.surprise_ppm == EXTERNAL_SURPRISE_MAX_PPM && z[2].policy_ppm == 300'000);
+		/* Without an external rate the old model still runs its own meetings (the checks above this block). */
+		auto q = make(2);
+		for (int d = 1; d <= 100; d++) FxStepDay(5, d, q.data(), 4, w);
+		CHECK(q[0].policy_ppm >= POLICY_MIN_PPM && q[0].policy_ppm <= POLICY_MAX_PPM);
+	}
+	/* The price level of a zone (running costs, construction, vehicles): 50% .. 200%, integer, exact for round numbers. */
+	{
+		CHECK(PriceLevelPercent(PPM) == 100 && PriceLevelPercent(1'250'000) == 125 && PriceLevelPercent(10) == PRICE_PERCENT_MIN && PriceLevelPercent(9 * PPM) == PRICE_PERCENT_MAX);
+		CHECK(ScaleByPercent(1000, 100) == 1000 && ScaleByPercent(1000, 125) == 1250 && ScaleByPercent(0, 150) == 0 && ScaleByPercent(7, 50) == 3);
+		CHECK(ScaleByPercent(1'000'000'000'000LL, 200) == 2'000'000'000'000LL);   // no overflow at 1e12
+		/* A cheaper zone and a dearer zone around 100%: the average zone costs the same as before. */
+		for (int64_t lvl = 250'000; lvl <= 4'000'000; lvl += 50'000) CHECK(ScaleByPercent(10'000, PriceLevelPercent(lvl)) >= 5'000 && ScaleByPercent(10'000, PriceLevelPercent(lvl)) <= 20'000);
+	}
 	std::printf("%d checks, %d failed\n", g_checks, g_fail);
 	return g_fail == 0 ? 0 : 1;
 }

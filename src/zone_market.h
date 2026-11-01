@@ -10,7 +10,9 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 #include "company_type.h"
+#include "economy_type.h"
 #include "station_type.h"
 #include "tile_type.h"
 #include "zone_market_math.h"
@@ -50,6 +52,39 @@ extern ZoneMarket _zone_market;
 
 /** Called for every final delivery (economy.cpp, hook ZONE_FEE_PATCH): charges the exchange fee when the cargo crossed a zone border. */
 void ZoneFeeOnDelivery(CompanyID owner, int64_t income, StationID source, StationID dest);
+
+/** Running costs of a vehicle follow the price level of the zone it stands in (called from the 4 vehicle files, hook ZONE_RUNNING_COST_PATCH). 100% = the average of the zones. Returns the cost unchanged when there are no zones. */
+Money ZoneRunningCostScale(Money cost, TileIndex tile); ///< Money, not int64_t: CommandCost(EXPENSES_x, int64_t) is ambiguous in MSVC.
+
+/** What a cost is in the zone of `tile`: the cost times the price level of the zone (50% .. 200%, 100% = the average of the zones). Returns the cost unchanged when there are no
+ *  zones. Used for the running costs (above), for construction and for the purchase of vehicles (zone_permit.cpp, hook ZONE_PERMIT_PATCH). */
+int64_t ZonePriceScale(int64_t cost, TileIndex tile);
+/** False when the price level of construction and vehicle purchases is switched off (ZONE_PRICE_ENABLED in zone_market.cpp). */
+bool ZonePriceEnabled();
+
+struct CurrencySpec;
+
+/** How money looks (symbol in front or behind) follows a zone: the zone of the headquarters of the company that looks at the screen, or the zone
+ *  chosen by a ZoneMoneyScope (hook ZONE_CURRENCY_LOOK_PATCH in strings.cpp). The value is converted at the exchange rate of the zone by ZoneFormatMoney. Returns `base` when there are no zones. */
+const CurrencySpec &ZoneDisplayCurrency(const CurrencySpec &base);
+
+/** Money of a zone written the way people write it in that country (real exchange rate, symbol, group and decimal marks). Hook ZONE_CURRENCY_CONVERT_PATCH
+ *  at the start of FormatGenericCurrency (strings.cpp).
+ *  @param spec The currency that the game wants to draw with; only a currency made by ZoneDisplayCurrency is handled.
+ *  @param magnitude The amount in base money units, NOT negative (the caller writes the minus sign and its colour).
+ *  @param compact True: K / M for large amounts, like the game does.
+ *  @param out The text, when the function returns true.
+ *  @return False when `spec` is not a zone currency or the conversion is switched off: the caller then formats the money the normal way. */
+bool ZoneFormatMoney(const CurrencySpec *spec, int64_t magnitude, bool compact, std::string &out);
+
+/** While this object lives, money drawn by the game (GetString with a currency) uses the look of `zone` (-1 = the base currency). For windows about a town or a zone. */
+struct ZoneMoneyScope {
+	int previous;
+	explicit ZoneMoneyScope(int zone);
+	~ZoneMoneyScope();
+	ZoneMoneyScope(const ZoneMoneyScope &) = delete;
+	ZoneMoneyScope &operator=(const ZoneMoneyScope &) = delete;
+};
 
 /** The tax level (percent of the base rates) of the zone of the headquarters of a company: 100 when it has no zone. Used for the taxes of the company itself. */
 int64_t ZoneTaxPercentOfCompany(CompanyID company);

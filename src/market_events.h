@@ -145,6 +145,9 @@ enum class MarketEventKind : uint8_t {
 	PlatinumDemandDrop,  ///< Platinum (XPT): the makers of catalysts and jewellery buy less, the price falls for a while.
 	OilWellsFound,       ///< Oil (XTI), REAL: the oil stock of the market is far above its start level (wells delivered, nobody bought), the oil price falls for a while. fact_ppm = stock against the start stock (ppm), fact2 = barrels.
 	OilSupplyShort,      ///< Oil (XTI), REAL: the oil stock is far below its start level (traders bought it out), the oil price rises for a while. Same facts.
+	ContractOffered,     ///< Contract (contract.cpp, step 4), REAL: a company offered a contract to the owner of an industry. target = the buyer, fact_ppm = units a month, fact2 = price of a unit in 1/100. No effect on prices.
+	ContractSigned,      ///< Contract, REAL: a contract was signed (accepted). Same facts as the offer.
+	ContractRefused,     ///< Contract, REAL: an offer was refused. Same facts as the offer.
 	Count,
 };
 
@@ -218,6 +221,9 @@ inline const MarketEventDef &MarketEventInfo(MarketEventKind kind)
 		{  0,      0,      0,   0,      0,      0,  3, false }, // PlatinumDemandDrop
 		{  0,      0,      0,   0,      0,      0,  0, false }, // OilWellsFound (never drawn by weight: made from the real oil stock, market_events.cpp)
 		{  0,      0,      0,   0,      0,      0,  0, false }, // OilSupplyShort (same)
+		{  0,      0,      0,   0,      0,      0,  0, false }, // ContractOffered (never drawn by weight: made by the contract commands, contract.cpp)
+		{  0,      0,      0,   0,      0,      0,  0, false }, // ContractSigned
+		{  0,      0,      0,   0,      0,      0,  0, false }, // ContractRefused
 	};
 	const size_t i = static_cast<size_t>(kind);
 	return table[i < MARKET_EVENT_KIND_COUNT ? i : 0];
@@ -309,6 +315,12 @@ inline int64_t MarketFuelEffectPpm(MarketEventKind kind, int severity)
 inline bool MarketKindIsRealOilKind(MarketEventKind kind)
 {
 	return kind == MarketEventKind::OilWellsFound || kind == MarketEventKind::OilSupplyShort;
+}
+
+/** The events that the contract system makes (offer, signed, refused). They are real, they move no price. */
+inline bool MarketKindIsContract(MarketEventKind kind)
+{
+	return kind == MarketEventKind::ContractOffered || kind == MarketEventKind::ContractSigned || kind == MarketEventKind::ContractRefused;
 }
 
 /** The name of a group of cargo, for the story. */

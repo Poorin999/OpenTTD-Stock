@@ -11,6 +11,12 @@ STR_STOCK_ORDER_HINT_EXPIRY                                     :never
 STR_STOCK_TIP_EXPIRY                                            :{BLACK}Number of game days (24 real minutes each) after which the pending order is cancelled automatically. Leave empty for an order that stays until you cancel it
 STR_STOCK_ERROR_CANT_MODIFY                                     :{WHITE}Can't change this trade...
 STR_STOCK_ERROR_MARKET_CLOSED                                   :{WHITE}The stock exchange is closed on Saturday and Sunday (valuables and banknotes trade every day)
+STR_STOCK_ERROR_NOT_LISTED                                      :{WHITE}This company is not on the stock market yet (no IPO)
+STR_COMPANY_IPO_ERROR_CAPTION                                   :{WHITE}Can't take the company public...
+STR_COMPANY_IPO_ERROR_LISTED                                    :{WHITE}The company is already on the stock market
+STR_COMPANY_IPO_ERROR_NO_HQ                                     :{WHITE}Build the headquarters first
+STR_COMPANY_IPO_ERROR_TOO_EARLY                                 :{WHITE}The company needs at least one completed quarter of results before the IPO
+STR_COMPANY_IPO_ERROR_NO_CASH                                   :{WHITE}Not enough unborrowed cash for the IPO fee
 STR_STOCK_ERROR_BAD_EXPIRY                                      :{WHITE}Invalid expiration time (1 to 3650 days, or empty for none)
 STR_STOCK_NEWS_ORDER_EXPIRED                                    :{BLACK}Pending order #{NUM} ({STRING}) for {COMPANY} has expired
 

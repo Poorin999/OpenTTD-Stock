@@ -1,0 +1,52 @@
+# Strings of the contracts (contract_cmd.cpp, step 3 of the contract system), for src/lang/english.txt. apply_overlay.py adds them; it skips strings that already exist.
+
+STR_CONTRACT_ERROR_CAPTION                                      :{WHITE}Can't make this contract...
+STR_CONTRACT_ERROR_NO_INDUSTRY                                  :{WHITE}This industry does not exist
+STR_CONTRACT_ERROR_INDUSTRY_GONE                                :{WHITE}The industry of this contract is gone
+STR_CONTRACT_ERROR_NOT_YOURS                                    :{WHITE}This contract is not yours: only the buyer and the owner of the industry can answer
+STR_CONTRACT_ERROR_BAD_QTY                                      :{WHITE}The amount a month must be more than 0 and not too large
+STR_CONTRACT_ERROR_BAD_PRICE                                    :{WHITE}The price must be more than 0 and not too large
+STR_CONTRACT_ERROR_BAD_MONTHS                                   :{WHITE}A contract lasts from 1 to 36 months
+STR_CONTRACT_ERROR_NO_SUCH                                      :{WHITE}This contract does not exist
+STR_CONTRACT_ERROR_SELF_DEAL                                    :{WHITE}You can not make a contract with yourself: you own this industry
+STR_CONTRACT_ERROR_NOT_PRODUCING                                :{WHITE}This industry does not produce this cargo
+STR_CONTRACT_ERROR_TOO_MANY                                     :{WHITE}You have too many open offers and contracts
+STR_CONTRACT_ERROR_DUPLICATE                                    :{WHITE}You have an open offer for this cargo at this industry already
+STR_CONTRACT_ERROR_EXCEEDS_FREE                                 :{WHITE}More than the output that is still free (the output of a month minus the active contracts)
+STR_CONTRACT_ERROR_EXCEEDS_SHARE                                :{WHITE}One buyer may book at most 60% of the output of an industry
+STR_CONTRACT_ERROR_NO_CASH                                      :{WHITE}Not enough cash for the deposit (one month of the contract, from cash that is not borrowed)
+STR_CONTRACT_ERROR_NOT_OPEN                                     :{WHITE}This contract is not waiting for an answer
+STR_CONTRACT_ERROR_NOT_YOUR_TURN                                :{WHITE}The other side has to answer first
+STR_CONTRACT_ERROR_TIMED_OUT                                    :{WHITE}This offer is too old: it was not answered in 7 days
+STR_CONTRACT_ERROR_TOO_MANY_ROUNDS                              :{WHITE}The 3 rounds of the negotiation are used: you can only accept or refuse
+STR_CONTRACT_ERROR_SAME_TERMS                                   :{WHITE}These are the same terms as before
+STR_CONTRACT_ERROR_NOT_ALLOWED                                  :{WHITE}Only the buyer can end an active contract
+STR_CONTRACT_ERROR_CLOSED                                       :{WHITE}This contract is closed already
+
+# Contracts window (step 4)
+STR_CONTRACT_WINDOW_CAPTION                                     :Contracts
+STR_CONTRACT_OPEN_BUTTON                                        :Contracts
+STR_CONTRACT_OPEN_TIP                                           :{BLACK}Open the contracts window: offer to buy cargo from an industry and answer offers
+STR_CONTRACT_BTN_IND_PREV                                       :< Industry
+STR_CONTRACT_BTN_IND_NEXT                                       :Industry >
+STR_CONTRACT_BTN_CARGO_PREV                                     :< Cargo
+STR_CONTRACT_BTN_CARGO_NEXT                                     :Cargo >
+STR_CONTRACT_BTN_QTY_DOWN                                       :Amount -
+STR_CONTRACT_BTN_QTY_UP                                         :Amount +
+STR_CONTRACT_BTN_PRICE_DOWN                                     :Price -5%
+STR_CONTRACT_BTN_PRICE_UP                                       :Price +5%
+STR_CONTRACT_BTN_MONTHS_DOWN                                    :Months -
+STR_CONTRACT_BTN_MONTHS_UP                                      :Months +
+STR_CONTRACT_BTN_OFFER                                          :Make offer
+STR_CONTRACT_BTN_ACCEPT                                         :Accept
+STR_CONTRACT_BTN_COUNTER                                        :Counter-offer
+STR_CONTRACT_BTN_REFUSE                                         :Refuse
+STR_CONTRACT_BTN_CANCEL                                         :Withdraw / end
+STR_CONTRACT_TIP_IND                                            :{BLACK}Choose another industry to make an offer to
+STR_CONTRACT_TIP_CARGO                                          :{BLACK}Choose another cargo of this industry
+STR_CONTRACT_TIP_TERMS                                          :{BLACK}Change the terms on the form (units a month, price of one unit, length)
+STR_CONTRACT_TIP_OFFER                                          :{BLACK}Send a new offer with the terms on the form
+STR_CONTRACT_TIP_ACCEPT                                         :{BLACK}Accept the selected contract as it is (the buyer pays the deposit)
+STR_CONTRACT_TIP_COUNTER                                        :{BLACK}Answer the selected contract with the terms on the form (round 2 and 3 only)
+STR_CONTRACT_TIP_REFUSE                                         :{BLACK}Refuse the selected contract
+STR_CONTRACT_TIP_CANCEL                                         :{BLACK}Withdraw the offer, or (buyer) end the active contract: a fine unless 2 months in a row were short

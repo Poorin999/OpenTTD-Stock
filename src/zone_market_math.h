@@ -117,6 +117,21 @@ inline int64_t FeeAmount(int64_t income, int64_t fee_ppm)
 	return income / PPM * fee_ppm + income % PPM * fee_ppm / PPM;
 }
 
+/** What things cost in a zone, in percent of the average of the zones: the price level (ppm, 1.0 = the average) limited to 50% .. 200%.
+ *  Used for the running costs of vehicles, the cost of construction and the purchase of vehicles (zone_market.cpp, zone_permit.cpp). Integer only. */
+static constexpr int64_t PRICE_PERCENT_MIN = 50;
+static constexpr int64_t PRICE_PERCENT_MAX = 200;
+inline int64_t PriceLevelPercent(int64_t price_level_ppm)
+{
+	return std::clamp<int64_t>(price_level_ppm / 10'000, PRICE_PERCENT_MIN, PRICE_PERCENT_MAX);
+}
+
+/** A cost scaled by a percent, without overflow. */
+inline int64_t ScaleByPercent(int64_t cost, int64_t percent)
+{
+	return cost / 100 * percent + cost % 100 * percent / 100;
+}
+
 /** One game day of the yearly inflation of a zone: a chance move, then the pull to INFL_START_PPM. */
 inline int64_t NextInflation(uint64_t seed, int zone, int64_t day, int64_t infl)
 {
@@ -195,6 +210,7 @@ static constexpr int64_t GUIDE_DAYS_BEFORE = 15;       ///< The market expectati
 static constexpr int64_t POLICY_STEP_PPM = 2'500;      ///< A policy move is a multiple of 0.25%.
 static constexpr int64_t POLICY_HOLD_PPM = 1'250;      ///< A gap to the aim smaller than 0.125% means: keep the rate.
 static constexpr int64_t POLICY_MAX_STEPS = 3;         ///< At most 0.75% at one meeting.
+static constexpr int64_t EXTERNAL_SURPRISE_MAX_PPM = 15'000;  ///< With the real central bank: a surprise is at most 1.5% (the hyper-inflation step of central_bank.h).
 static constexpr int64_t POLICY_SURPRISE_X = 3;        ///< A surprise of the policy rate moves the exchange rate by 3 x the surprise (a surprise of 0.25% = 0.75%).
 static constexpr int64_t PRICE_LEVEL_MIN_PPM = 250'000;///< The relative price level of a zone stays between 0.25 and 4.0.
 static constexpr int64_t PRICE_LEVEL_MAX_PPM = 4'000'000;
@@ -299,6 +315,12 @@ struct FxZone {
 	int64_t rate_ppm = PPM;
 	int64_t inflation_ppm = INFL_START_PPM;
 	int64_t policy_ppm = POLICY_START_PPM;
+	/** The policy rate of the REAL central bank of the zone (CentralBank in central_bank.h), in ppm of a year, and the rate that the market expects after its next
+	 *  meeting. -1 = not given: FxStepDay then runs its own meetings and rule (the stand-alone test, and the old behaviour). When given, there is ONE policy rate per
+	 *  zone: the one that sets the loan rates is the one that moves the exchange rate. A change of the rate against yesterday is a meeting, and its surprise is
+	 *  the new rate minus what was expected yesterday. */
+	int64_t external_policy_ppm = -1;
+	int64_t external_expected_ppm = -1;
 	FxState fx;
 	FxParts parts;
 };
@@ -366,6 +388,16 @@ inline void FxStepDay(uint64_t seed, int64_t day, FxZone *z, int n, const FxWorl
 	std::array<int64_t, MAX_ZONES> surprise{}, expected{};
 	for (int i = 0; i < n; i++) {
 		FxState &f = z[i].fx;
+		if (z[i].external_policy_ppm >= 0) {
+			/* The real central bank of the zone decides; here only what the market made of it. Day 1 (no memory yet) and a savegame that joins an older rate
+			 * give no surprise, and a surprise is never bigger than a hyper-inflation step (1.5%). */
+			const int64_t now = std::clamp<int64_t>(z[i].external_policy_ppm, POLICY_MIN_PPM, POLICY_MAX_PPM);
+			if (f.gdp_days > 0 && now != z[i].policy_ppm) surprise[i] = std::clamp<int64_t>(now - f.expected_policy_ppm, -EXTERNAL_SURPRISE_MAX_PPM, EXTERNAL_SURPRISE_MAX_PPM);
+			z[i].policy_ppm = now;
+			f.expected_policy_ppm = z[i].external_expected_ppm >= 0 ? z[i].external_expected_ppm : now;
+			expected[i] = f.expected_policy_ppm;
+			continue;
+		}
 		const int64_t phase = (day + i * MEETING_STAGGER_DAYS) % MEETING_DAYS;
 		const int64_t expected_now = ExpectedPolicy(z[i].policy_ppm, z[i].inflation_ppm);
 		if (phase == MEETING_DAYS - GUIDE_DAYS_BEFORE) f.expected_policy_ppm = expected_now;

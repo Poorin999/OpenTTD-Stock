@@ -34,6 +34,13 @@ int main()
 	CHECK(!IsConstructionName("CmdBuildVehicle") && !IsConstructionName("CmdBuildShip") && !IsConstructionName("CmdBuildAircraft"));
 	CHECK(!IsConstructionName("CmdBuildRailVehicle") && !IsConstructionName("CmdBuildRoadVehicle"));
 	CHECK(!IsConstructionName("CmdZonePermit") && !IsConstructionName("CmdBankBorrow") && !IsConstructionName("CmdSellVehicle") && !IsConstructionName(""));
+	/* The gate: blocked only for a human company with a headquarters, building in a foreign zone, without a permit. */
+	CHECK(BuildBlocked(true, true, true, true, false));
+	CHECK(!BuildBlocked(true, true, true, true, true));    // permit
+	CHECK(!BuildBlocked(true, true, true, false, false));  // home zone
+	CHECK(!BuildBlocked(true, true, false, true, false));  // not a construction
+	CHECK(!BuildBlocked(true, false, true, true, false));  // no headquarters yet: the first one may stand anywhere
+	CHECK(!BuildBlocked(false, true, true, true, false));  // AI / script: price rule only
 	std::printf("%d checks, %d failed\n", g_checks, g_fail);
 	return g_fail != 0;
 }

@@ -23,8 +23,13 @@
 #include "../town_news.h"
 #include "../citizen_gold.h"
 #include "../cargo_market.h"
+#include "../commercial_bank.h"
+#include "../company_info_gui.h"
 #include "../zone_market.h"
 #include "../zone_permit.h"
+#include "../industry_owner.h"
+#include "../company_role.h"
+#include "../contract.h"
 #include "../game_time/game_time_manager.h"
 
 #include "../safeguards.h"
@@ -72,12 +77,20 @@ enum StockRecordKind : uint8_t {
 	SRK_BANK_LOG = 41,  ///< Line of the account log of the bank window: a = company, b = line (LedgerItem), ym = game day of the year, v1 = amount (sum of the bookings), v2 = ledger year, v3 = number of bookings. Written newest first.
 	SRK_ZONE_HOLD = 45, ///< Banknotes of a zone that a company holds: a = company, b = zone, v1 = notes (units of that currency).
 	SRK_BANK_GOLD = 44, ///< The gold of one bank: a = zone of the bank, v1 = ounces. Written for every bank, after SRK_GOLD (whose v3 is the sum, kept for the shape of the record: a savegame without SRK_BANK_GOLD splits it between the banks).
-	SRK_TOWN_WALLET = 48, ///< City wallet of a town (town_wallet_math.h): ym = index of the town; b = 0: v1 = loan debt, v2 = bond debt, v3 = loan carry, v4 = bond carry, v5 = interest paid; b = 1: v1 = consumer cargo paid, v2 = shortfall, v3 = business tax, v4 = grants; b = 2: v1 = fares paid, v2 = mail paid, v3 = fare shortfall; b = 3: v1 = wages back to the citizens, v2 = tax back to the treasury. Written after the records of the town.
+	SRK_TOWN_WALLET = 48, ///< City wallet of a town (town_wallet_math.h): ym = index of the town; b = 0: v1 = loan debt, v2 = bond debt, v3 = loan carry, v4 = bond carry, v5 = interest paid; b = 1: v1 = consumer cargo paid, v2 = shortfall, v3 = business tax, v4 = grants; b = 4: v1 = debt at the commercial bank, v2 = its interest carry, v3 = interest paid to it; b = 2: v1 = fares paid, v2 = mail paid, v3 = fare shortfall; b = 3: v1 = wages back to the citizens, v2 = tax back to the treasury. Written after the records of the town.
 	SRK_ZONE_FX = 47, ///< Memory of the FX model of a zone: a = zone, ym = 0..2 (part), v1..v5 = the fields of zonemath::FxState (part 0: price level, exports avg, imports avg, gdp fast, gdp slow; 1: gdp days, capital, risk, news, reserve; 2: ref, expected policy). Written after SRK_ZONE_PERMIT.
 	SRK_ZONE_PERMIT = 46, ///< Building permit: ym = 0: a = company, b = zone, v1 = game day on which it ends; ym = 1: a = zone, v1 = permit fees paid to the zone, v2 = surcharges on construction in the zone (money units). Written after SRK_ZONE_TAX.
 	SRK_ZONE_TAX = 43, ///< Tax collected in a money zone: a = zone number, v1 = land tax, v2 = transport tax, v3 = VAT of deliveries into the zone, v4 = taxes of the companies with headquarters in the zone, v5 = tax level in percent + 1 (money units). Written for every zone, after SRK_ZONE.
 	SRK_ZONE = 42,    ///< Money zone: a = zone number, v1 = capital tile, v2 = exchange rate in ppm, v3 = exchange fees earned (money units). Written for every zone, in order.
 	SRK_GOLD_NEWS = 40, ///< State of the real gold news: ym = ounces that the mines delivered since the last news (mine_news_oz), v1 = shock of today in 1/100 money units (day_shift_cents, always 0 now), v2 = the level of the economy at the last price step in 1/100 money units (last_level_cents, 0 = unknown), v3 = cash in circulation averaged over about 7 game days (cash_avg, 0 = unknown), v4 = price impact of the trades in ppm (impact_ppm).
+	SRK_COMPANY_MONTH = 49, ///< Income and costs of one game month of a company (the chart of the company window): a = company, ym = month key (companyinfo::MonthKey), v1 = income, v2 = costs. Written oldest first.
+	SRK_CARGO_HISTORY = 50, ///< Price history of the cargo prices window. a = 255: v1 = number of days recorded (CargoMarket::history_days). a = cargo type: ym = number of the group of 5 slots of the ring (slot = ym * 5 + k), v1..v5 = shown price in ppm (price x freight rate) of those slots. Groups that are all 0 are not written.
+	SRK_CBANK = 51, ///< Commercial bank (commercial_bank.h), key = town: ym = town index, b = part. Part 0: v1 = liquid, v2 = cb_loan, v3 = dep_carry, v4 = res_carry, v5 = cb_carry. Part 1: v1..v4 = deposits of the four groups, v5 = written_off. Part 2: v1 = failures, v2 = created, v3 = loan_interest, v4 = deposit_interest.
+	SRK_CBANK_LOAN = 52, ///< Loan of a company at a commercial bank: a = company, ym = town index, b = part. Part 0: v1 = debt, v2 = interest_paid, v3 = rate_bp, v4 = carry, v5 = last_charged_day. Part 1: v1 = penalty_level | in_default << 8 | clean_days << 16.
+	SRK_IPO = 53, ///< Whether the shares of a company are on the market: a = company, v1 = 1 when listed. Written for every company slot. A savegame without any such record counts every company as listed.
+	SRK_INDUSTRY_OWNER = 54, ///< Owner of an industry (industry_owner_math.h): ym = pool index of the industry, a = owner company, b = upgrade level, v1 = game day of the purchase, v2 = price paid, v3 = tile | type << 32 (identity of the industry), v4 = construction date, v5 = founding year of the owner company. ym = -1: v1 = total paid to the system. Industries without a record belong to the system, so a savegame from before this record loads with no owners.
+	SRK_COMPANY_ROLE = 55, ///< Role of a company (company_role_math.h): a = company, b = role (0 transport owner, 1 industry owner), v1 = Dealer mode (0 or 1), v2 = game day of the last change, v5 = founding year of the company. Only companies that are not the default (transport owner, Dealer off) have a record; a savegame without any such record makes every company a transport owner.
+	SRK_CONTRACT = 56, ///< A contract between a buyer and an industry (contract_math.h). ym = -1: totals (v1 = next id, v2 = fines paid to the system). Else ym = id | part << 24; part 0 = the contract packed in a, b, v1..v5 (see contract::Table::ToRecords); part 1 = identity of the industry. Only contracts that are not closed are written. A savegame without this record has no contracts.
 	SRK_TOWN_BOOK = 36, ///< One group of citizens of a town: a = group (citizengold::Style), ym = index of the town, v1 = gold in hundredths of an ounce, v2 = what it cost, v3 = cash, v4 = profit of closed sales, v5 = wins | losses << 24 | cooldown << 48.
 };
 
@@ -155,6 +168,59 @@ struct STCKChunkHandler : ChunkHandler {
 		meta.v2 = _stock_market.dividend_delay;
 		meta.v3 = _stock_market.dividend_quarter;
 		write(meta);
+
+		/* The IPO state: one record per company slot, so that a loaded game can tell 'nobody is listed' from 'a savegame from before the IPO'. */
+		for (size_t c = 0; c < MAX_COMPANIES; c++) {
+			StockRecord r;
+			r.kind = SRK_IPO;
+			r.a = static_cast<uint8_t>(c);
+			r.v1 = _stock_market.listed[c] ? 1 : 0;
+			write(r);
+		}
+
+		/* The owners of the industries (the totals first, then one row per owned industry). Nothing is written when nobody owns an industry and nothing was paid. */
+		if (!_industry_owners.rows.empty() || _industry_owners.system_income != 0) {
+			for (const indowner::Record &rec : _industry_owners.ToRecords()) {
+				StockRecord r;
+				r.kind = SRK_INDUSTRY_OWNER;
+				r.a = rec.a;
+				r.b = rec.b;
+				r.ym = rec.ym;
+				r.v1 = rec.v1;
+				r.v2 = rec.v2;
+				r.v3 = rec.v3;
+				r.v4 = rec.v4;
+				r.v5 = rec.v5;
+				write(r);
+			}
+		}
+
+		/* The roles of the companies: one record per company that is not the default. Nothing is written when every company is a transport owner without Dealer mode. */
+		for (const crole::Record &rec : _company_roles.ToRecords()) {
+			StockRecord r;
+			r.kind = SRK_COMPANY_ROLE;
+			r.a = rec.a;
+			r.b = rec.b;
+			r.v1 = rec.v1;
+			r.v2 = rec.v2;
+			r.v5 = rec.v5;
+			write(r);
+		}
+
+		/* The contracts (step 3 of the contract system): the totals, then two records per contract that is not closed. */
+		for (const contract::Record &rec : _contracts.ToRecords()) {
+			StockRecord r;
+			r.kind = SRK_CONTRACT;
+			r.a = rec.a;
+			r.b = rec.b;
+			r.ym = rec.ym;
+			r.v1 = rec.v1;
+			r.v2 = rec.v2;
+			r.v3 = rec.v3;
+			r.v4 = rec.v4;
+			r.v5 = rec.v5;
+			write(r);
+		}
 
 		{
 			StockRecord t;
@@ -455,6 +521,75 @@ struct STCKChunkHandler : ChunkHandler {
 			write(r);
 		}
 
+		/* The price history of the cargo prices window: the raw ring, groups of 5 slots, all-zero groups are left out. */
+		{
+			StockRecord m;
+			m.kind = SRK_CARGO_HISTORY;
+			m.a = 255;
+			m.v1 = _cargo_market.history_days;
+			write(m);
+			for (size_t c = 0; c < _cargo_market.history.size() && c < 255; c++) {
+				const auto &ring = _cargo_market.history[c];
+				for (size_t g = 0; g * 5 < CargoMarket::HISTORY_DAYS; g++) {
+					int64_t v[5] = {0, 0, 0, 0, 0};
+					bool any = false;
+					for (size_t k = 0; k < 5; k++) {
+						const size_t slot = g * 5 + k;
+						if (slot < CargoMarket::HISTORY_DAYS) v[k] = ring[slot];
+						if (v[k] != 0) any = true;
+					}
+					if (!any) continue;
+					StockRecord r;
+					r.kind = SRK_CARGO_HISTORY;
+					r.a = static_cast<uint8_t>(c);
+					r.ym = static_cast<int32_t>(g);
+					r.v1 = v[0]; r.v2 = v[1]; r.v3 = v[2]; r.v4 = v[3]; r.v5 = v[4];
+					write(r);
+				}
+			}
+		}
+
+		/* The income and costs per game month of the companies (the chart of the company window). */
+		for (size_t c = 0; c < _company_month_buckets.size(); c++) {
+			for (const auto &[key, b] : _company_month_buckets[c]) {
+				if (b.income == 0 && b.expense == 0) continue;
+				StockRecord r;
+				r.kind = SRK_COMPANY_MONTH;
+				r.a = static_cast<uint8_t>(c);
+				r.ym = key;
+				r.v1 = b.income;
+				r.v2 = b.expense;
+				write(r);
+			}
+		}
+
+		/* The commercial banks and the loans of the companies at them (the loan of a town is in SRK_TOWN_WALLET b = 4). */
+		for (const auto &[town, bank] : _commercial_banks.banks) {
+			const cbank::Sheet &s = bank.sheet;
+			StockRecord p0;
+			p0.kind = SRK_CBANK; p0.b = 0; p0.ym = static_cast<int32_t>(town);
+			p0.v1 = s.liquid; p0.v2 = s.cb_loan; p0.v3 = s.dep_carry; p0.v4 = s.res_carry; p0.v5 = s.cb_carry;
+			write(p0);
+			StockRecord p1;
+			p1.kind = SRK_CBANK; p1.b = 1; p1.ym = static_cast<int32_t>(town);
+			p1.v1 = s.deposits[0]; p1.v2 = s.deposits[1]; p1.v3 = s.deposits[2]; p1.v4 = s.deposits[3]; p1.v5 = s.written_off;
+			write(p1);
+			StockRecord p2;
+			p2.kind = SRK_CBANK; p2.b = 2; p2.ym = static_cast<int32_t>(town);
+			p2.v1 = s.failures; p2.v2 = s.created; p2.v3 = s.loan_interest; p2.v4 = s.deposit_interest;
+			write(p2);
+		}
+		for (const auto &[key, acc] : _commercial_banks.loans) {
+			StockRecord l0;
+			l0.kind = SRK_CBANK_LOAN; l0.b = 0; l0.a = static_cast<uint8_t>(key & 15); l0.ym = static_cast<int32_t>(key >> 4);
+			l0.v1 = acc.debt; l0.v2 = acc.interest_paid; l0.v3 = acc.rate_bp; l0.v4 = acc.carry; l0.v5 = acc.last_charged_day;
+			write(l0);
+			StockRecord l1;
+			l1.kind = SRK_CBANK_LOAN; l1.b = 1; l1.a = l0.a; l1.ym = l0.ym;
+			l1.v1 = static_cast<int64_t>(acc.penalty_level) | (acc.in_default ? 0x100 : 0) | (static_cast<int64_t>(acc.clean_days) << 16);
+			write(l1);
+		}
+
 		for (const auto &[key, a] : _town_treasury.accounts) {
 			if (!a.started && a.treasury == 0 && a.spent == 0) continue;
 			StockRecord r;
@@ -490,7 +625,7 @@ struct STCKChunkHandler : ChunkHandler {
 				pr.v4 = tp.tp;
 				write(pr);
 			}
-			if (a.loan_debt != 0 || a.bond_debt != 0 || a.interest_paid != 0 || a.goods_paid != 0 || a.shortfall != 0 || a.business_tax != 0 || a.grants != 0 || a.fares_paid != 0 || a.mail_paid != 0 || a.fare_shortfall != 0 || a.wages_back != 0 || a.tax_back != 0) {
+			if (a.loan_debt != 0 || a.bond_debt != 0 || a.interest_paid != 0 || a.goods_paid != 0 || a.shortfall != 0 || a.business_tax != 0 || a.grants != 0 || a.fares_paid != 0 || a.mail_paid != 0 || a.fare_shortfall != 0 || a.wages_back != 0 || a.tax_back != 0 || a.cb_debt != 0 || a.cb_carry != 0 || a.cb_interest != 0) {
 				StockRecord w0;
 				w0.kind = SRK_TOWN_WALLET;
 				w0.b = 0;
@@ -515,6 +650,14 @@ struct STCKChunkHandler : ChunkHandler {
 				w3.ym = static_cast<int32_t>(key);
 				w3.v1 = a.wages_back; w3.v2 = a.tax_back;
 				write(w3);
+				if (a.cb_debt != 0 || a.cb_carry != 0 || a.cb_interest != 0) {
+					StockRecord w4;
+					w4.kind = SRK_TOWN_WALLET;
+					w4.b = 4;
+					w4.ym = static_cast<int32_t>(key);
+					w4.v1 = a.cb_debt; w4.v2 = a.cb_carry; w4.v3 = a.cb_interest;
+					write(w4);
+				}
 			}
 		}
 
@@ -661,6 +804,7 @@ struct STCKChunkHandler : ChunkHandler {
 		_stock_market.Reset();
 
 		bool have_stats = false;
+		bool have_ipo = false; ///< Whether the savegame has the IPO records (older ones do not: every company counts as listed).
 		std::array<std::vector<TimeframeRecord>, STOCK_SYMBOLS> frame_rows{}; ///< Candles of game time, imported after the last row.
 		int index;
 		while ((index = SlIterateArray()) != -1) {
@@ -1003,6 +1147,60 @@ struct STCKChunkHandler : ChunkHandler {
 					}
 					break;
 
+				case SRK_CARGO_HISTORY:
+					if (r.a == 255) {
+						_cargo_market.history_days = static_cast<uint32_t>(std::clamp<int64_t>(r.v1, 0, UINT32_MAX));
+					} else if (r.a < _cargo_market.history.size() && r.ym >= 0) {
+						const int64_t vals[5] = {r.v1, r.v2, r.v3, r.v4, r.v5};
+						for (size_t k = 0; k < 5; k++) {
+							const size_t slot = static_cast<size_t>(r.ym) * 5 + k;
+							if (slot < CargoMarket::HISTORY_DAYS) _cargo_market.history[r.a][slot] = static_cast<int32_t>(std::clamp<int64_t>(vals[k], 0, 2'000'000'000));
+						}
+					}
+					break;
+
+				case SRK_COMPANY_MONTH:
+					if (r.a < _company_month_buckets.size()) {
+						auto &months = _company_month_buckets[r.a];
+						CompanyMonthBucket &b = months[r.ym];
+						b.income = std::max<int64_t>(r.v1, 0);
+						b.expense = std::max<int64_t>(r.v2, 0);
+						while (months.size() > COMPANY_MONTHS_KEPT) months.erase(months.begin());
+					}
+					break;
+
+				case SRK_CBANK: {
+					if (r.ym < 0 || r.ym > 0xFFFF) break;
+					cbank::Sheet &s = _commercial_banks.banks[static_cast<uint32_t>(r.ym)].sheet;
+					if (r.b == 0) {
+						s.liquid = std::max<int64_t>(r.v1, 0); s.cb_loan = std::max<int64_t>(r.v2, 0);
+						s.dep_carry = r.v3; s.res_carry = r.v4; s.cb_carry = r.v5;
+					} else if (r.b == 1) {
+						s.deposits[0] = std::max<int64_t>(r.v1, 0); s.deposits[1] = std::max<int64_t>(r.v2, 0);
+						s.deposits[2] = std::max<int64_t>(r.v3, 0); s.deposits[3] = std::max<int64_t>(r.v4, 0);
+						s.written_off = std::max<int64_t>(r.v5, 0);
+					} else {
+						s.failures = std::max<int64_t>(r.v1, 0); s.created = std::max<int64_t>(r.v2, 0);
+						s.loan_interest = std::max<int64_t>(r.v3, 0); s.deposit_interest = std::max<int64_t>(r.v4, 0);
+					}
+					break;
+				}
+
+				case SRK_CBANK_LOAN: {
+					if (r.ym < 0 || r.ym > 0xFFFF || r.a >= MAX_COMPANIES) break;
+					BankAccount &acc = _commercial_banks.loans[CBankLoanKey(static_cast<uint32_t>(r.ym), r.a)];
+					if (r.b == 0) {
+						acc.debt = std::max<int64_t>(r.v1, 0); acc.interest_paid = std::max<int64_t>(r.v2, 0);
+						acc.rate_bp = std::max<int64_t>(r.v3, 0); acc.carry = std::max<int64_t>(r.v4, 0);
+						acc.last_charged_day = r.v5;
+					} else {
+						acc.penalty_level = static_cast<uint8_t>(std::clamp<int64_t>(r.v1 & 0xFF, 0, BANK_PENALTY_LEVEL_MAX));
+						acc.in_default = (r.v1 & 0x100) != 0;
+						acc.clean_days = static_cast<uint16_t>(std::clamp<int64_t>((r.v1 >> 16) & 0xFFFF, 0, 0xFFFF));
+					}
+					break;
+				}
+
 				case SRK_FLEET:
 					_cargo_market.fleet.fast_x100 = std::max<int64_t>(r.v1, 0);
 					_cargo_market.fleet.slow_x100 = std::max<int64_t>(r.v2, 0);
@@ -1016,6 +1214,8 @@ struct STCKChunkHandler : ChunkHandler {
 						a.loan_debt = std::max<int64_t>(r.v1, 0); a.bond_debt = std::max<int64_t>(r.v2, 0);
 						a.loan_carry = std::max<int64_t>(r.v3, 0); a.bond_carry = std::max<int64_t>(r.v4, 0);
 						a.interest_paid = std::max<int64_t>(r.v5, 0);
+					} else if (r.b == 4) {
+						a.cb_debt = std::max<int64_t>(r.v1, 0); a.cb_carry = std::max<int64_t>(r.v2, 0); a.cb_interest = std::max<int64_t>(r.v3, 0);
 					} else if (r.b == 3) {
 						a.wages_back = std::max<int64_t>(r.v1, 0); a.tax_back = std::max<int64_t>(r.v2, 0);
 					} else if (r.b == 2) {
@@ -1157,9 +1357,56 @@ struct STCKChunkHandler : ChunkHandler {
 					break;
 				}
 
+				case SRK_IPO:
+					have_ipo = true;
+					if (r.a < MAX_COMPANIES) _stock_market.listed[r.a] = r.v1 != 0;
+					break;
+
+				case SRK_INDUSTRY_OWNER: {
+					indowner::Record rec;
+					rec.ym = r.ym;
+					rec.a = r.a;
+					rec.b = r.b;
+					rec.v1 = r.v1;
+					rec.v2 = r.v2;
+					rec.v3 = r.v3;
+					rec.v4 = r.v4;
+					rec.v5 = r.v5;
+					_industry_owners.FromRecord(rec); // A record that makes no sense is ignored.
+					break;
+				}
+
+				case SRK_COMPANY_ROLE: {
+					crole::Record rec;
+					rec.a = r.a;
+					rec.b = r.b;
+					rec.v1 = r.v1;
+					rec.v2 = r.v2;
+					rec.v5 = r.v5;
+					_company_roles.FromRecord(rec); // A record that makes no sense is ignored.
+					break;
+				}
+
+				case SRK_CONTRACT: {
+					contract::Record rec;
+					rec.ym = r.ym;
+					rec.a = r.a;
+					rec.b = r.b;
+					rec.v1 = r.v1;
+					rec.v2 = r.v2;
+					rec.v3 = r.v3;
+					rec.v4 = r.v4;
+					rec.v5 = r.v5;
+					_contracts.FromRecord(rec); // A record that makes no sense is ignored.
+					break;
+				}
+
 				default: break;
 			}
 		}
+
+		/* A savegame from before the IPO: every company is on the market, so that a game in progress can still be traded. */
+		if (!have_ipo) _stock_market.listed.fill(true);
 
 		/* The candles of game time. A list that is not valid is dropped; the candles start again from the next price. */
 		for (size_t i = 0; i < STOCK_SYMBOLS; i++) {

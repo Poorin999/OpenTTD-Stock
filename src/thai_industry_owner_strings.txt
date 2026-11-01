@@ -1,0 +1,9 @@
+# Thai texts of the owners of industries (industry_owner.cpp). Added to lang/thai.txt by apply_overlay.py
+STR_INDUSTRY_OWNER_ERROR_CAPTION                        :{WHITE}ซื้อโรงงานนี้ไม่ได้...
+STR_INDUSTRY_OWNER_ERROR_NOT_FOR_SALE                   :{WHITE}โรงงานนี้ไม่มีผลผลิต จึงไม่มีสิทธิ์ให้เป็นเจ้าของ
+STR_INDUSTRY_OWNER_ERROR_YOURS                          :{WHITE}บริษัทของคุณเป็นเจ้าของโรงงานนี้อยู่แล้ว
+STR_INDUSTRY_OWNER_ERROR_OWNED                          :{WHITE}บริษัทอื่นเป็นเจ้าของโรงงานนี้อยู่
+STR_INDUSTRY_OWNER_ERROR_NO_CASH                        :{WHITE}เงินสดที่ไม่ได้กู้มีไม่พอ
+STR_INDUSTRY_OWNER_QUERY_CAPTION                          :ซื้อโรงงานนี้?
+STR_INDUSTRY_OWNER_BUTTON                                 :ซื้อโรงงาน
+STR_INDUSTRY_OWNER_BUTTON_TIP                             :{BLACK}ซื้อสิทธิ์เป็นเจ้าของโรงงานนี้จากระบบ
