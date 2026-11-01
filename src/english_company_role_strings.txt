@@ -1,0 +1,10 @@
+# Strings of the roles of companies (company_role.cpp, step 2 of the contract system), for src/lang/english.txt. apply_overlay.py adds them; it skips strings that already exist.
+
+STR_COMPANY_ROLE_ERROR_CAPTION                                  :{WHITE}Can't change the role...
+STR_COMPANY_ROLE_ERROR_SAME                                     :{WHITE}Your company has this role already
+STR_COMPANY_ROLE_ERROR_HAS_VEHICLES                             :{WHITE}An industry owner may run road vehicles only. Sell your trains, ships and aircraft first
+STR_COMPANY_ROLE_DEALER_ERROR_CAPTION                           :{WHITE}Can't change Dealer mode...
+STR_COMPANY_ROLE_ERROR_SAME_DEALER                              :{WHITE}Dealer mode is already in this state
+STR_COMPANY_ROLE_ERROR_DEALER_ROLE                              :{WHITE}Only a transport owner can use Dealer mode
+STR_COMPANY_ROLE_ERROR_BUILD                                    :{WHITE}An industry owner may run road vehicles only: no trains, ships or aircraft
+STR_COMPANY_ROLE_ERROR_START                                    :{WHITE}An industry owner may run road vehicles only: this vehicle may not start

@@ -31,6 +31,7 @@
 #include "company_base.h"
 #include "company_func.h"
 #include "hq_gate.h"
+#include "commercial_bank.h"
 #include "viewport_func.h"
 
 #include "table/strings.h"
@@ -192,6 +193,8 @@ struct ZoneMapWindow : Window {
 			DrawString(lx + sw + ScaleGUITrad(6), rx, y, fmt::format("{}  {}", i + 1, capital != nullptr ? GetString(STR_TOWN_NAME, capital->index) : std::string("-")), TC_WHITE, SA_LEFT);
 			y += row_h;
 			DrawString(lx + sw + ScaleGUITrad(6), rx, y, fmt::format("{} {}.{:03}   ผู้คน {}", ZoneCurrencyName(i), z.rate_ppm / 1'000'000, (z.rate_ppm % 1'000'000) / 1'000, z.population), TC_GREY, SA_LEFT);
+			y += row_h;
+			DrawString(lx + sw + ScaleGUITrad(6), rx, y, CentralBankTile(i) != INVALID_TILE ? "ธนาคารกลาง: อยู่ในเมืองหลวง (เปิดแล้ว)" : "ธนาคารกลาง: ยังไม่สร้างอาคาร", TC_GREY, SA_LEFT);
 			y += row_h + ScaleGUITrad(4);
 		}
 		if (Company::IsValidID(_local_company)) {
@@ -290,6 +293,8 @@ struct ZoneTaxWindow : Window {
 	{
 		if (widget != WID_ZT_PANEL) return;
 
+		const ZoneMoneyScope money_look(this->zone); // Taxes and fees collected in a FOREIGN zone are shown in its money at the rate of the day; the home zone is shown at the fixed rate.
+
 		const int pad = ScaleGUITrad(8);
 		const int row_h = GetCharacterHeight(FS_NORMAL) + ScaleGUITrad(3);
 		const int left = r.left + pad;
@@ -316,6 +321,7 @@ struct ZoneTaxWindow : Window {
 		/* The head: which zone. */
 		line(fmt::format("โซน {}  เมืองหลวง {}  ({})", this->zone + 1, capital != nullptr ? GetString(STR_TOWN_NAME, capital->index) : std::string("-"), ZoneCurrencyName(this->zone)), TC_LIGHT_BLUE);
 		line(fmt::format("อัตราแลกเปลี่ยน {}.{:03}   ผู้คนในโซน {}", z.rate_ppm / 1'000'000, (z.rate_ppm % 1'000'000) / 1'000, z.population), TC_GREY);
+		line(CentralBankTile(this->zone) != INVALID_TILE ? "ธนาคารกลางของโซน: อาคารธนาคารในเมืองหลวง (เปิดแล้ว)" : "ธนาคารกลางของโซน: ยังไม่สร้างอาคารในเมืองหลวง", TC_GREY);
 		y += ScaleGUITrad(6);
 
 		/* What was collected in this zone since the start of the game. */

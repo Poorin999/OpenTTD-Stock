@@ -515,6 +515,7 @@ static void OpenBestTrade(CompanyID owner, uint8_t wallet)
 			continue;
 		}
 		if (!IsStockSymbolValid(symbol)) continue;
+		if (!IsStockSymbolListed(symbol)) continue; // Not on the market yet (no IPO).
 		if (_stock_market.price_fp[target.base()] <= 0 || FairFixed(target) <= 0) continue;
 		if (GetStockPrice(target) < STOCK_AI_MIN_PRICE) continue;
 

@@ -32,7 +32,7 @@ struct CargoMarket {
 	std::array<cargomarket::CargoState, NUM_CARGO> cargo{};
 	cargomarket::FleetState fleet{}; ///< The vehicles of all companies (fast and long average), for the freight rate. Saved (SRK_FLEET).
 
-	/** The price shown in the cargo prices window (price x freight rate), one value per game day, newest last in ring order. Not saved: a load starts the history again. */
+	/** The price shown in the cargo prices window (price x freight rate), one value per game day, newest last in ring order. Saved (SRK_CARGO_HISTORY). */
 	static constexpr size_t HISTORY_DAYS = 366;
 	std::array<std::array<int32_t, HISTORY_DAYS>, NUM_CARGO> history{};
 	uint32_t history_days = 0; ///< Number of days recorded so far (the ring holds the last HISTORY_DAYS).

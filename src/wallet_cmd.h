@@ -20,6 +20,10 @@
 #include "gold_reserve.h"
 /* And the building permits of the money zones. */
 #include "zone_permit.h"
+/* And the right of ownership of industries (step 1 of the contract system). */
+#include "industry_owner.h"
+#include "company_role.h" /* CMD_SET_COMPANY_ROLE, CMD_SET_DEALER_MODE */
+#include "contract.h" /* CMD_CONTRACT_OFFER, CMD_CONTRACT_COUNTER, CMD_CONTRACT_ACCEPT, CMD_CONTRACT_REFUSE, CMD_CONTRACT_CANCEL */
 
 CommandCost CmdWalletCreate(DoCommandFlags flags, WalletKind kind);
 CommandCost CmdWalletDelete(DoCommandFlags flags, uint8_t wallet);

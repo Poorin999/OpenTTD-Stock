@@ -67,6 +67,21 @@ inline bool IsConstructionName(std::string_view name)
 	return true;
 }
 
+/** Whether a command is the purchase of a vehicle (the tile of the command is the depot): its price follows the price level of the zone of the depot. */
+inline bool IsVehiclePurchaseName(std::string_view name)
+{
+	return name == "CmdBuildVehicle" || name == "CmdCloneVehicle";
+}
+
+/**
+ * The permit GATE: whether a command is refused in its test run. Only a HUMAN company with a headquarters standing, building (construction) on a tile of a zone
+ * that is not the zone of its headquarters, without a valid permit. AI and game-script companies are not blocked (they pay the surcharge of the price rule).
+ */
+inline bool BuildBlocked(bool human, bool has_hq, bool construction, bool foreign_zone, bool has_permit)
+{
+	return human && has_hq && construction && foreign_zone && !has_permit;
+}
+
 } // namespace permitmath
 
 #endif /* ZONE_PERMIT_MATH_H */

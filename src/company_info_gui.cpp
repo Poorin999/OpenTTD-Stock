@@ -8,7 +8,7 @@
 /**
  * @file company_info_gui.cpp The company window of the mod (design of the owner's screenshot): the history of the company with the face of the
  * president, the net worth, the vehicles of the company with the profit of the year, the income and costs of the last months, the company colour,
- * and the buttons. The IPO button is only a placeholder: the IPO system does not exist yet.
+ * and the buttons. The orange IPO button lists the company on the stock market (CMD_COMPANY_IPO) and shows the real state of the IPO.
  *
  * What the window does itself: rename the company and the president, set the company colour, open the finances, the vehicle list, the
  * infrastructure window and the stock terminal. What only the ORIGINAL company window can do (new face, build or move the headquarters,
@@ -21,10 +21,13 @@
 #include "central_bank.h"
 #include "wallet_base.h"
 #include "stock_gui.h"
+#include "stock_base.h"
+#include "stock_cmd.h" /* CMD_COMPANY_IPO */
 #include "zone_market.h"
 #include "zone_permit.h"
 #include "zone_permit_math.h"
 #include "hq_gate.h"
+#include "company_role.h" /* the role card: CMD_SET_COMPANY_ROLE, CMD_SET_DEALER_MODE */
 #include "openttd.h"
 #include "game_time/game_time_manager.h"
 #include <algorithm>
@@ -71,28 +74,31 @@
 bool _company_info_use_original = false;
 
 /* ------------------------------------------------------------------------------------------------------------------------------------ */
-/* Income and costs per game month (for the chart). Not saved: the chart starts empty after a load and fills as game days pass.        */
+/* Income and costs per game month (for the chart). Saved (SRK_COMPANY_MONTH), so the chart is the same after a load.                          */
 /* ------------------------------------------------------------------------------------------------------------------------------------ */
 
 void ShowCompanyPermitWindow(CompanyID company); /* below: the permits tab */
 void ShowCompanyBanknoteWindow(CompanyID company); /* below: the banknotes tab */
 
+std::array<std::map<int32_t, CompanyMonthBucket>, MAX_COMPANIES> _company_month_buckets;
+static std::array<int64_t, MAX_COMPANIES> _seen_income{};  ///< Income of the quarter at the last game day.
+static std::array<int64_t, MAX_COMPANIES> _seen_expense{}; ///< Costs of the quarter at the last game day.
+static std::array<bool, MAX_COMPANIES> _seen_valid{};      ///< True when the two numbers above were read.
+static uint64_t _seen_minutes = 0;                         ///< Game minute of the last game day.
+
+void ResetCompanyMonthBuckets()
+{
+	for (auto &m : _company_month_buckets) m.clear();
+	_seen_income.fill(0);
+	_seen_expense.fill(0);
+	_seen_valid.fill(false);
+	_seen_minutes = 0;
+}
+
 namespace {
 
-/** What one company earned and spent in one game month. */
-struct MonthBucket {
-	int64_t income = 0;  ///< Income of the month.
-	int64_t expense = 0; ///< Costs of the month (positive).
-};
-
-static constexpr size_t MONTHS_KEPT = 12; ///< How many months are kept per company.
+static constexpr size_t MONTHS_KEPT = COMPANY_MONTHS_KEPT; ///< How many months are kept per company.
 static constexpr int CHART_MONTHS = 5;    ///< How many months the chart shows.
-
-std::array<std::map<int32_t, MonthBucket>, MAX_COMPANIES> _month_buckets;
-std::array<int64_t, MAX_COMPANIES> _seen_income{};  ///< Income of the quarter at the last game day.
-std::array<int64_t, MAX_COMPANIES> _seen_expense{}; ///< Costs of the quarter at the last game day.
-std::array<bool, MAX_COMPANIES> _seen_valid{};      ///< True when the two numbers above were read.
-uint64_t _seen_minutes = 0;                         ///< Game minute of the last game day.
 
 /** Once per game day: add what the company earned and spent since yesterday to the bucket of this month. */
 const GameTimeSubscription _company_month_daily(GameTimeEvent::Day, [](const GameTimeSnapshot &now)
@@ -101,7 +107,7 @@ const GameTimeSubscription _company_month_daily(GameTimeEvent::Day, [](const Gam
 
 	if (now.total_minutes < _seen_minutes) {
 		/* The clock went back (a new game or an older savegame): forget everything. */
-		for (auto &m : _month_buckets) m.clear();
+		for (auto &m : _company_month_buckets) m.clear();
 		_seen_valid.fill(false);
 	} else if (_seen_minutes != 0 && now.total_minutes != _seen_minutes + static_cast<uint64_t>(GameTimeManager::MINUTES_PER_DAY)) {
 		/* Days were skipped (a savegame was loaded, or stock_skip): the old totals no longer fit, read them again. */
@@ -115,10 +121,10 @@ const GameTimeSubscription _company_month_daily(GameTimeEvent::Day, [](const Gam
 		const int64_t income = static_cast<int64_t>(c->cur_economy.income);
 		const int64_t expense = -static_cast<int64_t>(c->cur_economy.expenses);
 		if (_seen_valid[i]) {
-			MonthBucket &b = _month_buckets[i][key];
+			CompanyMonthBucket &b = _company_month_buckets[i][key];
 			b.income += companyinfo::BucketDelta(income, _seen_income[i]);
 			b.expense += companyinfo::BucketDelta(expense, _seen_expense[i]);
-			while (_month_buckets[i].size() > MONTHS_KEPT) _month_buckets[i].erase(_month_buckets[i].begin());
+			while (_company_month_buckets[i].size() > MONTHS_KEPT) _company_month_buckets[i].erase(_company_month_buckets[i].begin());
 		}
 		_seen_income[i] = income;
 		_seen_expense[i] = expense;
@@ -128,6 +134,12 @@ const GameTimeSubscription _company_month_daily(GameTimeEvent::Day, [](const Gam
 
 /** True: the window shows Thai text. False: English only. Change it here and build again. */
 constexpr bool USE_THAI = true;
+
+/** Whether the shares of a company are on the market. */
+static bool IsCompanyListed(CompanyID company)
+{
+	return company.base() < MAX_COMPANIES && _stock_market.listed[company.base()];
+}
 
 std::string CiText(const char *thai, const char *english)
 {
@@ -171,6 +183,11 @@ const char *const TAB_EN[NUM_TABS] = {"Company", "Finance", "Vehicles", "Infrast
 const char *const BTN_TH[4] = {"เปลี่ยนชื่อบริษัท", "ชื่อประธาน", "ซื้อหุ้น", "IPO บริษัท"};
 const char *const BTN_EN[4] = {"Rename company", "President name", "Stocks", "Company IPO"};
 constexpr int BTN_IPO = 3; ///< Index of the IPO button (orange).
+/** The texts of the role card (step 2 of the contract system): the two roles, then the Dealer mode switch. */
+const char *const ROLE_TH[2] = {"เจ้าของขนส่ง", "เจ้าของโรงงาน"};
+const char *const ROLE_EN[2] = {"Transport owner", "Industry owner"};
+const char *const DEALER_TH[2] = {"โหมด Dealer: ปิด", "โหมด Dealer: เปิด"};
+const char *const DEALER_EN[2] = {"Dealer mode: OFF", "Dealer mode: ON"};
 
 /** All the rectangles of the window, from the rectangle of the panel. Draw and click use the same numbers. */
 struct InfoLayout {
@@ -181,6 +198,9 @@ struct InfoLayout {
 	int mid_left = 0, mid_right = 0;
 	Rect swatch[16];
 	Rect btns[4];
+	Rect role;         ///< The card of the role.
+	Rect role_btn[3];  ///< Transport owner, Industry owner, Dealer mode.
+	Rect role_desc;    ///< The line of text under the buttons.
 	Rect footer;
 	int hdr = 0; ///< Height of the title strip of a card.
 	int pad = 0;
@@ -257,9 +277,19 @@ InfoLayout MakeInfoLayout(const Rect &r, int net_text_w)
 	for (int i = 0; i < 4; i++) btn_min_w = std::max(btn_min_w, static_cast<int>(GetStringBoundingBox(CiText(BTN_TH[i], BTN_EN[i])).width) + ScaleGUITrad(20));
 	const int footer_h = fh + ScaleGUITrad(6);
 
+	/* The card of the role: the title strip, a row of three buttons and one line of text. */
+	const int role_btn_h = std::max(ScaleGUITrad(26), fh + ScaleGUITrad(10));
+	const int role_btn_gap = ScaleGUITrad(6);
+	const int role_h = l.hdr + ScaleGUITrad(8) + role_btn_h + ScaleGUITrad(6) + row + pad;
+	int role_btn_min_w = 0;
+	for (int i = 0; i < 2; i++) {
+		role_btn_min_w = std::max(role_btn_min_w, static_cast<int>(GetStringBoundingBox(CiText(ROLE_TH[i], ROLE_EN[i])).width) + ScaleGUITrad(20));
+		role_btn_min_w = std::max(role_btn_min_w, static_cast<int>(GetStringBoundingBox(CiText(DEALER_TH[i], DEALER_EN[i])).width) + ScaleGUITrad(20));
+	}
+
 	/* The smallest size. */
-	l.needed_w = 2 * pad + std::max({tabs_w, pad + face_col + pad + mid_min_w + pad + net_w + pad, 8 * sw_min_w + 7 * sw_gap + 2 * pad, 4 * btn_min_w + 3 * btn_gap, ScaleGUITrad(780)});
-	l.needed_h = pad + tab_h + gap + profile_h + gap + row2_min + gap + col_h + gap + btn_h + ScaleGUITrad(6) + footer_h + pad;
+	l.needed_w = 2 * pad + std::max({tabs_w, pad + face_col + pad + mid_min_w + pad + net_w + pad, 8 * sw_min_w + 7 * sw_gap + 2 * pad, 4 * btn_min_w + 3 * btn_gap, 3 * role_btn_min_w + 2 * role_btn_gap + 2 * pad, ScaleGUITrad(780)});
+	l.needed_h = pad + tab_h + gap + profile_h + gap + row2_min + gap + col_h + gap + role_h + gap + btn_h + ScaleGUITrad(6) + footer_h + pad;
 
 	/* The rest of the height (when the window is bigger) goes to the row of the chart. */
 	const int extra = std::max(0, static_cast<int>(r.bottom - r.top + 1) - l.needed_h);
@@ -270,6 +300,8 @@ InfoLayout MakeInfoLayout(const Rect &r, int net_text_w)
 	y += row2_h + gap;
 	l.colours = {left, y, right, y + col_h};
 	y += col_h + gap;
+	l.role = {left, y, right, y + role_h};
+	y += role_h + gap;
 
 	const int bw = (right - left - 3 * btn_gap) / 4;
 	for (int i = 0; i < 4; i++) {
@@ -289,6 +321,18 @@ InfoLayout MakeInfoLayout(const Rect &r, int net_text_w)
 	l.mid_left = p.left + pad + face_col + pad;
 	l.mid_right = l.net_box.left - pad;
 	l.hq_btn = {l.mid_left, p.bottom - pad - hq_h, l.mid_right, p.bottom - pad};
+
+	/* Inside the card of the role: three buttons side by side, the text under them. */
+	{
+		const Rect &ro = l.role;
+		const int rb_top = ro.top + l.hdr + ScaleGUITrad(8);
+		const int rb_w = (ro.right - ro.left - 2 * pad - 2 * role_btn_gap) / 3;
+		for (int i = 0; i < 3; i++) {
+			const int bx = ro.left + pad + i * (rb_w + role_btn_gap);
+			l.role_btn[i] = {bx, rb_top, bx + rb_w, rb_top + role_btn_h};
+		}
+		l.role_desc = {ro.left + pad, rb_top + role_btn_h + ScaleGUITrad(6), ro.right - pad, ro.bottom - pad};
+	}
 
 	/* Inside the card of the colours: two rows of eight. */
 	const Rect &c = l.colours;
@@ -344,7 +388,6 @@ struct CompanyInfoWindow : Window {
 	enum class QueryKind : uint8_t { None, CompanyName, President };
 	QueryKind query_kind = QueryKind::None;
 	bool placing_hq = false;             ///< True while the cursor places the headquarters (own tool, no original window).
-	uint64_t ipo_flash_until = 0;        ///< Game minute until which the footer says that the IPO does not exist yet.
 
 	/** The numbers change all the time: draw again 4 times a second so the cash is the same as in the status bar. */
 	const IntervalTimer<TimerWindow> redraw_interval = {std::chrono::milliseconds(250), [this](auto) {
@@ -439,7 +482,7 @@ struct CompanyInfoWindow : Window {
 			total_vehicles += vs.count[i];
 			total_profit += vs.profit[i];
 		}
-		DrawCard(l.profile, l.hdr, CiText("ประวัติบริษัท", "History"), fmt::format("{} · {} {}", CiText("บริษัทขนส่ง", "Transport company"), CiText("ผู้เล่น", "Player"), this->company.base() + 1));
+		DrawCard(l.profile, l.hdr, CiText("ประวัติบริษัท", "History"), fmt::format("{} · {} {}", GetCompanyRole(this->company) == crole::Role::IndustryOwner ? CiText("บริษัทโรงงาน", "Industry company") : CiText("บริษัทขนส่ง", "Transport company"), CiText("ผู้เล่น", "Player"), this->company.base() + 1));
 
 		/* The face and the president. */
 		DrawCompanyManagerFace(c->face, c->colour, l.face);
@@ -555,19 +598,53 @@ struct CompanyInfoWindow : Window {
 			}
 		}
 
+		/* ---- The card of the role (step 2 of the contract system) ---- */
+		{
+			const crole::Role role = GetCompanyRole(this->company);
+			const bool is_io = role == crole::Role::IndustryOwner;
+			const bool dealer = IsCompanyDealer(this->company);
+			DrawCard(l.role, l.hdr, CiText("บทบาทบริษัท", "Company role"),
+				is_io ? CiText(ROLE_TH[1], ROLE_EN[1]) : (dealer ? CiText("เจ้าของขนส่ง · Dealer", "Transport owner · Dealer") : CiText(ROLE_TH[0], ROLE_EN[0])));
+			const PixelColour active_fill = GetColourGradient(COLOUR_YELLOW, SHADE_DARK);
+			DrawButton(l.role_btn[0], CiText(ROLE_TH[0], ROLE_EN[0]), !is_io ? active_fill : box_fill, !is_io ? TC_BLACK : TC_WHITE, mine);
+			DrawButton(l.role_btn[1], CiText(ROLE_TH[1], ROLE_EN[1]), is_io ? active_fill : box_fill, is_io ? TC_BLACK : TC_WHITE, mine);
+			DrawButton(l.role_btn[2], CiText(DEALER_TH[dealer ? 1 : 0], DEALER_EN[dealer ? 1 : 0]), dealer ? GetColourGradient(COLOUR_ORANGE, SHADE_NORMAL) : box_fill, dealer ? TC_BLACK : TC_WHITE, mine && !is_io);
+
+			/* One line: what the role means, or what stops the change. */
+			const int blocked = is_io ? 0 : CountVehiclesForbiddenFor(this->company, crole::Role::IndustryOwner);
+			std::string desc;
+			TextColour desc_colour = TC_GREY;
+			if (is_io) {
+				desc = CiText("สร้างโรงงาน คลัง และรถบรรทุกเท่านั้น ห้ามรถไฟ เรือ เครื่องบิน · โหมด Dealer ใช้ไม่ได้", "Industries, warehouses and road vehicles only: no trains, ships or aircraft · no Dealer mode");
+			} else if (blocked > 0) {
+				desc = fmt::format("{} {} {}", CiText("จะเป็นเจ้าของโรงงานได้ต้องขายรถไฟ เรือ และเครื่องบินก่อน เหลืออยู่", "To become an industry owner, sell your trains, ships and aircraft first. Left:"), blocked, CiText("คัน", "vehicle(s)"));
+				desc_colour = TC_ORANGE;
+			} else {
+				desc = CiText("ใช้ยานพาหนะได้ทุกชนิด · เปิดโหมด Dealer ได้", "Every vehicle type · can switch Dealer mode on");
+			}
+			DrawString(l.role_desc.left, l.role_desc.right, l.role_desc.top, desc, desc_colour, SA_LEFT);
+		}
+
 		/* ---- The buttons ---- */
+		const bool listed = IsCompanyListed(this->company);
+		const bool can_ipo = !listed && CanCompanyIpo(this->company);
 		for (int i = 0; i < 4; i++) {
 			const bool ipo = i == BTN_IPO;
-			const bool enabled = i == 2 || mine;
-			DrawButton(l.btns[i], CiText(BTN_TH[i], BTN_EN[i]), ipo ? GetColourGradient(COLOUR_ORANGE, SHADE_NORMAL) : box_fill, ipo ? TC_BLACK : TC_WHITE, enabled);
+			/* The IPO button: live while the company can go public, and a plain 'Listed' once it has. */
+			const bool enabled = ipo ? (mine && can_ipo) : (i == 2 || mine);
+			const std::string label = (ipo && listed) ? CiText("จดทะเบียนแล้ว", "Listed") : CiText(BTN_TH[i], BTN_EN[i]);
+			DrawButton(l.btns[i], label, ipo ? GetColourGradient(COLOUR_ORANGE, SHADE_NORMAL) : box_fill, ipo ? TC_BLACK : TC_WHITE, enabled);
 		}
 
 		/* ---- The line at the bottom ---- */
-		const bool flash = GameTimeManager::Get().GetTotalGameMinutes() < this->ipo_flash_until;
-		if (flash) {
-			DrawString(l.footer.left, l.footer.right, l.footer.top, CiText("ระบบ IPO ยังไม่เปิดใช้งาน (ปุ่มนี้เป็นเพียงตัวอย่างหน้าจอ)", "The IPO system is not available yet (this button is only a placeholder)"), TC_ORANGE, SA_LEFT);
+		if (listed) {
+			DrawString(l.footer.left, l.footer.right, l.footer.top, CiText("บริษัทอยู่ในตลาดหุ้นแล้ว", "The company is on the stock market"), TC_GREY, SA_LEFT);
+		} else if (can_ipo) {
+			DrawString(l.footer.left, l.footer.right, l.footer.top, CiText("พร้อม IPO ค่าธรรมเนียม ", "Ready for the IPO, fee ") + CiMoney(GetCompanyIpoFee(this->company)), TC_ORANGE, SA_LEFT);
+		} else if (CompanyNeedsHq(this->company)) {
+			DrawString(l.footer.left, l.footer.right, l.footer.top, CiText("ยังไม่เข้าตลาด: ต้องสร้างสำนักงานใหญ่ (HQ) ก่อน", "Not on the market: build the headquarters first"), TC_GREY, SA_LEFT);
 		} else {
-			DrawString(l.footer.left, l.footer.right, l.footer.top, CiText("ปุ่ม IPO เป็นตัวอย่างหน้าจอ ยังไม่มีระบบเสนอขายหุ้นจริง", "The IPO button is only a placeholder: there is no share offering yet"), TC_GREY, SA_LEFT);
+			DrawString(l.footer.left, l.footer.right, l.footer.top, CiText("ยังไม่เข้าตลาด: ต้องมีผลประกอบการครบ 1 ไตรมาสก่อน", "Not on the market: one completed quarter of results is needed first"), TC_GREY, SA_LEFT);
 		}
 		DrawString(l.footer.left, l.footer.right, l.footer.top, fmt::format("COMPANY {:02}", this->company.base() + 1), TC_GREY, SA_RIGHT);
 	}
@@ -599,8 +676,8 @@ struct CompanyInfoWindow : Window {
 		/* The last months: the current one and the four before it. */
 		const GameTimeSnapshot snap = GameTimeManager::Get().GetSnapshot();
 		const int32_t now_key = companyinfo::MonthKey(snap.year, snap.day);
-		const auto &buckets = _month_buckets[this->company.base()];
-		MonthBucket shown[CHART_MONTHS];
+		const auto &buckets = _company_month_buckets[this->company.base()];
+		CompanyMonthBucket shown[CHART_MONTHS];
 		int64_t top_value = 0;
 		for (int i = 0; i < CHART_MONTHS; i++) {
 			const auto it = buckets.find(now_key - (CHART_MONTHS - 1 - i));
@@ -699,6 +776,26 @@ struct CompanyInfoWindow : Window {
 			}
 		}
 
+		/* The role card: the command checks everything again (vehicles owned, role); the error comes as the usual message. */
+		if (mine) {
+			const bool is_io = GetCompanyRole(this->company) == crole::Role::IndustryOwner;
+			if (InRect(l.role_btn[0], pt)) {
+				if (is_io) Command<CMD_SET_COMPANY_ROLE>::Post(STR_COMPANY_ROLE_ERROR_CAPTION, static_cast<uint8_t>(crole::Role::TransportOwner));
+				this->SetDirty();
+				return;
+			}
+			if (InRect(l.role_btn[1], pt)) {
+				if (!is_io) Command<CMD_SET_COMPANY_ROLE>::Post(STR_COMPANY_ROLE_ERROR_CAPTION, static_cast<uint8_t>(crole::Role::IndustryOwner));
+				this->SetDirty();
+				return;
+			}
+			if (InRect(l.role_btn[2], pt)) {
+				if (!is_io) Command<CMD_SET_DEALER_MODE>::Post(STR_COMPANY_ROLE_DEALER_ERROR_CAPTION, !IsCompanyDealer(this->company));
+				this->SetDirty();
+				return;
+			}
+		}
+
 		/* The buttons at the bottom. */
 		if (InRect(l.btns[0], pt) && mine) {
 			this->query_kind = QueryKind::CompanyName;
@@ -709,8 +806,8 @@ struct CompanyInfoWindow : Window {
 		} else if (InRect(l.btns[2], pt)) {
 			ShowStockWindow();
 		} else if (InRect(l.btns[BTN_IPO], pt)) {
-			/* The IPO system does not exist yet: only say so in the line at the bottom. */
-			this->ipo_flash_until = GameTimeManager::Get().GetTotalGameMinutes() + 6;
+			/* The command checks everything again (headquarters, quarter, cash); the error comes as the usual message. */
+			if (mine && CanCompanyIpo(this->company)) Command<CMD_COMPANY_IPO>::Post(STR_COMPANY_IPO_ERROR_CAPTION, true);
 			this->SetDirty();
 		}
 	}

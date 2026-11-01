@@ -6,7 +6,7 @@
 /**
  * @file commercial_bank.h The commercial banks: one in every town. They take deposits from the citizens, lend to the town treasury and to companies, keep reserves at the
  * central bank (which is their lender of last resort) and can fail. They use the model of the central bank (rating C..AAA, risk rate curve, default and penalty, write-off).
- * See commercial_bank_math.h for the rules. Saved as SRK_CBANK / SRK_CBANK_LOAN (saveload/stock_sl.cpp), loan of a town in SRK_TOWN_WALLET b = 4.
+ * See commercial_bank_math.h for the rules. Saved as SRK_CBANK / SRK_CBANK_LOAN (saveload/stock_sl.cpp), loan of a town in SRK_TOWN_WALLET b = 4. Saved since 2026-10-30.
  */
 
 #ifndef COMMERCIAL_BANK_H
@@ -19,6 +19,7 @@
 #include "company_type.h"
 #include "economy_type.h"
 #include "central_bank.h"
+#include "tile_type.h"
 #include "commercial_bank_math.h"
 
 /** One commercial bank (the key in the manager is the index of its town). */
@@ -39,11 +40,19 @@ struct CommercialBankManager {
 
 	std::map<uint32_t, int64_t> next_build_try; ///< Game day before which no new bank building is tried in a town (it had no site). Not saved.
 
-	void Reset() { this->banks.clear(); this->loans.clear(); this->next_build_try.clear(); }
+	bool first_build_done = false; ///< False until the banks of the towns were made once after a new game or a load (not saved).
+	void Reset() { this->banks.clear(); this->loans.clear(); this->next_build_try.clear(); this->first_build_done = false; }
+	void EnsureBanks(int64_t day);
 	void UpdateDaily(int64_t day);
 };
 
 extern CommercialBankManager _commercial_banks;
+
+struct Town;
+/** The central bank of a zone is the bank building of the capital of that zone: its tile, INVALID_TILE while there is none (or no such zone). */
+TileIndex CentralBankTile(int zone);
+/** The zone (0 based) of which this town is the capital, -1 for any other town. */
+int CapitalZoneOfTown(const Town *t);
 
 /** Money that a company owes to all the commercial banks together. */
 int64_t GetCommercialDebt(CompanyID company);

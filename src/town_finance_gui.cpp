@@ -11,6 +11,7 @@
 #include "town_finance_gui.h"
 #include "town_treasury.h"
 #include "town_wallet_math.h"
+#include "zone_market.h"
 #include "central_bank.h"
 #include "gold_reserve.h"
 #include "stock_base.h"
@@ -138,6 +139,7 @@ struct TownFinanceWindow : Window {
 	{
 		const Town *t = Town::GetIfValid(static_cast<TownID>(this->town_index));
 		if (t == nullptr) return 0;
+		const ZoneMoneyScope money_look(_zone_market.ZoneOfTile(t->xy)); // The money of a town looks like the money of its zone.
 
 		const Look look;
 		const int pad = ScaleGUITrad(8);

@@ -62,7 +62,7 @@ struct StockOrderWindow : Window {
 	/** Whether this symbol may be traded: a company must exist and not be the company of the local player; a valuable can always be traded. */
 	static bool IsTradable(CompanyID company)
 	{
-		return IsStockSymbolValid(company.base()) && company != _local_company;
+		return IsStockSymbolListed(company.base()) && company != _local_company;
 	}
 
 	/** Make sure #symbol is a tradable company; pick the first one when it is not. INVALID_OWNER when there is none. */

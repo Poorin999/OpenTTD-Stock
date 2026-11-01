@@ -361,7 +361,7 @@ void RetailMarketManager::ExecuteSlice(int hour)
 	auto part = [&](int64_t whole) { return whole * (hour + 1) / H - whole * hour / H; };
 
 	for (uint8_t i = 0; i < MAX_COMPANIES; i++) {
-		if (!this->day_plan[i].valid || !Company::IsValidID(CompanyID{i}) || _stock_market.price_fp[i] <= 0) continue;
+		if (!this->day_plan[i].valid || !Company::IsValidID(CompanyID{i}) || !IsStockSymbolListed(i) || _stock_market.price_fp[i] <= 0) continue;
 		CompanyRecord &rec = this->companies[i];
 		const int64_t price = GetStockPrice(CompanyID{i});
 		if (price <= 0) continue;

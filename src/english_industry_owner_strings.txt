@@ -1,0 +1,10 @@
+# Strings of the owners of industries (industry_owner.cpp, step 1 of the contract system), for src/lang/english.txt. apply_overlay.py adds them; it skips strings that already exist.
+
+STR_INDUSTRY_OWNER_ERROR_CAPTION                                :{WHITE}Can't buy this industry...
+STR_INDUSTRY_OWNER_ERROR_NOT_FOR_SALE                           :{WHITE}This industry produces nothing, so there is no output to own
+STR_INDUSTRY_OWNER_ERROR_YOURS                                  :{WHITE}Your company already owns this industry
+STR_INDUSTRY_OWNER_ERROR_OWNED                                  :{WHITE}Another company owns this industry
+STR_INDUSTRY_OWNER_ERROR_NO_CASH                                :{WHITE}Not enough unborrowed cash
+STR_INDUSTRY_OWNER_QUERY_CAPTION                                :Buy this industry?
+STR_INDUSTRY_OWNER_BUTTON                                       :Buy industry
+STR_INDUSTRY_OWNER_BUTTON_TIP                                   :{BLACK}Buy the right of ownership of this industry from the system

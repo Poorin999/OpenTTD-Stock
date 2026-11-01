@@ -12,6 +12,7 @@
 #include "cargo_market_gui.h"
 #include "oil_market_gui.h"
 #include "zone_map_gui.h"
+#include "contract_gui.h"
 #include "market_events.h"
 #include "market_news_ai.h"
 #include "stock_base.h"
@@ -366,6 +367,10 @@ struct MarketNewsWindow : Window {
 			ShowZoneMapWindow();
 			return;
 		}
+		if (widget == WID_MN_CONTRACTS) {
+			ShowContractWindow();
+			return;
+		}
 		if (widget != WID_MN_PANEL) return;
 		if (this->news.Click(this->GetWidget<NWidgetBase>(WID_MN_PANEL)->GetCurrentRect(), pt)) this->SetDirty();
 	}
@@ -378,6 +383,7 @@ static constexpr std::initializer_list<NWidgetPart> _nested_market_news_widgets 
 		NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_MN_CARGO), SetStringTip(STR_MARKET_NEWS_CARGO_BUTTON, STR_MARKET_NEWS_CARGO_TIP),
 		NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_MN_OIL), SetStringTip(STR_MARKET_NEWS_OIL_BUTTON, STR_MARKET_NEWS_OIL_TIP),
 		NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_MN_ZONES), SetStringTip(STR_MARKET_NEWS_ZONES_BUTTON, STR_MARKET_NEWS_ZONES_TIP),
+		NWidget(WWT_PUSHTXTBTN, COLOUR_GREY, WID_MN_CONTRACTS), SetStringTip(STR_CONTRACT_OPEN_BUTTON, STR_CONTRACT_OPEN_TIP),
 		NWidget(WWT_SHADEBOX, COLOUR_GREY),
 		NWidget(WWT_STICKYBOX, COLOUR_GREY),
 	EndContainer(),

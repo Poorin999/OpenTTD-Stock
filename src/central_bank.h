@@ -393,6 +393,20 @@ struct MonetaryPolicy {
 	bool Extended() const { return this->emergency || this->shift_bp > POLICY_SHIFT_MAX_BP; }
 	bool Update(int64_t day, int64_t index_ppm, int64_t value_now, int64_t value_before, int64_t jobs_growth_bp = 0, bool has_jobs = false);
 	bool CheckUnscheduled(int64_t day, int64_t index_ppm, int64_t jobs_growth_bp, bool has_jobs, int64_t jobs_report_day);
+	/**
+	 * The shift (bp) that the market expects after the next meeting: where the rule wants the rate (from the inflation and growth of the last meeting), rounded
+	 * like a move. Made from SAVED values only (not from wanted_gap_bp, which is not saved), so every client, also one that has just loaded the game, gets the
+	 * same number; the exchange rate model of the zones reads it (zone_market.cpp).
+	 */
+	int64_t ExpectedShiftBp() const
+	{
+		if (!this->measured) return this->shift_bp;
+		const int64_t wanted = PolicyDesiredShiftBp(this->inflation_bp, this->growth_bp, this->emergency);
+		int64_t max_step = this->Extended() ? POLICY_EMERGENCY_STEP_BP : POLICY_BIG_STEP_BP;
+		if (this->emergency && this->inflation_bp >= POLICY_HYPER_INFLATION_BP) max_step = POLICY_HYPER_STEP_BP;
+		const int64_t step = PolicyRoundMove(wanted - this->shift_bp, max_step);
+		return std::clamp<int64_t>(this->shift_bp + step, POLICY_SHIFT_MIN_BP, this->Extended() || this->emergency ? POLICY_EMERGENCY_SHIFT_MAX_BP : POLICY_SHIFT_MAX_BP);
+	}
 };
 
 /** The penalty rate in bp for a penalty level (1 or more): 1500, 1550, ... capped at 1800; 1100 more while the policy shift is above the normal ceiling (emergency). */
@@ -700,6 +714,10 @@ enum class LedgerItem : uint8_t {
 	ZonePermit,      ///< One-time fee of a building permit for a foreign zone (zone_permit.cpp). Expense, paid to the bank of that zone. Appended last: the index is saved.
 	ZoneExchange,    ///< Cash given for banknotes of a zone (expense) and cash got back for them (income): shown, not counted as earnings (zone_market.cpp). Appended last: the index is saved.
 	GoldStorage,     ///< Storage and insurance of the gold in the vault (tax.cpp, GOLD_STORAGE_BP_PER_YEAR of its value, daily). Expense. Appended last: the index is saved.
+	IpoFee,          ///< Fee of the IPO of a company (stock_base.cpp, STOCK_IPO_FEE_PERMILLE of its value). Expense, paid to the bank of the zone. Appended last: the index is saved.
+	IndustryBuy,     ///< Price of the right of ownership of an industry (industry_owner.cpp). Expense, paid to the bank of the zone of the industry. Appended last: the index is saved.
+	ContractFine,    ///< Fine of a shortfall of a contract (contract.cpp, step 6): expense of the owner of the industry, income of the buyer. Appended last: the index is saved.
+	ContractEscrow,  ///< Escrow of a contract (contract.cpp): the deposit that the buyer pays (expense) and gets back (income). Shown, not counted as earnings. Appended last: the index is saved.
 	End,
 };
 static constexpr size_t LEDGER_ITEMS = static_cast<size_t>(LedgerItem::End);

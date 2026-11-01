@@ -10,6 +10,9 @@
 #ifndef COMPANY_INFO_GUI_H
 #define COMPANY_INFO_GUI_H
 
+#include <array>
+#include <cstdint>
+#include <map>
 #include "company_type.h"
 
 /** While this is true, ShowCompany() opens the ORIGINAL company window (face, headquarters, shares). Only ShowOriginalCompanyWindow() sets it. */
@@ -28,5 +31,19 @@ void ShowOriginalCompanyWindow(CompanyID company);
 void ShowCompanyInfrastructureOfMod(CompanyID company);
 /** Open the face window of OpenTTD for this company (wrapper in company_gui.cpp, added by patch_company_info). */
 void ShowCompanyFaceOfMod(CompanyID company);
+
+/** What one company earned and spent in one game month (the chart of the company window). Saved as SRK_COMPANY_MONTH (saveload/stock_sl.cpp). */
+struct CompanyMonthBucket {
+	int64_t income = 0;  ///< Income of the month.
+	int64_t expense = 0; ///< Costs of the month (positive).
+};
+
+constexpr size_t COMPANY_MONTHS_KEPT = 12; ///< How many months are kept per company.
+
+/** The buckets, per company, key = companyinfo::MonthKey (year and month). Ordered, so the oldest month is the first. */
+extern std::array<std::map<int32_t, CompanyMonthBucket>, MAX_COMPANIES> _company_month_buckets;
+
+/** Forget the buckets and the running totals (a new game or the start of a load, called by StockMarket::Reset). */
+void ResetCompanyMonthBuckets();
 
 #endif /* COMPANY_INFO_GUI_H */

@@ -1,0 +1,2 @@
+# Thai texts of the building permits of the money zones (zone_permit.cpp). Added to lang/thai.txt by apply_overlay.py
+STR_ZONE_PERMIT_ERROR_NEED                              :{WHITE}ต้องมีใบอนุญาตก่อสร้างของเขตนี้ก่อน

@@ -67,21 +67,59 @@ CommandCost CmdZonePermit(DoCommandFlags flags, uint8_t zone)
 	return CommandCost(EXPENSES_OTHER);
 }
 
-CommandCost ZonePermitAdjustCost(Commands cmd, TileIndex tile, const CommandCost &cost)
+/**
+ * What the zone adds to (or takes off) the cost of a command: (1) the PRICE LEVEL of the zone of the tile (50% .. 200% of the average of the zones, from the inflation
+ * of that zone) for every construction and every purchase of a vehicle, for every company; (2) the permit surcharge for a construction in a foreign zone (a percentage of
+ * the cost that already follows the price level). Pure function of the state of the game, the same on every client. `count` = add the surcharge to the statistics.
+ */
+static int64_t ZoneExtraCost(Commands cmd, TileIndex tile, int64_t base, bool count)
 {
-	if (tile == 0 || _zone_market.count <= 0 || !Company::IsValidID(_current_company)) return cost;
-	const int64_t base = static_cast<int64_t>(cost.GetCost());
-	if (base <= 0 || CompanyNeedsHq(_current_company)) return cost;
-	if (!permitmath::IsConstructionName(GetCommandName(cmd))) return cost;
+	if (tile == 0 || base <= 0 || _zone_market.count <= 0 || !Company::IsValidID(_current_company)) return 0;
+	const std::string_view name = GetCommandName(cmd);
+	const bool construction = permitmath::IsConstructionName(name);
+	const bool purchase = permitmath::IsVehiclePurchaseName(name);
+	if (!construction && !purchase) return 0;
 
 	const int here = _zone_market.ZoneOfTile(tile);
-	const int home = _zone_market.ZoneOfCompany(_current_company);
-	if (here < 0 || home < 0 || here == home) return cost;
+	if (here < 0) return 0;
+	int64_t total = base;
+	if (ZonePriceEnabled()) total = ZonePriceScale(base, tile);
+	if (construction && !CompanyNeedsHq(_current_company)) {
+		const int home = _zone_market.ZoneOfCompany(_current_company);
+		if (home >= 0 && home != here) {
+			const int64_t extra = permitmath::Surcharge(total, _zone_permits.Has(_current_company, here), _zone_market.zones[here].tax_percent);
+			if (extra > 0 && count) _zone_permits.surcharges[here] += extra;
+			total += extra;
+		}
+	}
+	return total - base;
+}
 
-	const int64_t extra = permitmath::Surcharge(base, _zone_permits.Has(_current_company, here), _zone_market.zones[here].tax_percent);
-	if (extra <= 0) return cost;
-	_zone_permits.surcharges[here] += extra;
+CommandCost ZonePermitAdjustCost(Commands cmd, TileIndex tile, const CommandCost &cost)
+{
+	const int64_t extra = ZoneExtraCost(cmd, tile, static_cast<int64_t>(cost.GetCost()), true);
+	if (extra == 0) return cost;
 	CommandCost out = cost;
 	out.AddCost(Money(extra));
 	return out;
+}
+
+void ZonePermitCheckTest(Commands cmd, TileIndex tile, CommandCost &res)
+{
+	if (res.Failed() || tile == 0 || _zone_market.count <= 0 || !Company::IsValidID(_current_company)) return;
+
+	if (permitmath::IsConstructionName(GetCommandName(cmd))) {
+		const int here = _zone_market.ZoneOfTile(tile);
+		const int home = _zone_market.ZoneOfCompany(_current_company);
+		if (here >= 0 && home >= 0) {
+			const bool human = !Company::Get(_current_company)->is_ai;
+			if (permitmath::BuildBlocked(human, !CompanyNeedsHq(_current_company), true, here != home, _zone_permits.Has(_current_company, here))) {
+				res = CommandCost(STR_ZONE_PERMIT_ERROR_NEED);
+				return;
+			}
+		}
+	}
+	/* The test run of the local client also knows the price level and the surcharge, so the check "enough cash" is made with the price that will be paid. */
+	const int64_t extra = ZoneExtraCost(cmd, tile, static_cast<int64_t>(res.GetCost()), false);
+	if (extra != 0) res.AddCost(Money(extra));
 }

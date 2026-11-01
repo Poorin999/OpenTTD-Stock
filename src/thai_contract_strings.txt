@@ -1,0 +1,51 @@
+# Thai texts of the contracts (contract_cmd.cpp). Added to lang/thai.txt by apply_overlay.py
+STR_CONTRACT_ERROR_CAPTION                              :{WHITE}ทำสัญญานี้ไม่ได้...
+STR_CONTRACT_ERROR_NO_INDUSTRY                          :{WHITE}ไม่มีโรงงานนี้
+STR_CONTRACT_ERROR_INDUSTRY_GONE                        :{WHITE}โรงงานของสัญญานี้หายไปแล้ว
+STR_CONTRACT_ERROR_NOT_YOURS                            :{WHITE}สัญญานี้ไม่ใช่ของคุณ ตอบได้เฉพาะผู้ซื้อและเจ้าของโรงงาน
+STR_CONTRACT_ERROR_BAD_QTY                              :{WHITE}ปริมาณต่อเดือนต้องมากกว่า 0 และไม่มากเกินไป
+STR_CONTRACT_ERROR_BAD_PRICE                            :{WHITE}ราคาต้องมากกว่า 0 และไม่สูงเกินไป
+STR_CONTRACT_ERROR_BAD_MONTHS                           :{WHITE}สัญญาอยู่ได้ตั้งแต่ 1 ถึง 36 เดือน
+STR_CONTRACT_ERROR_NO_SUCH                              :{WHITE}ไม่มีสัญญานี้
+STR_CONTRACT_ERROR_SELF_DEAL                            :{WHITE}ทำสัญญากับตัวเองไม่ได้ เพราะคุณเป็นเจ้าของโรงงานนี้
+STR_CONTRACT_ERROR_NOT_PRODUCING                        :{WHITE}โรงงานนี้ไม่ได้ผลิตสินค้านี้
+STR_CONTRACT_ERROR_TOO_MANY                             :{WHITE}คุณมีข้อเสนอและสัญญาค้างอยู่มากเกินไป
+STR_CONTRACT_ERROR_DUPLICATE                            :{WHITE}คุณมีข้อเสนอสินค้านี้ที่โรงงานนี้รออยู่แล้ว
+STR_CONTRACT_ERROR_EXCEEDS_FREE                         :{WHITE}มากกว่าผลผลิตที่ยังว่าง (ผลผลิตต่อเดือนหักสัญญาที่ใช้งานอยู่)
+STR_CONTRACT_ERROR_EXCEEDS_SHARE                        :{WHITE}ผู้ซื้อคนเดียวจองได้ไม่เกิน 60% ของผลผลิตโรงงาน
+STR_CONTRACT_ERROR_NO_CASH                              :{WHITE}เงินสดไม่พอสำหรับเงินมัดจำ (มูลค่า 1 เดือนของสัญญา จากเงินสดที่ไม่ได้กู้)
+STR_CONTRACT_ERROR_NOT_OPEN                             :{WHITE}สัญญานี้ไม่ได้รอคำตอบอยู่
+STR_CONTRACT_ERROR_NOT_YOUR_TURN                        :{WHITE}ต้องรอให้อีกฝ่ายตอบก่อน
+STR_CONTRACT_ERROR_TIMED_OUT                            :{WHITE}ข้อเสนอนี้เก่าเกินไป ไม่มีใครตอบภายใน 7 วัน
+STR_CONTRACT_ERROR_TOO_MANY_ROUNDS                      :{WHITE}เจรจาครบ 3 รอบแล้ว ทำได้แค่ตกลงหรือปฏิเสธ
+STR_CONTRACT_ERROR_SAME_TERMS                           :{WHITE}เงื่อนไขนี้เหมือนเดิม
+STR_CONTRACT_ERROR_NOT_ALLOWED                          :{WHITE}เฉพาะผู้ซื้อเท่านั้นที่ยกเลิกสัญญาที่ใช้งานอยู่ได้
+STR_CONTRACT_ERROR_CLOSED                               :{WHITE}สัญญานี้ปิดไปแล้ว
+
+# หน้าต่างสัญญา (ขั้น 4)
+STR_CONTRACT_WINDOW_CAPTION                             :สัญญา
+STR_CONTRACT_OPEN_BUTTON                                :สัญญา
+STR_CONTRACT_OPEN_TIP                                   :{BLACK}เปิดหน้าต่างสัญญา: เสนอซื้อสินค้าจากโรงงาน และตอบข้อเสนอ
+STR_CONTRACT_BTN_IND_PREV                               :< โรงงาน
+STR_CONTRACT_BTN_IND_NEXT                               :โรงงาน >
+STR_CONTRACT_BTN_CARGO_PREV                             :< สินค้า
+STR_CONTRACT_BTN_CARGO_NEXT                             :สินค้า >
+STR_CONTRACT_BTN_QTY_DOWN                               :ปริมาณ -
+STR_CONTRACT_BTN_QTY_UP                                 :ปริมาณ +
+STR_CONTRACT_BTN_PRICE_DOWN                             :ราคา -5%
+STR_CONTRACT_BTN_PRICE_UP                               :ราคา +5%
+STR_CONTRACT_BTN_MONTHS_DOWN                            :เดือน -
+STR_CONTRACT_BTN_MONTHS_UP                              :เดือน +
+STR_CONTRACT_BTN_OFFER                                  :ยื่นข้อเสนอ
+STR_CONTRACT_BTN_ACCEPT                                 :ตกลง
+STR_CONTRACT_BTN_COUNTER                                :เสนอใหม่
+STR_CONTRACT_BTN_REFUSE                                 :ปฏิเสธ
+STR_CONTRACT_BTN_CANCEL                                 :ถอน / ยกเลิก
+STR_CONTRACT_TIP_IND                                    :{BLACK}เลือกโรงงานอื่นเพื่อยื่นข้อเสนอ
+STR_CONTRACT_TIP_CARGO                                  :{BLACK}เลือกสินค้าอื่นของโรงงานนี้
+STR_CONTRACT_TIP_TERMS                                  :{BLACK}ปรับเงื่อนไขในฟอร์ม (ปริมาณต่อเดือน ราคาต่อหน่วย ระยะเวลา)
+STR_CONTRACT_TIP_OFFER                                  :{BLACK}ส่งข้อเสนอใหม่ด้วยเงื่อนไขในฟอร์ม
+STR_CONTRACT_TIP_ACCEPT                                 :{BLACK}ตกลงสัญญาที่เลือกตามเงื่อนไขปัจจุบัน (ผู้ซื้อจ่ายเงินมัดจำ)
+STR_CONTRACT_TIP_COUNTER                                :{BLACK}ตอบสัญญาที่เลือกด้วยเงื่อนไขในฟอร์ม (รอบ 2 และ 3 เท่านั้น)
+STR_CONTRACT_TIP_REFUSE                                 :{BLACK}ปฏิเสธสัญญาที่เลือก
+STR_CONTRACT_TIP_CANCEL                                 :{BLACK}ถอนข้อเสนอ หรือ (ผู้ซื้อ) ยกเลิกสัญญาที่ใช้งานอยู่: เสียค่าปรับ เว้นแต่ขาดส่งติดกัน 2 เดือน

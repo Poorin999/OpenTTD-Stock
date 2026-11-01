@@ -28,6 +28,8 @@ static constexpr int64_t STOCK_SHARES_PER_LOT = 100;
 
 /** Largest size of a single order, as a percentage of the shares of a company. It was 100 by mistake (the comment below and the error text always said 10%): one order could take the whole company. */
 static constexpr int64_t STOCK_MAX_ORDER_PERCENT = 10;
+/** The fee of an IPO, in parts per thousand of the value of the company (0.5%). It is paid to the central bank of the zone. */
+static constexpr int64_t STOCK_IPO_FEE_PERMILLE = 5;
 
 /** Largest volume of a single order, in hundredths of a LOT. 10% of 100,000 shares is 10,000 (100.00 LOT). */
 static constexpr uint32_t STOCK_MAX_VOLUME = static_cast<uint32_t>(STOCK_SHARES_PER_COMPANY * STOCK_MAX_ORDER_PERCENT / 100);
@@ -267,6 +269,7 @@ struct StockMarket {
 	std::array<int64_t, STOCK_SYMBOLS> base_fp{};                  ///< Mid price per share according to the valuation, times #STOCK_PRICE_SCALE, refreshed once per day.
 	std::array<int64_t, STOCK_SYMBOLS> impact{};                   ///< Accumulated market impact of the orders, in parts per million; positive when more was bought than sold.
 	std::array<StockValuation, STOCK_SYMBOLS> valuation{};         ///< Valuation per company, refreshed once per day.
+	std::array<bool, MAX_COMPANIES> listed{};                      ///< Whether the shares of a company are on the market (IPO done). Saved as SRK_IPO. A savegame without that record counts every company as listed.
 	std::array<std::vector<StockCandle>, STOCK_SYMBOLS> daily{};   ///< Closed daily candles per company; ym holds the game day number. Only filled when #record_daily is set.
 	std::array<StockCandle, STOCK_SYMBOLS> daily_current{};        ///< The running daily candle per company.
 	std::array<bool, STOCK_SYMBOLS> has_daily_current{};           ///< Whether #daily_current is valid.
@@ -284,6 +287,7 @@ struct StockMarket {
 	uint8_t dividend_quarter = 0;     ///< Number (1..4) of the quarter that has ended and whose dividend is due.
 
 	void Reset();
+	void ListCompany(CompanyID company);
 	void UpdateDaily();
 	void UpdateGameDay();
 	void UpdateTick();
@@ -331,6 +335,10 @@ std::vector<StockRankEntry> GetStockRanking(StockRankSort sort);
 int64_t GetStockProfit(const StockOrder &position);
 int64_t GetStockMargin(const StockOrder &position);
 bool IsStockSymbolValid(size_t symbol);
+bool IsStockSymbolListed(size_t symbol);
+int64_t GetCompanyIpoFee(CompanyID company);
+bool CanCompanyIpo(CompanyID company);
+void ChargeIpoFee(CompanyID company, int64_t fee);
 std::string GetStockSymbolName(size_t symbol);
 std::string GetStockSymbolShortName(size_t symbol);
 int64_t GetStockUsedMargin(CompanyID owner, uint8_t wallet);

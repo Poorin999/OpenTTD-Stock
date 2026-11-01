@@ -45,4 +45,10 @@ DEF_CMD_TRAIT(CMD_ZONE_PERMIT, CmdZonePermit, {}, CommandType::MoneyManagement)
  */
 CommandCost ZonePermitAdjustCost(Commands cmd, TileIndex tile, const CommandCost &cost);
 
+/**
+ * The permit GATE (called in the TEST run of a command by command_func.h, hook ZONE_PERMIT_BLOCK_PATCH): turns a successful test into an error when a human company
+ * builds on a tile of a foreign zone without a valid permit. Does nothing when the test has already failed. Only the start tile of a command is looked at.
+ */
+void ZonePermitCheckTest(Commands cmd, TileIndex tile, CommandCost &res);
+
 #endif /* ZONE_PERMIT_H */

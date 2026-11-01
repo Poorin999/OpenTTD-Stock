@@ -11,6 +11,7 @@
 #include "town_treasury.h"
 #include "town_wallet_math.h"
 #include "central_bank.h"
+#include "zone_market.h"
 #include "citizen_gold.h"
 #include "market_events.h"
 #include "game_time/game_time_manager.h"
@@ -249,7 +250,7 @@ static std::set<uint32_t> TownsWithBankBuilding()
 
 /** True: every town gets a real bank building (the bank industry of the game) when it has none. False: only the virtual branch. */
 static constexpr bool BANK_BUILD_BUILDINGS = true;
-static constexpr int BANK_BUILD_TOWNS_PER_DAY = 4;   ///< At most this many towns are tried per game day (a failed town waits BANK_BUILD_RETRY_DAYS).
+static constexpr int BANK_BUILD_TOWNS_PER_RUN = 20;  ///< At most this many towns are tried per run (the run is every game hour; a failed town waits BANK_BUILD_RETRY_DAYS).
 static constexpr int64_t BANK_BUILD_RETRY_DAYS = 30;
 static constexpr int BANK_BUILD_RADIUS = 12;         ///< The bank is looked for this many tiles around the town centre.
 
@@ -401,16 +402,55 @@ static void UpdateBank(uint32_t town, CommercialBank &bank, int64_t day, int64_t
 	}
 }
 
-void CommercialBankManager::UpdateDaily(int64_t day)
+/** The tile of the bank building (bank industry) of a town, or INVALID_TILE when it has none. */
+static TileIndex BankBuildingTileOfTown(const Town *t)
 {
-	const int64_t index_ppm = GetPriceIndexPpm();
-
-	/* A town that is gone takes its bank with it; the loans of companies there are forgiven (the companies keep the cash). */
-	for (auto it = this->banks.begin(); it != this->banks.end();) {
-		if (TownOf(it->first) == nullptr) it = this->banks.erase(it); else ++it;
+	for (const Industry *i : Industry::Iterate()) {
+		if (i->town != t) continue;
+		const IndustrySpec *spec = GetIndustrySpec(i->type);
+		for (const auto &v : spec->accepts_cargo_label) {
+			if (const MixedCargoType *m = std::get_if<MixedCargoType>(&v); m != nullptr && *m == MCT_VALUABLES_GOLD_DIAMONDS) return i->location.tile;
+		}
 	}
-	WriteOffGoneCompanies();
+	return INVALID_TILE;
+}
 
+/** The central bank of a zone is the bank building of its capital. */
+TileIndex CentralBankTile(int zone)
+{
+	if (zone < 0 || zone >= _zone_market.count) return INVALID_TILE;
+	const Town *t = ClosestTownFromTile(_zone_market.zones[zone].capital, UINT_MAX);
+	return t != nullptr ? BankBuildingTileOfTown(t) : INVALID_TILE;
+}
+
+/** The zone (0 based) of which this town is the capital, or -1. Cheap: it is called for every town name that is drawn (the capital is the tile of the town centre). */
+int CapitalZoneOfTown(const Town *t)
+{
+	if (t == nullptr) return -1;
+	for (int z = 0; z < _zone_market.count; z++) {
+		if (_zone_market.zones[z].capital == t->xy) return z;
+	}
+	return -1;
+}
+
+/** The mark that follows the name of a capital in the main game view (zoomed out: shorter). Empty for any other town. Used by viewport.cpp and town_cmd.cpp (apply_overlay.py, patch_capital_label). */
+std::string CapitalLabelSuffix(const Town *t, bool small)
+{
+	const int z = CapitalZoneOfTown(t);
+	if (z < 0) return std::string();
+	return small ? fmt::format(" [C{}]", z + 1) : fmt::format(" [CAPITAL {}]", z + 1);
+}
+
+/** Every town gets a bank (the sheet) and, when it has none, a bank building. Runs every game hour (and at midnight), so a new town or a new game does not wait a day. */
+void CommercialBankManager::EnsureBanks(int64_t day)
+{
+	/* The names of the capitals in the game view change when the zones are made (or after a load): make the signs again. */
+	static int last_zone_count = -1;
+	if (last_zone_count != _zone_market.count) {
+		last_zone_count = _zone_market.count;
+		UpdateAllTownVirtCoords();
+	}
+	const int64_t index_ppm = GetPriceIndexPpm();
 	/* Every town has a bank. A new one gets its capital by the size of the town. */
 	for (const Town *t : Town::Iterate()) {
 		const uint32_t key = TownKey(t);
@@ -423,20 +463,57 @@ void CommercialBankManager::UpdateDaily(int64_t day)
 	std::set<uint32_t> with_building = TownsWithBankBuilding();
 	if (BANK_BUILD_BUILDINGS) {
 		const std::optional<IndustryType> bank_type = BankIndustryType();
+		/* The bank building of a capital is the central bank of its zone: the capitals come first and are not counted against the limit of towns per run. */
+		std::set<uint32_t> capital_keys;
+		for (int z = 0; z < _zone_market.count; z++) {
+			const Town *ct = ClosestTownFromTile(_zone_market.zones[z].capital, UINT_MAX);
+			if (ct != nullptr) capital_keys.insert(TownKey(ct));
+		}
 		int tried = 0;
-		for (auto &[key, b] : this->banks) {
-			if (!bank_type.has_value() || tried >= BANK_BUILD_TOWNS_PER_DAY) break;
-			if (with_building.count(key) != 0) continue;
+		auto try_town = [&](uint32_t key, bool capital) {
+			if (with_building.count(key) != 0) return;
 			const auto wait = this->next_build_try.find(key);
-			if (wait != this->next_build_try.end() && wait->second > day) continue;
+			if (wait != this->next_build_try.end() && wait->second > day + (capital ? 1 : 0)) {
+				if (!capital) return; // A capital is tried again every day, also when it was first tried as an ordinary town (30 days).
+				this->next_build_try.erase(key);
+			} else if (wait != this->next_build_try.end() && wait->second > day) return;
 			const Town *t = TownOf(key);
-			if (t == nullptr) continue;
-			tried++;
-			if (BuildBankBuilding(t, *bank_type, day)) { with_building.insert(key); this->next_build_try.erase(key); }
-			else this->next_build_try[key] = day + BANK_BUILD_RETRY_DAYS;
+			if (t == nullptr) return;
+			if (!capital) tried++;
+			if (BuildBankBuilding(t, *bank_type, day)) {
+				with_building.insert(key);
+				this->next_build_try.erase(key);
+				if (capital) {
+					AddNewsItem(GetEncodedString(STR_JUST_RAW_STRING, fmt::format("The central bank opened in {}, the capital of its zone.", GetString(STR_TOWN_NAME, t->index))),
+							NewsType::General, NewsStyle::Small, {});
+				}
+			} else {
+				this->next_build_try[key] = day + (capital ? 1 : BANK_BUILD_RETRY_DAYS); // a capital is tried again every day
+			}
+		};
+		if (bank_type.has_value()) {
+			for (uint32_t key : capital_keys) { if (this->banks.count(key) != 0) try_town(key, true); }
+			for (auto &[key, b] : this->banks) {
+				if (tried >= BANK_BUILD_TOWNS_PER_RUN) break;
+				if (capital_keys.count(key) != 0) continue;
+				try_town(key, false);
+			}
 		}
 	}
 	for (auto &[key, b] : this->banks) b.has_building = with_building.count(key) != 0;
+}
+
+void CommercialBankManager::UpdateDaily(int64_t day)
+{
+	const int64_t index_ppm = GetPriceIndexPpm();
+
+	/* A town that is gone takes its bank with it; the loans of companies there are forgiven (the companies keep the cash). */
+	for (auto it = this->banks.begin(); it != this->banks.end();) {
+		if (TownOf(it->first) == nullptr) it = this->banks.erase(it); else ++it;
+	}
+	WriteOffGoneCompanies();
+
+	this->EnsureBanks(day);
 	for (auto &[key, b] : this->banks) UpdateBank(key, b, day, index_ppm);
 	InvalidateBankData();
 }
@@ -445,4 +522,21 @@ static const GameTimeSubscription _commercial_bank_daily(GameTimeEvent::Day, [](
 {
 	if (_game_mode != GM_NORMAL) return;
 	_commercial_banks.UpdateDaily(static_cast<int64_t>(now.total_minutes / GameTimeManager::MINUTES_PER_DAY));
+}, 22);
+
+static const GameTimeSubscription _commercial_bank_hourly(GameTimeEvent::Hour, [](const GameTimeSnapshot &now)
+{
+	if (_game_mode != GM_NORMAL) return;
+	if (now.total_minutes % GameTimeManager::MINUTES_PER_DAY == 0) return; // Midnight belongs to UpdateDaily (it calls EnsureBanks too).
+	_commercial_banks.EnsureBanks(static_cast<int64_t>(now.total_minutes / GameTimeManager::MINUTES_PER_DAY));
+}, 22);
+
+/** Right at the start of a game (new game or load) the banks are built in the first game minute, not after the first hour or the first midnight. */
+static const GameTimeSubscription _commercial_bank_first(GameTimeEvent::Minute, [](const GameTimeSnapshot &now)
+{
+	if (_game_mode != GM_NORMAL || _commercial_banks.first_build_done) return;
+	if (Town::GetNumItems() == 0) return; // The map is not ready yet: try again next minute.
+	_commercial_banks.first_build_done = true;
+	UpdateAllTownVirtCoords(); // A new game or a load: the capital names in the game view.
+	_commercial_banks.EnsureBanks(static_cast<int64_t>(now.total_minutes / GameTimeManager::MINUTES_PER_DAY));
 }, 22);

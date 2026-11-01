@@ -11,6 +11,7 @@
  */
 
 #include "stdafx.h"
+#include "commercial_bank.h"
 #include <algorithm>
 #include <charconv>
 #include <vector>
@@ -29,9 +30,21 @@
 #include "zone_market.h"
 #include "zone_permit.h"
 #include "zone_permit_math.h"
+#include "industry_owner.h"
+#include "company_role.h"
+#include "contract.h"
+#include "vehicle_base.h"
+#include "industry.h"
+#include "industry_map.h"
+#include "industry_cmd.h"
+#include "core/random_func.hpp"
+#include "strings_func.h"
+#include "tile_map.h"
+#include "map_func.h"
 #include "command_func.h"
 #include "company_func.h"
 #include "zone_map_gui.h"
+#include "contract_gui.h"
 #include "zone_borders.h"
 #include "command_func.h"
 #include "wallet_cmd.h"
@@ -174,7 +187,8 @@ static bool ConZones(std::span<std::string_view> argv)
 	for (int i = 0; i < _zone_market.count; i++) {
 		const ZoneState &z = _zone_market.zones[i];
 		const Town *capital = ClosestTownFromTile(z.capital, UINT_MAX);
-		IConsolePrint(CC_DEFAULT, "zone {}  capital {}  currency {} ({})  rate {}.{:03}  people {}  fees earned {}  tax level {}%", i + 1, capital != nullptr ? GetString(STR_TOWN_NAME, capital->index) : std::string("-"), ZoneCurrencyName(i), ZoneCurrencySymbol(i), z.rate_ppm / 1'000'000, (z.rate_ppm % 1'000'000) / 1'000, z.population, z.fees, z.tax_percent);
+		const TileIndex cbt = CentralBankTile(i);
+		IConsolePrint(CC_DEFAULT, "zone {}  capital {}  currency {} ({})  rate {}.{:03}  people {}  fees earned {}  tax level {}%  central bank {}", i + 1, capital != nullptr ? GetString(STR_TOWN_NAME, capital->index) : std::string("-"), ZoneCurrencyName(i), ZoneCurrencySymbol(i), z.rate_ppm / 1'000'000, (z.rate_ppm % 1'000'000) / 1'000, z.population, z.fees, z.tax_percent, cbt != INVALID_TILE ? fmt::format("at tile {},{}", TileX(cbt), TileY(cbt)) : std::string("not built yet"));
 	}
 	for (int a = 0; a < _zone_market.count; a++) {
 		for (int b = 0; b < _zone_market.count; b++) {
@@ -299,6 +313,348 @@ static bool ConZonePermit(std::span<std::string_view> argv)
 		return true;
 	}
 	Command<CMD_ZONE_PERMIT>::Post(STR_ZONE_PERMIT_ERROR_CAPTION, static_cast<uint8_t>(zone - 1));
+	return true;
+}
+
+/** Read an industry from a console argument: an industry id, or the tile index of any tile of the industry (shown in the land area information window). */
+static bool ParseIndustryArg(std::string_view arg, IndustryID &out)
+{
+	uint32_t value = 0;
+	const auto [end, error] = std::from_chars(arg.data(), arg.data() + arg.size(), value);
+	if (error != std::errc() || end != arg.data() + arg.size()) return false;
+	if (value < 0xFFFF && Industry::IsValidID(IndustryID{static_cast<uint16_t>(value)})) {
+		out = IndustryID{static_cast<uint16_t>(value)};
+		return true;
+	}
+	if (value < Map::Size() && IsTileType(TileIndex{value}, MP_INDUSTRY)) {
+		out = GetIndustryIndex(TileIndex{value});
+		return true;
+	}
+	return false;
+}
+
+/** Owners of industries (step 1 of the contract system). 'industry_owner' lists the industries that a company owns, 'industry_owner <id>' shows one industry with its owner and price. Read only. */
+static bool ConIndustryOwner(std::span<std::string_view> argv)
+{
+	if (argv.empty() || (argv.size() >= 2 && argv[1] == "?")) {
+		IConsolePrint(CC_HELP, "Owners of industries. Usage: 'industry_owner' (the industries that a company owns, and what was paid to the system) or 'industry_owner <industry id or tile index>' (owner, upgrade level and the price of the right of ownership). An industry that nobody owns belongs to the system (NPC). Buy one with 'industry_buy <industry id or tile index>' (unborrowed cash only).");
+		return true;
+	}
+	if (_game_mode != GM_NORMAL) {
+		IConsolePrint(CC_ERROR, "This works in a running game only.");
+		return true;
+	}
+	const auto describe = [](const Industry *i) {
+		const CompanyID owner = GetIndustryOwner(i->index);
+		const int64_t price = GetIndustryOwnershipPrice(i);
+		IConsolePrint(CC_DEFAULT, "industry {} at {} x {}: owner {}, level {}, {}", i->index.base(), TileX(i->location.tile), TileY(i->location.tile),
+			owner == CompanyID::Invalid() ? std::string("system") : fmt::format("company {}", owner.base() + 1), GetIndustryLevel(i->index),
+			price > 0 ? fmt::format("price {}", price) : std::string("not for sale"));
+	};
+	if (argv.size() == 1) {
+		int owned = 0;
+		for (const Industry *i : Industry::Iterate()) {
+			if (GetIndustryOwner(i->index) == CompanyID::Invalid()) continue;
+			describe(i);
+			owned++;
+		}
+		IConsolePrint(CC_DEFAULT, "{} industries have a company as owner; paid to the system so far: {}", owned, _industry_owners.system_income);
+		return true;
+	}
+	IndustryID iid;
+	if (!ParseIndustryArg(argv[1], iid)) {
+		IConsolePrint(CC_ERROR, "'{}' is not an industry id or a tile index of an industry in this game.", argv[1]);
+		return true;
+	}
+	describe(Industry::Get(iid));
+	return true;
+}
+
+/** Found a new industry at a tile, paid by the local company like 'Fund new industry' in the game. 'industry_build' lists the types. Works in multiplayer (it is a command). */
+static bool ConIndustryBuild(std::span<std::string_view> argv)
+{
+	if (argv.empty() || (argv.size() >= 2 && argv[1] == "?")) {
+		IConsolePrint(CC_HELP, "Found a new industry. Usage: 'industry_build' (list the types), 'industry_build <type> <tile index>' (tile index is shown in the land area information window; the game's own rules for the place and the price apply). Then buy it with 'industry_buy <tile index>'.");
+		return true;
+	}
+	if (_game_mode != GM_NORMAL) {
+		IConsolePrint(CC_ERROR, "This works in a running game only.");
+		return true;
+	}
+	if (argv.size() == 1) {
+		for (IndustryType t = 0; t < NUM_INDUSTRYTYPES; t++) {
+			const IndustrySpec *spec = GetIndustrySpec(t);
+			if (!spec->enabled) continue;
+			IConsolePrint(CC_DEFAULT, "{}: {}", t, GetString(spec->name));
+		}
+		return true;
+	}
+	uint32_t type = 0, tile = 0;
+	const auto r1 = std::from_chars(argv[1].data(), argv[1].data() + argv[1].size(), type);
+	if (argv.size() != 3 || r1.ec != std::errc() || r1.ptr != argv[1].data() + argv[1].size() || type >= NUM_INDUSTRYTYPES || !GetIndustrySpec(static_cast<IndustryType>(type))->enabled) {
+		IConsolePrint(CC_ERROR, "Usage: 'industry_build <type> <tile index>'. 'industry_build' lists the types.");
+		return true;
+	}
+	const auto r2 = std::from_chars(argv[2].data(), argv[2].data() + argv[2].size(), tile);
+	if (r2.ec != std::errc() || r2.ptr != argv[2].data() + argv[2].size() || tile >= Map::Size()) {
+		IConsolePrint(CC_ERROR, "'{}' is not a tile index of this map.", argv[2]);
+		return true;
+	}
+	const IndustrySpec *indsp = GetIndustrySpec(static_cast<IndustryType>(type));
+	const uint32_t seed = InteractiveRandom();
+	const uint32_t layout = InteractiveRandomRange(static_cast<uint32_t>(indsp->layouts.size()));
+	Command<CMD_BUILD_INDUSTRY>::Post(STR_ERROR_CAN_T_CONSTRUCT_THIS_INDUSTRY, TileIndex{tile}, static_cast<IndustryType>(type), layout, false, seed);
+	return true;
+}
+
+/** Buy the right of ownership of an industry from the system with the local company. Works in multiplayer (it is a command). */
+static bool ConIndustryBuy(std::span<std::string_view> argv)
+{
+	if (argv.size() != 2 || argv[1] == "?") {
+		IConsolePrint(CC_HELP, "Buy the right of ownership of an industry from the system. Usage: 'industry_buy <industry id or tile index>'. The price is the output of one month times the market price times 12, paid from unborrowed cash. See 'industry_owner <id>' for the price.");
+		return true;
+	}
+	if (_game_mode != GM_NORMAL) {
+		IConsolePrint(CC_ERROR, "This works in a running game only.");
+		return true;
+	}
+	IndustryID iid;
+	if (!ParseIndustryArg(argv[1], iid)) {
+		IConsolePrint(CC_ERROR, "'{}' is not an industry id or a tile index of an industry in this game.", argv[1]);
+		return true;
+	}
+	Command<CMD_BUY_INDUSTRY_OWNERSHIP>::Post(STR_INDUSTRY_OWNER_ERROR_CAPTION, iid);
+	return true;
+}
+
+/** Contracts (step 3 of the contract system). Helpers: whole numbers, and a price like 4, 4.5 or 4.25 read as 1/100 of a money unit (integers only, no floating point). */
+static bool ContractParseUint(std::string_view s, uint32_t &out)
+{
+	if (s.empty()) return false;
+	const auto [end, error] = std::from_chars(s.data(), s.data() + s.size(), out);
+	return error == std::errc() && end == s.data() + s.size();
+}
+
+static bool ContractParsePrice(std::string_view s, uint32_t &cents)
+{
+	const size_t dot = s.find('.');
+	uint32_t whole = 0;
+	uint32_t frac = 0;
+	if (!ContractParseUint(s.substr(0, dot), whole) || whole > 10'000'000) return false;
+	if (dot != std::string_view::npos) {
+		const std::string_view f = s.substr(dot + 1);
+		if (f.empty() || f.size() > 2 || !ContractParseUint(f, frac)) return false;
+		if (f.size() == 1) frac *= 10;
+	}
+	cents = whole * 100 + frac;
+	return true;
+}
+
+static std::string ContractCargoName(uint8_t cargo)
+{
+	return cargo < NUM_CARGO && CargoSpec::Get(cargo)->IsValid() ? GetString(CargoSpec::Get(cargo)->name) : std::string("?");
+}
+
+static const char *ContractStatusName(contract::Status s)
+{
+	switch (s) {
+		case contract::Status::Offered: return "offered";
+		case contract::Status::Countered: return "countered";
+		case contract::Status::Active: return "active";
+		case contract::Status::Refused: return "refused";
+		case contract::Status::Cancelled: return "cancelled";
+		case contract::Status::Expired: return "expired";
+		case contract::Status::Completed: return "completed";
+	}
+	return "?";
+}
+
+/** 'contract' lists the contracts of your company (as buyer or as owner of the industry). 'contract <industry id or tile index>' shows the output of an industry, what is booked and what is free. Read only. */
+static bool ConContract(std::span<std::string_view> argv)
+{
+	if (argv.empty() || (argv.size() >= 2 && argv[1] == "?") || argv.size() > 2) {
+		IConsolePrint(CC_HELP, "Contracts. Usage: 'contract' (your contracts and offers) or 'contract <industry id or tile index>' (output, booked and free output of an industry). Make one with contract_offer, answer with contract_counter / contract_accept / contract_refuse, end it with contract_cancel.");
+		return true;
+	}
+	if (_game_mode != GM_NORMAL) {
+		IConsolePrint(CC_ERROR, "This works in a running game only.");
+		return true;
+	}
+	if (argv.size() == 2) {
+		uint32_t value = 0;
+		if (!ContractParseUint(argv[1], value) || value >= 0xFFFF || !Industry::IsValidID(IndustryID{static_cast<uint16_t>(value)})) {
+			IConsolePrint(CC_ERROR, "'{}' is not an industry id of this game.", argv[1]);
+			return true;
+		}
+		const Industry *i = Industry::Get(IndustryID{static_cast<uint16_t>(value)});
+		int64_t ident = 0;
+		int32_t built = 0;
+		ContractIndustryIdent(i, ident, built);
+		const CompanyID owner = GetIndustryOwner(i->index);
+		IConsolePrint(CC_DEFAULT, "industry {}: owner {}", i->index.base(), owner == CompanyID::Invalid() ? std::string("system") : fmt::format("company {}", owner.base() + 1));
+		for (const auto &p : i->produced) {
+			if (!IsValidCargoType(p.cargo)) continue;
+			const int64_t output = ContractMonthlyOutput(i, p.cargo);
+			const int64_t booked = _contracts.Reserved(i->index.base(), ident, built, p.cargo);
+			IConsolePrint(CC_DEFAULT, "  cargo {} ({}): output a month {}, booked {}, free {}, one buyer may book up to {}", static_cast<int>(p.cargo), ContractCargoName(p.cargo), output, booked,
+				contract::FreeOf(output, booked), contract::BuyerCapOf(output));
+		}
+		return true;
+	}
+	if (!Company::IsValidID(_local_company)) {
+		IConsolePrint(CC_ERROR, "You need a company.");
+		return true;
+	}
+	const int32_t year = CompanyRoleYear(_local_company);
+	int shown = 0;
+	for (const auto &[id, c] : _contracts.rows) {
+		uint8_t seller = contract::SYSTEM;
+		int32_t seller_year = 0;
+		ContractCurrentSeller(c, seller, seller_year);
+		const bool is_buyer = c.buyer == _local_company.base() && c.buyer_year == year;
+		const bool is_seller = seller == _local_company.base() && seller_year == year;
+		if (!is_buyer && !is_seller) continue;
+		IConsolePrint(CC_DEFAULT, "#{} {}: industry {} cargo {} ({}), {} a month at {}.{:02}, {} months{}, buyer company {}, seller {}, round {}{}, escrow {}{}", c.id, ContractStatusName(c.status), c.industry,
+			static_cast<int>(c.cargo), ContractCargoName(c.cargo), c.terms.qty, c.terms.price_cents / 100, c.terms.price_cents % 100, c.terms.months,
+			c.status == contract::Status::Active ? fmt::format(" ({} left)", c.months_left) : std::string(), c.buyer + 1,
+			seller == contract::SYSTEM ? std::string("system") : fmt::format("company {}", seller + 1), c.round,
+			contract::IsOpen(c.status) ? fmt::format(", waiting for the {}", c.turn == contract::Side::Seller ? "seller" : "buyer") : std::string(), c.escrow,
+			c.status == contract::Status::Active ? fmt::format(", delivered {} this month, short {} month(s) in a row", c.delivered, c.miss_streak) : std::string());
+		shown++;
+	}
+	IConsolePrint(CC_DEFAULT, "{} contract(s) shown", shown);
+	return true;
+}
+
+/** 'contract_offer <industry id or tile index> <cargo id> <amount a month> <price per unit> <months>': offer a contract to the owner of an industry. Works in multiplayer (it is a command). */
+static bool ConContractOffer(std::span<std::string_view> argv)
+{
+	if (argv.size() != 6 || argv[1] == "?") {
+		IConsolePrint(CC_HELP, "Offer a contract. Usage: 'contract_offer <industry id or tile index> <cargo id> <amount a month> <price per unit, like 4.50> <months>'. The deposit (one month of the contract) is taken when the contract is accepted. See 'contract <industry id or tile index>' for the cargo ids and the free output.");
+		return true;
+	}
+	if (_game_mode != GM_NORMAL) {
+		IConsolePrint(CC_ERROR, "This works in a running game only.");
+		return true;
+	}
+	uint32_t industry = 0, cargo = 0, qty = 0, price = 0, months = 0;
+	if (!ContractParseUint(argv[1], industry) || industry >= 0xFFFF || !Industry::IsValidID(IndustryID{static_cast<uint16_t>(industry)})) {
+		IConsolePrint(CC_ERROR, "'{}' is not an industry id of this game.", argv[1]);
+		return true;
+	}
+	if (!ContractParseUint(argv[2], cargo) || cargo >= NUM_CARGO || !ContractParseUint(argv[3], qty) || !ContractParsePrice(argv[4], price) || !ContractParseUint(argv[5], months) || months > 255) {
+		IConsolePrint(CC_ERROR, "Cargo id, amount, price and months must be numbers (the price may have 2 decimals).");
+		return true;
+	}
+	Command<CMD_CONTRACT_OFFER>::Post(STR_CONTRACT_ERROR_CAPTION, IndustryID{static_cast<uint16_t>(industry)}, static_cast<uint8_t>(cargo), qty, price, static_cast<uint8_t>(months));
+	return true;
+}
+
+/** 'contract_counter <contract id> <amount a month> <price per unit> <months>': answer with new terms (round 2 or 3). */
+static bool ConContractCounter(std::span<std::string_view> argv)
+{
+	if (argv.size() != 5 || argv[1] == "?") {
+		IConsolePrint(CC_HELP, "Answer a contract with new terms. Usage: 'contract_counter <contract id> <amount a month> <price per unit, like 4.50> <months>'. There are at most 3 rounds.");
+		return true;
+	}
+	if (_game_mode != GM_NORMAL) {
+		IConsolePrint(CC_ERROR, "This works in a running game only.");
+		return true;
+	}
+	uint32_t id = 0, qty = 0, price = 0, months = 0;
+	if (!ContractParseUint(argv[1], id) || !ContractParseUint(argv[2], qty) || !ContractParsePrice(argv[3], price) || !ContractParseUint(argv[4], months) || months > 255) {
+		IConsolePrint(CC_ERROR, "The contract id, amount, price and months must be numbers (the price may have 2 decimals).");
+		return true;
+	}
+	Command<CMD_CONTRACT_COUNTER>::Post(STR_CONTRACT_ERROR_CAPTION, id, qty, price, static_cast<uint8_t>(months));
+	return true;
+}
+
+/** The three commands that need only a contract id: accept, refuse, cancel. */
+template <Commands Cmd>
+static bool ConContractById(std::span<std::string_view> argv, const char *help)
+{
+	if (argv.size() != 2 || argv[1] == "?") {
+		IConsolePrint(CC_HELP, "{}", help);
+		return true;
+	}
+	if (_game_mode != GM_NORMAL) {
+		IConsolePrint(CC_ERROR, "This works in a running game only.");
+		return true;
+	}
+	uint32_t id = 0;
+	if (!ContractParseUint(argv[1], id)) {
+		IConsolePrint(CC_ERROR, "'{}' is not a contract id.", argv[1]);
+		return true;
+	}
+	Command<Cmd>::Post(STR_CONTRACT_ERROR_CAPTION, id);
+	return true;
+}
+
+static bool ConContractAccept(std::span<std::string_view> argv) { return ConContractById<CMD_CONTRACT_ACCEPT>(argv, "Accept the contract that waits for you. Usage: 'contract_accept <contract id>'. The buyer pays the deposit (one month of the contract) from unborrowed cash."); }
+static bool ConContractRefuse(std::span<std::string_view> argv) { return ConContractById<CMD_CONTRACT_REFUSE>(argv, "Refuse the contract that waits for you. Usage: 'contract_refuse <contract id>'."); }
+/** Open the contracts window (step 4). */
+static bool ConContractWindow(std::span<std::string_view> argv)
+{
+	if (argv.size() >= 2 && argv[1] == "?") {
+		IConsolePrint(CC_HELP, "Open the contracts window: your offers and contracts, with buttons to accept, refuse, counter and cancel. Usage: 'contract_window'.");
+		return true;
+	}
+	if (_game_mode != GM_NORMAL) {
+		IConsolePrint(CC_ERROR, "This works in a running game only.");
+		return true;
+	}
+	if (_network_dedicated) {
+		IConsolePrint(CC_ERROR, "There is no window on a dedicated server.");
+		return true;
+	}
+	ShowContractWindow();
+	return true;
+}
+
+static bool ConContractCancel(std::span<std::string_view> argv) { return ConContractById<CMD_CONTRACT_CANCEL>(argv, "Withdraw an offer, or (as the buyer) end an active contract. Usage: 'contract_cancel <contract id>'. Ending an active contract early costs the deposit, unless 2 months in a row were short."); }
+
+/** Roles of companies (step 2 of the contract system). 'company_role' lists every company with its role, Dealer mode and the vehicles that its role forbids;
+ * 'company_role transport' / 'company_role industry' changes the role of the local company; 'company_dealer on|off' switches Dealer mode. Works in multiplayer (commands). */
+static bool ConCompanyRole(std::span<std::string_view> argv)
+{
+	if (argv.size() >= 2 && argv[1] == "?") {
+		IConsolePrint(CC_HELP, "Roles of companies. Usage: 'company_role' (list), 'company_role transport' or 'company_role industry' (change the role of your company). An industry owner may run road vehicles only. See also 'company_dealer on|off'.");
+		return true;
+	}
+	if (_game_mode != GM_NORMAL) {
+		IConsolePrint(CC_ERROR, "This works in a running game only.");
+		return true;
+	}
+	if (argv.size() == 1) {
+		for (const Company *c : Company::Iterate()) {
+			const crole::Role role = GetCompanyRole(c->index);
+			IConsolePrint(CC_DEFAULT, "company {}: {}{}, vehicles that the industry-owner role forbids: {}", c->index.base() + 1,
+				role == crole::Role::IndustryOwner ? "industry owner" : "transport owner", IsCompanyDealer(c->index) ? " (Dealer mode ON)" : "",
+				CountVehiclesForbiddenFor(c->index, crole::Role::IndustryOwner));
+		}
+		return true;
+	}
+	if (argv[1] != "transport" && argv[1] != "industry") {
+		IConsolePrint(CC_ERROR, "'{}' is not a role. Use 'transport' or 'industry'.", argv[1]);
+		return true;
+	}
+	Command<CMD_SET_COMPANY_ROLE>::Post(STR_COMPANY_ROLE_ERROR_CAPTION, static_cast<uint8_t>(argv[1] == "industry" ? crole::Role::IndustryOwner : crole::Role::TransportOwner));
+	return true;
+}
+
+/** Dealer mode of the local company. */
+static bool ConCompanyDealer(std::span<std::string_view> argv)
+{
+	if (argv.size() != 2 || (argv[1] != "on" && argv[1] != "off")) {
+		IConsolePrint(CC_HELP, "Switch Dealer mode of your company (a transport owner only). Usage: 'company_dealer on' or 'company_dealer off'.");
+		return true;
+	}
+	if (_game_mode != GM_NORMAL) {
+		IConsolePrint(CC_ERROR, "This works in a running game only.");
+		return true;
+	}
+	Command<CMD_SET_DEALER_MODE>::Post(STR_COMPANY_ROLE_DEALER_ERROR_CAPTION, argv[1] == "on");
 	return true;
 }
 
@@ -439,6 +795,18 @@ void RegisterStockConsoleCommands()
 	IConsole::CmdRegister("zones_map", ConZonesMap);
 	IConsole::CmdRegister("zone_tax", ConZoneTax);
 	IConsole::CmdRegister("zone_permit", ConZonePermit);
+	IConsole::CmdRegister("industry_owner", ConIndustryOwner);
+	IConsole::CmdRegister("industry_buy", ConIndustryBuy);
+	IConsole::CmdRegister("industry_build", ConIndustryBuild);
+	IConsole::CmdRegister("company_role", ConCompanyRole);
+	IConsole::CmdRegister("company_dealer", ConCompanyDealer);
+	IConsole::CmdRegister("contract", ConContract);
+	IConsole::CmdRegister("contract_offer", ConContractOffer);
+	IConsole::CmdRegister("contract_counter", ConContractCounter);
+	IConsole::CmdRegister("contract_accept", ConContractAccept);
+	IConsole::CmdRegister("contract_refuse", ConContractRefuse);
+	IConsole::CmdRegister("contract_cancel", ConContractCancel);
+	IConsole::CmdRegister("contract_window", ConContractWindow);
 	IConsole::CmdRegister("zone_lines", ConZoneLines);
 	IConsole::CmdRegister("zone_buy", ConZoneBuy);
 	IConsole::CmdRegister("zone_sell", ConZoneSell);

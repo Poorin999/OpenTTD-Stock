@@ -20,17 +20,17 @@ int main()
 	/* Table sanity. */
 	for (size_t k = 0; k < MARKET_EVENT_KIND_COUNT; k++) {
 		const MarketEventDef &d = MarketEventInfo(static_cast<MarketEventKind>(k));
-		CHECK(d.weight > 0 || MarketKindIsRealOilKind(static_cast<MarketEventKind>(k))); // The two real oil kinds have weight 0: never drawn.
+		CHECK(d.weight > 0 || MarketKindIsRealOilKind(static_cast<MarketEventKind>(k)) || MarketKindIsContract(static_cast<MarketEventKind>(k))); // The two real oil kinds and the three contract kinds have weight 0: never drawn.
 		{
 			const MarketEventKind kk = static_cast<MarketEventKind>(k);
 			int vi = -1;
 			const bool other = MarketCargoEffectOf(kk, 1).push_ppm != 0 || MarketDiamondStockPpm(kk, 1) != 0 || MarketTownBoostPpm(kk, 1) != 0 || MarketValuablePushPpm(kk, 1, vi) != 0;
-			CHECK(d.gold_dir != 0 || d.share_dir != 0 || other || MarketKindHasTownField(kk)); // Town news and weather have their own effects (weather) or none (town news).
+			CHECK(d.gold_dir != 0 || d.share_dir != 0 || other || MarketKindHasTownField(kk) || MarketKindIsContract(kk)); // Town news and weather have their own effects (weather) or none (town news).
 		}
 		CHECK(d.gold_min <= d.gold_max && d.share_min <= d.share_max);
 		const MarketStoryTexts &t = MarketStoryTextsOf(static_cast<MarketEventKind>(k));
 		CHECK(t.headline[0] && t.headline[1] && t.body[0] && t.body[1]);
-		CHECK((std::string(t.headline[0]).find("{C}") != std::string::npos) == (d.company || static_cast<MarketEventKind>(k) == MarketEventKind::TownBoom || MarketKindHasTownField(static_cast<MarketEventKind>(k)))); // Town stories name the town.
+		CHECK((std::string(t.headline[0]).find("{C}") != std::string::npos) == (d.company || static_cast<MarketEventKind>(k) == MarketEventKind::TownBoom || MarketKindHasTownField(static_cast<MarketEventKind>(k)) || MarketKindIsContract(static_cast<MarketEventKind>(k)))); // Town stories name the town, contract stories name the buyer.
 		CHECK(d.company == MarketKindIsCompany(static_cast<MarketEventKind>(k)));
 	}
 
@@ -63,7 +63,7 @@ int main()
 		if (d.company) CHECK(e.target == 0 || e.target == 2 || e.target == 5 || e.target == 7);
 		(void)world_only_company;
 	}
-	CHECK(seen.size() == MARKET_EVENT_KIND_COUNT - 9); // The 7 town news and weather kinds and the 2 oil kinds are never drawn: they are made from the real state of the towns and of the oil stock.
+	CHECK(seen.size() == MARKET_EVENT_KIND_COUNT - 12); // The 7 town news and weather kinds, the 2 oil kinds and the 3 contract kinds are never drawn: they are made from the real state of the game.
 	CHECK(max_gold <= MARKET_EVENT_GOLD_MAX_PPM && max_share <= MARKET_EVENT_SHARE_MAX_PPM);
 	CHECK(sev[1] > sev[2] && sev[2] > sev[3] && sev[3] > 0);
 	std::printf("severity 1/2/3 = %d/%d/%d, max gold %lld ppm, max share %lld ppm\n", sev[1], sev[2], sev[3], (long long)max_gold, (long long)max_share);
@@ -295,7 +295,7 @@ int main()
 			CHECK(static_cast<size_t>(f.kind) == k);
 		}
 		/* A kind that was already in the old games keeps its number (savegames). */
-		CHECK(static_cast<int>(MarketEventKind::ProfitTaking) == 28 && static_cast<int>(MarketEventKind::CoalShortage) == 29 && static_cast<int>(MarketEventKind::TownBoom) == 37 && MARKET_EVENT_KIND_COUNT == 51 && static_cast<int>(MarketEventKind::OilWellsFound) == 49 && static_cast<int>(MarketEventKind::OilSupplyShort) == 50 && static_cast<int>(MarketEventKind::TownGrew) == 38 && static_cast<int>(MarketEventKind::WeatherDroughtEnd) == 44 && static_cast<int>(MarketEventKind::SilverMineFound) == 45 && static_cast<int>(MarketEventKind::PlatinumDemandDrop) == 48);
+		CHECK(static_cast<int>(MarketEventKind::ProfitTaking) == 28 && static_cast<int>(MarketEventKind::CoalShortage) == 29 && static_cast<int>(MarketEventKind::TownBoom) == 37 && MARKET_EVENT_KIND_COUNT == 54 && static_cast<int>(MarketEventKind::ContractRefused) == 53 && static_cast<int>(MarketEventKind::OilWellsFound) == 49 && static_cast<int>(MarketEventKind::OilSupplyShort) == 50 && static_cast<int>(MarketEventKind::TownGrew) == 38 && static_cast<int>(MarketEventKind::WeatherDroughtEnd) == 44 && static_cast<int>(MarketEventKind::SilverMineFound) == 45 && static_cast<int>(MarketEventKind::PlatinumDemandDrop) == 48);
 
 		/* The story says what the news does. */
 		MarketEvent sc; sc.kind = MarketEventKind::CoalShortage; sc.severity = 2; sc.variant = 1;

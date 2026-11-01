@@ -15,6 +15,9 @@
 #include "cargo_market.h"
 #include "zone_market.h"
 #include "zone_permit.h"
+#include "industry_owner.h"
+#include "company_role.h"
+#include "contract.h"
 #include "stock_gui.h"
 #include "central_bank.h"
 #include "commercial_bank.h"
@@ -28,6 +31,7 @@
 #include "command_type.h"
 #include "company_base.h"
 #include "company_func.h"
+#include "hq_gate.h"
 #include "economy_func.h"
 #include "news_func.h"
 #include "strings_func.h"
@@ -39,6 +43,7 @@
 
 #include "table/strings.h"
 
+#include "company_info_gui.h"
 #include "safeguards.h"
 
 StockMarket _stock_market;
@@ -56,6 +61,7 @@ void StockMarket::Reset()
 	this->base_fp.fill(0);
 	this->impact.fill(0);
 	this->valuation.fill({});
+	this->listed.fill(false); // A new game: nobody is on the market until the IPO. The loader sets every company to listed when the savegame has no SRK_IPO record.
 	_wallets.Reset();
 	ResetBanks();
 	_gold_reserve.Reset();
@@ -64,8 +70,12 @@ void StockMarket::Reset()
 	_town_treasury.Reset();
 	_commercial_banks.Reset();
 	_cargo_market.Reset();
+	ResetCompanyMonthBuckets();
 	_zone_market.Reset();
 	_zone_permits.Reset();
+	_company_roles.Reset(); // Every company is a transport owner without Dealer mode until it chooses (a savegame from before this has no roles).
+	_contracts.Reset(); // No contracts until somebody makes one (a savegame from before this has none).
+	_industry_owners.Reset(); // Every industry belongs to the system until a company buys it (a savegame from before this has no owners).
 	_market_events.Reset();
 	TownNewsReset();
 	RetailMarketManager::Get().Reset(); // The retail investors start again with every new game and every load.
@@ -138,6 +148,64 @@ bool IsStockSymbolValid(size_t symbol)
 {
 	if (symbol < MAX_COMPANIES) return Company::IsValidID(CompanyID{static_cast<uint8_t>(symbol)});
 	return IsValuableSymbol(symbol);
+}
+
+/** Whether the shares of a symbol are on the market: a valuable always, a company only after its IPO. A symbol that does not exist is not listed. */
+bool IsStockSymbolListed(size_t symbol)
+{
+	if (!IsStockSymbolValid(symbol)) return false;
+	if (IsValuableSymbol(symbol)) return true;
+	return _stock_market.listed[symbol];
+}
+
+/** The fee of the IPO of a company: STOCK_IPO_FEE_PERMILLE of its value (company value plus wallets minus the debt), never below 0. */
+int64_t GetCompanyIpoFee(CompanyID company)
+{
+	return std::max<int64_t>(GetCentralBankEquity(company), 0) * STOCK_IPO_FEE_PERMILLE / 1000;
+}
+
+/** Whether a company may do its IPO now: it exists, is not listed yet, has its headquarters and has completed at least one quarter (a valuation exists). */
+bool CanCompanyIpo(CompanyID company)
+{
+	if (!Company::IsValidID(company) || company.base() >= MAX_COMPANIES) return false;
+	if (_stock_market.listed[company.base()]) return false;
+	if (CompanyNeedsHq(company)) return false;
+	return _stock_market.valuation[company.base()].quarters >= 1;
+}
+
+/** Take the IPO fee from the cash of a company: an expense in the finances window and the account statement, income of the bank of the zone of its headquarters. */
+void ChargeIpoFee(CompanyID company, int64_t fee)
+{
+	if (fee <= 0 || !Company::IsValidID(company)) return;
+	{
+		AutoRestoreBackup cur_company(_current_company, company);
+		SubtractMoneyFromCompany(CommandCost(EXPENSES_OTHER, Money(fee)));
+	}
+	RecordLedger(company, LedgerItem::IpoFee, -fee);
+	BankOfCompany(company).trading_revenue_cents += fee * 100;
+}
+
+/**
+ * Put the shares of a company on the market. The first price is the price of the valuation of today; what the company traded as before
+ * (hidden prices and candles) is forgotten, so the chart starts with the IPO.
+ * @param company The company.
+ */
+void StockMarket::ListCompany(CompanyID company)
+{
+	const size_t i = company.base();
+	if (i >= MAX_COMPANIES || !Company::IsValidID(company) || this->listed[i]) return;
+	this->listed[i] = true;
+	if (this->base_fp[i] > 0) this->price_fp[i] = this->base_fp[i];
+	this->impact[i] = 0;
+	this->candles[i].clear();
+	this->current[i] = {};
+	this->has_current[i] = false;
+	this->daily[i].clear();
+	this->daily_current[i] = {};
+	this->has_daily_current[i] = false;
+	this->frames[i].Reset();
+	InvalidateWindowData(WC_STOCK_MARKET, 0);
+	InvalidateWindowData(WC_STOCK_ORDER, 0);
 }
 
 /** The name of a symbol for lists and titles: the name of the company, or for example "Gold (XAU)". */
@@ -609,7 +677,7 @@ void StockMarket::HandleRemovedCompanies()
 		if (Company::IsValidID(CompanyID{i})) continue;
 		const bool stale = !this->candles[i].empty() || this->has_current[i] || this->price_fp[i] != 0 ||
 				this->base_fp[i] != 0 || this->impact[i] != 0 || this->valuation[i].quarters != 0 || _wallets.HasOwner(CompanyID{i}) || !this->daily[i].empty() || this->has_daily_current[i] || this->frames[i].HasRunning(GameTimeframe::H1) ||
-				this->stats[i].closed != 0 || !this->stats[i].months.empty() || CentralBank::accounts[i].debt != 0;
+				this->stats[i].closed != 0 || !this->stats[i].months.empty() || CentralBank::accounts[i].debt != 0 || this->listed[i];
 		if (!stale) continue;
 		this->candles[i].clear();
 		this->current[i] = {};
@@ -618,6 +686,7 @@ void StockMarket::HandleRemovedCompanies()
 		this->base_fp[i] = 0;
 		this->impact[i] = 0;
 		this->valuation[i] = {};
+		this->listed[i] = false;
 		_wallets.RemoveOwner(CompanyID{i});
 		this->frames[i].Reset();
 		this->daily[i].clear();
@@ -785,6 +854,7 @@ std::vector<StockRankEntry> GetStockRanking(StockRankSort sort)
 {
 	std::vector<StockRankEntry> list;
 	for (const Company *c : Company::Iterate()) {
+		if (!_stock_market.listed[c->index.base()]) continue; // Not on the market yet.
 		StockRankEntry e;
 		e.company = c->index;
 		e.price = GetStockPrice(c->index);
@@ -1131,6 +1201,16 @@ void StockMarket::UpdateDaily()
 
 	/* The valuables take a fresh part of noise once per economy day (the drift takes its step once per game day, see valuables.cpp). */
 	_valuables.StepFast();
+
+	/* A company of an AI goes public by itself as soon as it may (a human company presses the IPO button). The fee is paid when the AI has the unborrowed cash, otherwise it is waived: nobody should stay off the market for lack of cash. Every client does the same here. */
+	for (const Company *c : Company::Iterate()) {
+		if (!c->is_ai || !CanCompanyIpo(c->index)) continue;
+		const int64_t fee = GetCompanyIpoFee(c->index);
+		if (fee > 0 && GetUnborrowedLiquidCash(c->index) >= fee) {
+			ChargeIpoFee(c->index, fee);
+		}
+		this->ListCompany(c->index);
+	}
 
 	/* The companies first, then the valuables (see STOCK_SYMBOLS). */
 	for (size_t i = 0; i < STOCK_SYMBOLS; i++) {

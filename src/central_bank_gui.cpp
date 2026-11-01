@@ -198,6 +198,10 @@ static void DrawAccountStatement(const Rect &r, int offset)
 	booked("Gold Sales (sold from the vault)", LedgerItem::GoldSell);
 	booked("Bank Gold Operations (cash paid in / taken out)", LedgerItem::BankGoldOp);
 	booked("Gold Storage (vault, 0.5% a year)", LedgerItem::GoldStorage);
+	booked("IPO fee (listing on the stock market)", LedgerItem::IpoFee);
+	booked("Industry ownership (bought from the system)", LedgerItem::IndustryBuy);
+	booked("Contract fines (shortfall, paid / received)", LedgerItem::ContractFine);
+	booked("Contract escrow (deposit paid / returned, not earnings)", LedgerItem::ContractEscrow);
 
 	category("Taxes (paid to the Central Bank)");
 	booked("Land Tax (per tile owned, daily)", LedgerItem::TaxLand);
@@ -364,6 +368,10 @@ static void DrawArchiveStatement(const Rect &r, int age)
 	line("Gold Sales (sold from the vault)", GetLedgerEntry(_local_company, LedgerItem::GoldSell, year), true, false);
 	line("Bank Gold Operations (cash paid in / taken out)", GetLedgerEntry(_local_company, LedgerItem::BankGoldOp, year), true, false);
 	booked("Gold Storage (vault, 0.5% a year)", LedgerItem::GoldStorage);
+	booked("IPO fee (listing on the stock market)", LedgerItem::IpoFee);
+	booked("Industry ownership (bought from the system)", LedgerItem::IndustryBuy);
+	booked("Contract fines (shortfall, paid / received)", LedgerItem::ContractFine);
+	line("Contract escrow (deposit paid / returned, not earnings)", GetLedgerEntry(_local_company, LedgerItem::ContractEscrow, year), true, false);
 
 	category("Taxes (paid to the Central Bank)");
 	booked("Land Tax (per tile owned, daily)", LedgerItem::TaxLand);
@@ -647,6 +655,10 @@ struct CentralBankWindow : Window {
 			case LedgerItem::TaxIncome:       return CbText("ภาษีเงินได้ไตรมาส", "Income tax");
 			case LedgerItem::TaxInterest:     return CbText("ภาษีดอกเบี้ยเงินสด (IORB)", "IORB tax");
 			case LedgerItem::GoldStorage:     return CbText("ค่าเก็บและประกันทองในคลัง", "Gold storage");
+			case LedgerItem::IpoFee:          return CbText("ค่าธรรมเนียม IPO", "IPO fee");
+			case LedgerItem::IndustryBuy:     return CbText("ซื้อสิทธิ์เป็นเจ้าของโรงงาน", "Industry ownership");
+			case LedgerItem::ContractFine:    return e.amount >= 0 ? CbText("ได้รับค่าปรับสัญญา", "Contract fine received") : CbText("จ่ายค่าปรับสัญญา", "Contract fine paid");
+			case LedgerItem::ContractEscrow:  return e.amount >= 0 ? CbText("คืนเงินมัดจำสัญญา", "Contract escrow back") : CbText("วางเงินมัดจำสัญญา", "Contract escrow paid");
 			case LedgerItem::ZonePermit:      return CbText("ค่าใบอนุญาตก่อสร้างต่างโซน", "Building permit");
 			case LedgerItem::ZoneExchange:    return e.amount >= 0 ? CbText("ขายธนบัตร", "Banknote sale") : CbText("ซื้อธนบัตร", "Banknote buy");
 			case LedgerItem::ZoneFee:         return CbText("ค่าธรรมเนียมแลกเงินข้ามโซน", "Zone exchange fee");

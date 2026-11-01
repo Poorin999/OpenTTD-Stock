@@ -1,0 +1,9 @@
+# Thai texts of the roles of companies (company_role.cpp). Added to lang/thai.txt by apply_overlay.py
+STR_COMPANY_ROLE_ERROR_CAPTION                          :{WHITE}เปลี่ยนบทบาทไม่ได้...
+STR_COMPANY_ROLE_ERROR_SAME                             :{WHITE}บริษัทของคุณมีบทบาทนี้อยู่แล้ว
+STR_COMPANY_ROLE_ERROR_HAS_VEHICLES                     :{WHITE}เจ้าของโรงงานใช้ได้เฉพาะรถบรรทุก ต้องขายรถไฟ เรือ และเครื่องบินของคุณก่อน
+STR_COMPANY_ROLE_DEALER_ERROR_CAPTION                   :{WHITE}เปลี่ยนโหมด Dealer ไม่ได้...
+STR_COMPANY_ROLE_ERROR_SAME_DEALER                      :{WHITE}โหมด Dealer อยู่ในสถานะนี้แล้ว
+STR_COMPANY_ROLE_ERROR_DEALER_ROLE                      :{WHITE}เฉพาะเจ้าของขนส่งเท่านั้นที่ใช้โหมด Dealer ได้
+STR_COMPANY_ROLE_ERROR_BUILD                            :{WHITE}เจ้าของโรงงานใช้ได้เฉพาะรถบรรทุก ห้ามสร้างรถไฟ เรือ หรือเครื่องบิน
+STR_COMPANY_ROLE_ERROR_START                            :{WHITE}เจ้าของโรงงานใช้ได้เฉพาะรถบรรทุก ยานพาหนะคันนี้เริ่มวิ่งไม่ได้
