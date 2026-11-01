@@ -41,7 +41,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "wallet_cmd.h": "src", "wallet_cmd.cpp": "src",
     "commercial_bank.h": "src", "commercial_bank.cpp": "src", "commercial_bank_math.h": "src",
     "central_bank.h": "src", "central_bank.cpp": "src",
-    "tax.h": "src", "tax.cpp": "src", "zone_market.h": "src", "zone_market.cpp": "src", "zone_market_math.h": "src", "town_wallet.h": "src", "town_wallet.cpp": "src", "town_wallet_math.h": "src", "zone_map_gui.h": "src", "zone_borders.h": "src", "zone_borders.cpp": "src", "hq_gate.h": "src", "hq_gate.cpp": "src", "zone_permit.h": "src", "zone_permit.cpp": "src", "zone_permit_math.h": "src", "zone_map_gui.cpp": "src",
+    "tax.h": "src", "tax.cpp": "src", "zone_market.h": "src", "zone_market.cpp": "src", "zone_market_math.h": "src", "town_wallet.h": "src", "town_wallet.cpp": "src", "town_wallet_math.h": "src", "zone_map_gui.h": "src", "zone_borders.h": "src", "zone_borders.cpp": "src", "hq_gate.h": "src", "hq_gate.cpp": "src", "zone_permit.h": "src", "zone_permit.cpp": "src", "zone_permit_math.h": "src", "industry_owner.h": "src", "industry_owner.cpp": "src", "industry_owner_math.h": "src", "company_role.h": "src", "company_role.cpp": "src", "company_role_math.h": "src", "contract.h": "src", "contract.cpp": "src", "contract_math.h": "src", "contract_cmd.cpp": "src", "contract_gui.cpp": "src", "contract_gui.h": "src", "contract_screens.cpp": "src", "contract_screens.h": "src", "radial_menu.cpp": "src", "radial_menu.h": "src", "zone_map_gui.cpp": "src",
     "cargo_market.h": "src", "cargo_market.cpp": "src", "CargoMarketMath.h": "src",
     "town_treasury.h": "src", "town_treasury.cpp": "src", "citizen_gold.h": "src", "citizen_terminal.h": "src", "gold_market_math.h": "src", "oil_market_math.h": "src", "oil_market_gui.h": "src", "oil_market_gui.cpp": "src",
     "gold_reserve.h": "src", "gold_reserve.cpp": "src", "gold_industry.cpp": "src", "firs_desert_cargo.cpp": "src", "custom_cargo_icons.cpp": "src", "custom_cargo_icons.h": "src", "custom_industry_gfx.cpp": "src", "custom_industry_gfx.h": "src", "english_firs_strings.txt": "src", "desert_industries.cpp": "src", "english_desert_industries_strings.txt": "src",
@@ -59,6 +59,7 @@ FILES = {  # file name -> folder in the OpenTTD tree
     "game_time_manager.h": "src/game_time", "game_time_manager.cpp": "src/game_time", "game_time_driver.cpp": "src/game_time",
     "game_time_aggregator.h": "src/game_time",
     "stock_sl.cpp": "src/saveload",
+    "stock_sl_compat.h": "src/saveload/compat",
     "stock_widget.h": "src/widgets",
 }
 NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
@@ -77,14 +78,23 @@ NEW_COMMANDS = [  # in the order they are added after CMD_STOCK_CLOSE
     ("CMD_ZONE_PERMIT", "buy a building permit for a foreign money zone"),
     ("CMD_CBANK_BORROW", "borrow from the commercial bank of a town"),
     ("CMD_CBANK_REPAY", "repay the commercial bank of a town"),
+    ("CMD_COMPANY_IPO", "take the company public (IPO): its shares can be traded"),
+    ("CMD_BUY_INDUSTRY_OWNERSHIP", "buy the right of ownership of an industry from the system"),
+    ("CMD_SET_COMPANY_ROLE", "choose the role of the company: transport owner or industry owner"),
+    ("CMD_SET_DEALER_MODE", "switch Dealer mode of a transport owner"),
+    ("CMD_CONTRACT_OFFER", "offer a contract to the owner of an industry"),
+    ("CMD_CONTRACT_COUNTER", "answer a contract offer with new terms"),
+    ("CMD_CONTRACT_ACCEPT", "accept a contract offer"),
+    ("CMD_CONTRACT_REFUSE", "refuse a contract offer"),
+    ("CMD_CONTRACT_CANCEL", "withdraw an offer or end a contract"),
 ]
-NEW_SOURCES = ["commercial_bank.cpp", "commercial_bank.h", "commercial_bank_math.h", "km_system.cpp", "km_math.h", "town_wallet.cpp", "town_wallet.h", "town_wallet_math.h", "zone_borders.cpp", "zone_borders.h", "hq_gate.cpp", "hq_gate.h", "zone_permit.cpp", "zone_permit.h", "zone_map_gui.cpp", "zone_map_gui.h", "zone_market.cpp", "zone_market.h", "zone_market_math.h", "wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "oil_market_math.h", "oil_market_gui.cpp", "oil_market_gui.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "firs_desert_cargo.cpp", "custom_cargo_icons.cpp", "custom_cargo_icons.h", "custom_industry_gfx.cpp", "custom_industry_gfx.h", "desert_industries.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "company_info_gui.cpp", "company_info_gui.h", "company_info_math.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
+NEW_SOURCES = ["commercial_bank.cpp", "commercial_bank.h", "commercial_bank_math.h", "km_system.cpp", "km_math.h", "town_wallet.cpp", "town_wallet.h", "town_wallet_math.h", "zone_borders.cpp", "zone_borders.h", "hq_gate.cpp", "hq_gate.h", "zone_permit.cpp", "zone_permit.h", "industry_owner.cpp", "industry_owner.h", "industry_owner_math.h", "company_role.cpp", "company_role.h", "company_role_math.h", "contract.cpp", "contract.h", "contract_math.h", "contract_cmd.cpp", "contract_gui.cpp", "contract_gui.h", "contract_screens.cpp", "contract_screens.h", "radial_menu.cpp", "radial_menu.h", "zone_map_gui.cpp", "zone_map_gui.h", "zone_market.cpp", "zone_market.h", "zone_market_math.h", "wallet_base.cpp", "wallet_base.h", "wallet_cmd.cpp", "wallet_cmd.h", "central_bank.cpp", "central_bank.h", "tax.cpp", "tax.h", "cargo_market.cpp", "cargo_market.h", "CargoMarketMath.h", "town_treasury.cpp", "town_treasury.h", "citizen_gold.h", "citizen_terminal.h", "gold_market_math.h", "oil_market_math.h", "oil_market_gui.cpp", "oil_market_gui.h", "gold_reserve.cpp", "gold_reserve.h", "gold_industry.cpp", "firs_desert_cargo.cpp", "custom_cargo_icons.cpp", "custom_cargo_icons.h", "custom_industry_gfx.cpp", "custom_industry_gfx.h", "desert_industries.cpp", "valuables.cpp", "valuables.h", "gold_panel.cpp", "gold_panel.h", "gold_buy_gui.cpp", "town_finance_gui.cpp", "town_finance_gui.h", "company_info_gui.cpp", "company_info_gui.h", "company_info_math.h", "economy_news.cpp", "economy_news.h", "market_events.cpp", "market_events.h", "town_news.cpp", "town_news.h", "market_news_ai.h", "market_news_gui.cpp", "market_news_gui.h", "cargo_market_gui.cpp", "cargo_market_gui.h", "game_calendar.cpp", "game_calendar.h", "stock_console.cpp", "stock_dev.h",
                "central_bank_gui.cpp", "central_bank_gui.h",
                "RetailMath.h", "RetailMarketManager.h", "RetailMarketManager.cpp",
                "game_time/game_time_manager.h", "game_time/game_time_manager.cpp", "game_time/game_time_driver.cpp", "game_time/game_time_aggregator.h"]
 REPLACE_KEYS = {"STR_STOCK_TIP_TOOLBOX", "STR_STOCK_TIP_SUMMARY", "STR_STOCK_ORDER_INFO", "STR_STOCK_TIP_DEPOSIT", "STR_STOCK_TIP_WITHDRAW"}
-STRING_FILES = ["english_stock_strings.txt", "english_wallet_strings.txt", "english_round8_strings.txt", "english_timeframe_strings.txt", "english_central_bank_strings.txt", "english_gold_strings.txt", "english_firs_strings.txt", "english_desert_industries_strings.txt", "english_town_finance_strings.txt", "english_company_info_strings.txt", "english_valuables_strings.txt", "english_news_strings.txt", "english_zone_permit_strings.txt", "english_commercial_bank_strings.txt"]
-THAI_STRING_FILES = ["thai_firs_strings.txt", "thai_desert_industries_strings.txt"]  # Thai texts of the new strings, appended to lang/thai.txt
+STRING_FILES = ["english_stock_strings.txt", "english_wallet_strings.txt", "english_round8_strings.txt", "english_timeframe_strings.txt", "english_central_bank_strings.txt", "english_gold_strings.txt", "english_firs_strings.txt", "english_desert_industries_strings.txt", "english_town_finance_strings.txt", "english_company_info_strings.txt", "english_valuables_strings.txt", "english_news_strings.txt", "english_zone_permit_strings.txt", "english_commercial_bank_strings.txt", "english_industry_owner_strings.txt", "english_company_role_strings.txt", "english_contract_strings.txt"]
+THAI_STRING_FILES = ["thai_firs_strings.txt", "thai_desert_industries_strings.txt", "thai_zone_permit_strings.txt", "thai_industry_owner_strings.txt", "thai_company_role_strings.txt", "thai_contract_strings.txt"]  # Thai texts of the new strings, appended to lang/thai.txt
 ANCHORS = ["STR_STOCK_ERROR_NO_ORDER", "STR_STOCK_NEWS_ORDER_EXPIRED"]
 
 
@@ -502,15 +512,17 @@ def patch_graph_window_name(tree):
     if not lang.is_dir():
         sys.exit(f"ERROR: {lang} not found in the OpenTTD tree")
     changed = 0
+    found = 0
     for f in sorted(lang.glob("*.txt")):
         text, crlf = _read_lf(f)
         new = text
         for key, prefix in GOLD_NAME_KEYS.items():
-            new = re.sub(r"^(" + key + r"\s*:).*$", lambda m: m.group(1) + prefix + GOLD_WINDOW_NAME, new, flags=re.M)
+            new, n = re.subn(r"^(" + key + r"\s*:).*$", lambda m: m.group(1) + prefix + GOLD_WINDOW_NAME, new, flags=re.M)
+            found += n  # a key that is already renamed still counts: running the script twice must not fail
         if new != text:
             _write_like(f, new, crlf)
             changed += 1
-    if changed == 0:
+    if found == 0:
         sys.exit("ERROR: STR_GRAPH_MENU_OPERATING_PROFIT_GRAPH / STR_GRAPH_OPERATING_PROFIT_CAPTION not found in any src/lang/*.txt")
     print(f"lang: the operating profit graph is now called '{GOLD_WINDOW_NAME}' ({changed} language files)")
 
@@ -582,6 +594,63 @@ def patch_cargo_market(tree):
     t = ensure_include(t, '#include "cargo_market.h" /* CARGO_MARKET_PATCH */', ['#include "central_bank.h"', '#include "stdafx.h"'])
     _write_like(p, t, crlf)
     print("economy.cpp: cargo market hooks added")
+
+
+CONTRACT_DELIVERY_MARKER = "CONTRACT_DELIVERY_PATCH"
+
+
+def patch_contract_delivery(tree):
+    """Contracts, step 5: one call at the start of CargoPayment::PayFinalDelivery in economy.cpp counts the units that a company hauled from an industry on its ACTIVE
+    contracts (contract.cpp ContractOnDelivery). In place, at an anchor; nothing is written when the anchor is missing."""
+    p = tree / "src" / "economy.cpp"
+    t, crlf = _read_lf(p)
+    if CONTRACT_DELIVERY_MARKER in t:
+        # An older version of this patch used this->owner->index, which CargoPayment does not have (error C2039): repair the line in place.
+        bad = "ContractOnDelivery(this->owner->index, cp, cargo, count);"
+        if bad in t:
+            t = t.replace(bad, "ContractOnDelivery(this->front->owner, cp, cargo, count);")
+            _write_like(p, t, crlf)
+            print("economy.cpp: contract delivery hook repaired (this->front->owner)")
+        else:
+            print("economy.cpp: contract delivery hook already there")
+        return
+    m = re.search(r"^void CargoPayment::PayFinalDelivery\(CargoType cargo, const CargoPacket \*cp, uint count, TileIndex current_tile\)\n\{\n", t, re.M)
+    if not m:
+        sys.exit("ERROR: CargoPayment::PayFinalDelivery not found in economy.cpp (anchor of the contract delivery patch)")
+    t = t[:m.end()] + f"\tContractOnDelivery(this->front->owner, cp, cargo, count); /* {CONTRACT_DELIVERY_MARKER} */\n" + t[m.end():]
+    t = ensure_include(t, '#include "contract.h" /* CONTRACT_DELIVERY_PATCH */', ['#include "central_bank.h"', '#include "stdafx.h"'])
+    _write_like(p, t, crlf)
+    print("economy.cpp: contract delivery hook added")
+
+
+CONTRACT_PROFIT_MARKER = "CONTRACT_PROFIT_PATCH"
+
+
+def patch_contract_profit(tree):
+    """Contracts, step 5 (pay): right after PayFinalDelivery worked out the pay of a final delivery (`Money <name> = DeliverGoods(...);`), one line calls
+    ContractAdjustProfit: units on an ACTIVE contract pay the contract price, other units of an industry with an owner pay 70%. In place, at an anchor.
+    An extra: when the anchor is missing the build goes on and contracts only count units (a WARNING, nothing is written)."""
+    p = tree / "src" / "economy.cpp"
+    t, crlf = _read_lf(p)
+    if CONTRACT_PROFIT_MARKER in t:
+        print("economy.cpp: contract pay hook already there")
+        return
+    m = re.search(r"^void CargoPayment::PayFinalDelivery\(CargoType cargo, const CargoPacket \*cp, uint count, TileIndex current_tile\)\n\{\n", t, re.M)
+    if not m:
+        print("WARNING: CargoPayment::PayFinalDelivery not found in economy.cpp, the contract price of a delivery is not hooked")
+        return
+    end = t.find("\n}\n", m.end())
+    body = t[m.end():end] if end > 0 else ""
+    d = re.search(r"^(\s*)Money (\w+) = DeliverGoods\([^;]*\);[^\n]*\n", body, re.M)
+    if not d:
+        print("WARNING: 'Money x = DeliverGoods(...);' not found in PayFinalDelivery, the contract price of a delivery is not hooked")
+        return
+    line = f"{d.group(1)}{d.group(2)} = ContractAdjustProfit(this->front->owner, cp, cargo, count, {d.group(2)}); /* {CONTRACT_PROFIT_MARKER} */\n"
+    body = body[:d.end()] + line + body[d.end():]
+    t = t[:m.end()] + body + t[end:]
+    t = ensure_include(t, '#include "contract.h" /* CONTRACT_DELIVERY_PATCH */', ['#include "central_bank.h"', '#include "stdafx.h"'])
+    _write_like(p, t, crlf)
+    print("economy.cpp: contract pay hook added")
 
 
 CARGO_LOCAL_MARKER = "CARGO_LOCAL_PATCH"
@@ -667,6 +736,103 @@ def patch_zone_fee(tree):
     t = ensure_include(t, '#include "zone_market.h" /* ZONE_FEE_PATCH */', ['#include "central_bank.h"', '#include "stdafx.h"'])
     _write_like(p, t, crlf)
     print("economy.cpp: zone fee hook added")
+
+
+ZONE_RUNNING_MARKER = "ZONE_RUNNING_COST_PATCH"
+
+
+def patch_zone_running_cost(tree):
+    """Multi-central-bank pattern: the running costs of a vehicle follow the price level (inflation) of the zone it stands in.
+    One edit in each of train_cmd.cpp, roadveh_cmd.cpp, ship_cmd.cpp, aircraft_cmd.cpp: the line that books the running cost uses
+    ZoneRunningCostScale(GetRunningCost(), tile) (zone_market.cpp). In place, at an anchor. An extra: a file that has a different layout is skipped with a WARNING."""
+    for name in ("train_cmd.cpp", "roadveh_cmd.cpp", "ship_cmd.cpp", "aircraft_cmd.cpp"):
+        p = tree / "src" / name
+        if not p.is_file():
+            print(f"WARNING: {name} not found, zone running cost not hooked there")
+            continue
+        t, crlf = _read_lf(p)
+        if ZONE_RUNNING_MARKER in t:
+            print(f"{name}: zone running cost hook already there")
+            continue
+        old = "this->GetRunningCost() * this->running_ticks"
+        if t.count(old) != 1:
+            print(f"WARNING: {name} has a different running cost line, zone running cost not hooked there")
+            continue
+        m = re.search(r'^#include "safeguards.h"\n', t, re.M)
+        if not m:
+            print(f"WARNING: {name}: safeguards.h include not found, zone running cost not hooked there")
+            continue
+        t = t.replace(old, f"ZoneRunningCostScale(this->GetRunningCost(), this->tile) /* {ZONE_RUNNING_MARKER} */ * this->running_ticks", 1)
+        m = re.search(r'^#include "safeguards.h"\n', t, re.M)
+        t = t[:m.start()] + '#include "zone_market.h" /* ZONE_RUNNING_COST_PATCH */\n' + t[m.start():]
+        _write_like(p, t, crlf)
+        print(f"{name}: zone running cost hook added")
+
+
+ZONE_CURRENCY_LOOK_MARKER = "ZONE_CURRENCY_LOOK_PATCH"
+ZONE_CURRENCY_CONVERT_MARKER = "ZONE_CURRENCY_CONVERT_PATCH"
+
+
+def patch_zone_currency_look(tree):
+    """Money looks different in each zone and is shown at the real exchange rate of the zone (zone_market.cpp). Two edits in strings.cpp, each in place at an
+    anchor and each safe to run again:
+      1. the two places that format money ({CURRENCY_SHORT} and {CURRENCY_LONG}) get the currency through ZoneDisplayCurrency(GetCurrency())
+         (marker ZONE_CURRENCY_LOOK_PATCH);
+      2. the start of FormatGenericCurrency asks ZoneFormatMoney first: for a zone currency it returns the finished text (converted, with the symbol, group and
+         decimal marks of the country) and the game's own formatting is skipped. The minus sign and its red colour are written here the way the game does,
+         with the same call that the file already uses for SCC_PUSH_COLOUR (marker ZONE_CURRENCY_CONVERT_PATCH).
+    An extra: when an anchor is missing the build goes on without it (a WARNING, nothing is written for that step)."""
+    p = tree / "src" / "strings.cpp"
+    t, crlf = _read_lf(p)
+    changed = False
+
+    # --- 1. the look ---
+    if ZONE_CURRENCY_LOOK_MARKER in t:
+        print("strings.cpp: zone currency look hook already there")
+    else:
+        old = "FormatGenericCurrency(builder, &GetCurrency(), "
+        if t.count(old) != 2 or not re.search(r'^#include "safeguards.h"\n', t, re.M):
+            print("WARNING: strings.cpp has a different money formatting layout, the zone currency look is not hooked")
+            return
+        t = t.replace(old, f"FormatGenericCurrency(builder, &ZoneDisplayCurrency(GetCurrency()) /* {ZONE_CURRENCY_LOOK_MARKER} */, ")
+        m = re.search(r'^#include "safeguards.h"\n', t, re.M)
+        t = t[:m.start()] + '#include "zone_market.h" /* ZONE_CURRENCY_LOOK_PATCH */\n' + t[m.start():]
+        changed = True
+        print("strings.cpp: zone currency look hook added")
+
+    # --- 2. the value at the exchange rate, with the marks of the country ---
+    if ZONE_CURRENCY_CONVERT_MARKER in t:
+        print("strings.cpp: zone currency convert hook already there")
+    else:
+        sig = re.search(r"^static void FormatGenericCurrency\(StringBuilder &builder, const CurrencySpec \*spec, Money number, bool compact\)\n\{\n", t, re.M)
+        if not sig:
+            print("WARNING: FormatGenericCurrency has a different signature in strings.cpp, the zone exchange rate is not applied (the look is still there)")
+        else:
+            # The call that this file uses for the colour codes (PutUtf8 in newer sources, Utf8Encode in older ones).
+            enc = re.search(r"builder\.(\w+)\(SCC_PUSH_COLOUR\)", t)
+            if enc:
+                m_ = enc.group(1)
+                neg_on = f"builder.{m_}(SCC_PUSH_COLOUR); builder.{m_}(SCC_RED); builder += \"-\";"
+                neg_off = f"builder.{m_}(SCC_POP_COLOUR);"
+            else:
+                print("WARNING: no SCC_PUSH_COLOUR call found in strings.cpp: a negative zone amount gets a plain minus sign without the red colour")
+                neg_on, neg_off = 'builder += "-";', ""
+            hook = (
+                f"\t{{ /* {ZONE_CURRENCY_CONVERT_MARKER} */\n"
+                "\t\tstd::string zone_text;\n"
+                "\t\tconst bool zone_negative = number < 0;\n"
+                "\t\tif (ZoneFormatMoney(spec, static_cast<int64_t>(zone_negative ? -number : number), compact, zone_text)) {\n"
+                f"\t\t\tif (zone_negative) {{ {neg_on} }}\n"
+                "\t\t\tbuilder += zone_text;\n"
+                + (f"\t\t\tif (zone_negative) {{ {neg_off} }}\n" if neg_off else "") +
+                "\t\t\treturn;\n"
+                "\t\t}\n"
+                "\t}\n")
+            t = t[:sig.end()] + hook + t[sig.end():]
+            changed = True
+            print("strings.cpp: zone currency convert hook added")
+    if changed:
+        _write_like(p, t, crlf)
 
 
 ORDER_KM_MARKER = "ORDER_KM_PATCH"
@@ -980,6 +1146,50 @@ def patch_zone_borders(tree):
     t = ensure_include(t, '#include "zone_borders.h"', ['#include "viewport_func.h"', '#include "stdafx.h"'])
     _write_like(p, t, crlf)
     print("viewport.cpp: zone borders hook added")
+
+
+CAPITAL_LABEL_MARKER = "CAPITAL_LABEL_PATCH"
+
+
+def patch_capital_label(tree):
+    """The capital of a money zone is marked on its name in the main game view (viewport.cpp, town_cmd.cpp): '<town> [CAPITAL 1]' (zoomed out: '<town> [C1]').
+    CapitalLabelSuffix() lives in commercial_bank.cpp. Both the label that is drawn (ViewportAddTownStrings) and the label whose width is measured
+    (Town::UpdateVirtCoord) get the suffix, so the sign has the right size. In place at anchors; only a WARNING when an anchor is missing."""
+    decl = (f"\n/* {CAPITAL_LABEL_MARKER} */\nstd::string CapitalLabelSuffix(const Town *t, bool small);\n")
+    # 1. viewport.cpp: the drawn string
+    p = tree / "src" / "viewport.cpp"
+    if p.is_file():
+        t, crlf = _read_lf(p)
+        if CAPITAL_LABEL_MARKER not in t:
+            anchor = ("\t\tif (t->larger_town) {\n\t\t\t*str = GetString(stringid_town_city, t->index, t->cache.population);\n"
+                      "\t\t} else {\n\t\t\t*str = GetString(stringid_town, t->index, t->cache.population);\n\t\t}\n")
+            inc = '#include "safeguards.h"\n'
+            if t.count(anchor) == 1 and t.count(inc) == 1:
+                t = t.replace(anchor, anchor + "\t\t*str += CapitalLabelSuffix(t, small);\n", 1)
+                t = t.replace(inc, inc + decl, 1)
+                _write_like(p, t, crlf)
+                print("viewport.cpp: capital label added")
+            else:
+                print("WARNING: the town label code of ViewportAddTownStrings was not found exactly once in viewport.cpp, the capital is not marked in the game view")
+    else:
+        print("WARNING: viewport.cpp not found, the capital is not marked in the game view")
+    # 2. town_cmd.cpp: the measured string
+    p = tree / "src" / "town_cmd.cpp"
+    if p.is_file():
+        t, crlf = _read_lf(p)
+        if CAPITAL_LABEL_MARKER not in t:
+            a1 = "\tthis->cache.sign.UpdatePosition(pt.x, pt.y - 24 * ZOOM_BASE,\n\t\ttown_string,\n\t\tGetString(STR_TOWN_NAME, this->index, this->cache.population)\n);"
+            b1 = "\tthis->cache.sign.UpdatePosition(pt.x, pt.y - 24 * ZOOM_BASE,\n\t\ttown_string + CapitalLabelSuffix(this, false),\n\t\tGetString(STR_TOWN_NAME, this->index, this->cache.population) + CapitalLabelSuffix(this, true)\n);"
+            inc = '#include "safeguards.h"\n'
+            if t.count(a1) == 1 and t.count(inc) == 1:
+                t = t.replace(a1, b1, 1)
+                t = t.replace(inc, inc + decl, 1)
+                _write_like(p, t, crlf)
+                print("town_cmd.cpp: capital label added")
+            else:
+                print("WARNING: the sign update of Town::UpdateVirtCoord was not found exactly once in town_cmd.cpp, the capital label may have the wrong width")
+    else:
+        print("WARNING: town_cmd.cpp not found, the capital label may have the wrong width")
 
 
 def patch_zone_status(tree):
@@ -1481,6 +1691,49 @@ def patch_town_gui(tree):
     print("town_gui.cpp, town_widget.h: Finances button added to the town window")
 
 
+INDUSTRY_BUY_MARKER = "INDUSTRY_BUY_PATCH"
+
+
+def patch_industry_view_buy(tree):
+    """Adds the Buy industry button to the industry window: widget WID_IV_BUY (widgets/industry_widget.h), the button next to the cargo graph button, the click
+    handler and the include (industry_gui.cpp). It opens ShowIndustryBuyPrompt() of industry_owner.cpp (owner and price, Yes / No, then CMD_BUY_INDUSTRY_OWNERSHIP)."""
+    gui = tree / "src" / "industry_gui.cpp"
+    wid = tree / "src" / "widgets" / "industry_widget.h"
+    for f in (gui, wid):
+        if not f.is_file():
+            sys.exit(f"ERROR: {f} not found in the OpenTTD tree")
+    g, g_crlf = _read_lf(gui)
+    w, w_crlf = _read_lf(wid)
+    if INDUSTRY_BUY_MARKER in g and "WID_IV_BUY" in w:
+        print("industry_gui.cpp, industry_widget.h: buy button already there")
+        return
+    if INDUSTRY_BUY_MARKER in g or "WID_IV_BUY" in w:
+        sys.exit("ERROR: only one of industry_gui.cpp and industry_widget.h has the buy button patch; restore both from OpenTTD and run again")
+    m = re.search(r"^([ \t]*)WID_IV_GRAPH,[^\n]*\n", w, re.M)
+    if not m:
+        sys.exit("ERROR: WID_IV_GRAPH not found in widgets/industry_widget.h (anchor of the buy button patch)")
+    w = w[:m.end()] + m.group(1) + "WID_IV_BUY, ///< Buy the right of ownership of this industry.\n" + w[m.end():]
+    incs = list(re.finditer(r'^#include "widgets/industry_widget\.h"[^\n]*\n', g, re.M))
+    if not incs:
+        sys.exit('ERROR: #include "widgets/industry_widget.h" not found in industry_gui.cpp (anchor of the buy button patch)')
+    g = g[:incs[-1].end()] + '#include "industry_owner.h" /* INDUSTRY_BUY_PATCH */\n' + g[incs[-1].end():]
+    m = re.search(r"^([ \t]*)case WID_IV_DISPLAY: \{\n", g, re.M)
+    if not m:
+        sys.exit("ERROR: case WID_IV_DISPLAY not found in industry_gui.cpp (anchor of the buy button patch)")
+    ind = m.group(1)
+    g = g[:m.start()] + f"{ind}case WID_IV_BUY: // INDUSTRY_BUY_PATCH\n{ind}\tShowIndustryBuyPrompt(this, IndustryID{{static_cast<uint16_t>(this->window_number)}});\n{ind}\tbreak;\n\n" + g[m.start():]
+    btns = list(re.finditer(r"^([ \t]*)NWidget\(WWT_PUSHTXTBTN, ([\w:]+), WID_IV_GRAPH\)[^\n]*\n", g, re.M))
+    if len(btns) != 1:
+        sys.exit(f"ERROR: expected one WID_IV_GRAPH button in industry_gui.cpp, found {len(btns)} (anchor of the buy button patch)")
+    b = btns[0]
+    line = (f"{b.group(1)}NWidget(WWT_PUSHTXTBTN, {b.group(2)}, WID_IV_BUY), SetFill(1, 0), SetResize(1, 0), "
+            f"SetStringTip(STR_INDUSTRY_OWNER_BUTTON, STR_INDUSTRY_OWNER_BUTTON_TIP),\n")
+    g = g[:b.end()] + line + g[b.end():]
+    _write_like(gui, g, g_crlf)
+    _write_like(wid, w, w_crlf)
+    print("industry_gui.cpp, industry_widget.h: Buy industry button added to the industry window")
+
+
 COMPANY_INFO_MARKER = "COMPANY_INFO_PATCH"
 COMPANY_INFRA_FUNC = "ShowCompanyInfrastructureOfMod"  # public wrapper of the static ShowCompanyInfrastructure() of company_gui.cpp
 COMPANY_FACE_FUNC = "ShowCompanyFaceOfMod"  # public wrapper of the static DoSelectCompanyManagerFace() of company_gui.cpp
@@ -1541,6 +1794,59 @@ def patch_company_info(tree):
     print(f"{p.name}: company window patch: " + ", ".join(changed))
 
 
+COMPANY_ROLE_MARKER = "COMPANY_ROLE_PATCH"
+
+
+def patch_company_role(tree):
+    """The role gate (company_role.cpp): a company that is an INDUSTRY OWNER may run road vehicles only. OpenTTD can not forbid a vehicle type per company, so two
+    one-line checks are put in src/vehicle_cmd.cpp (OpenTTD 15.3), in place, at anchors:
+      1. CmdBuildVehicle: right after   VehicleType type = GetDepotVehicleType(tile);   a forbidden type returns an error (the test run and the real run, so nothing is
+         built, paid or sent over the network);
+      2. CmdStartStopVehicle: right after   CommandCost ret = CheckOwnership(v->owner); if (ret.Failed()) return ret;   a forbidden vehicle that stands stopped may not start.
+    Both anchors must exist inside the right function, otherwise the script STOPS with a clear message and writes nothing (a role gate that is silently missing would be worse
+    than a failed build). The daily net (company_role.cpp) needs no patch."""
+    p = tree / "src" / "vehicle_cmd.cpp"
+    if not p.is_file():
+        sys.exit(f"ERROR: {p} not found in the OpenTTD tree (anchor of the role gate)")
+    t, crlf = _read_lf(p)
+    if COMPANY_ROLE_MARKER in t:
+        print("vehicle_cmd.cpp: role gate already there")
+        return
+
+    # 1. CmdBuildVehicle
+    m = re.search(r"CmdBuildVehicle\(DoCommandFlags flags, TileIndex tile, EngineID eid, bool use_free_vehicles, CargoType cargo, ClientID client_id\)\s*\{\n", t)
+    if not m:
+        sys.exit("ERROR: CmdBuildVehicle(flags, tile, eid, use_free_vehicles, cargo, client_id) not found in vehicle_cmd.cpp (anchor of the role gate)")
+    end = t.find("\n}\n", m.end())
+    body = t[m.end():end]
+    a1 = list(re.finditer(r"^([ \t]*)VehicleType type = GetDepotVehicleType\(tile\);\n", body, re.M))
+    if end < 0 or len(a1) != 1:
+        sys.exit("ERROR: 'VehicleType type = GetDepotVehicleType(tile);' not found exactly once in CmdBuildVehicle (vehicle_cmd.cpp), anchor of the role gate")
+    ind = a1[0].group(1)
+    gate = (f"{ind}if (CompanyRoleBlocksBuild(_current_company, type)) return {{ CommandCost(STR_COMPANY_ROLE_ERROR_BUILD), VehicleID::Invalid(), 0, 0, {{}} }}; "
+            f"/* {COMPANY_ROLE_MARKER} */\n")
+    body = body[:a1[0].end()] + gate + body[a1[0].end():]
+    t = t[:m.end()] + body + t[end:]
+
+    # 2. CmdStartStopVehicle
+    m = re.search(r"CommandCost CmdStartStopVehicle\(DoCommandFlags flags, VehicleID veh_id, bool evaluate_startstop_cb\)\s*\{\n", t)
+    if not m:
+        sys.exit("ERROR: CmdStartStopVehicle(flags, veh_id, evaluate_startstop_cb) not found in vehicle_cmd.cpp (anchor of the role gate)")
+    end = t.find("\n}\n", m.end())
+    body = t[m.end():end]
+    a2 = list(re.finditer(r"^([ \t]*)CommandCost ret = CheckOwnership\(v->owner\);\n[ \t]*if \(ret\.Failed\(\)\) return ret;\n", body, re.M))
+    if end < 0 or len(a2) != 1:
+        sys.exit("ERROR: 'CommandCost ret = CheckOwnership(v->owner); if (ret.Failed()) return ret;' not found exactly once in CmdStartStopVehicle (vehicle_cmd.cpp), anchor of the role gate")
+    ind = a2[0].group(1)
+    gate = f"{ind}if (CompanyRoleBlocksStart(v)) return CommandCost(STR_COMPANY_ROLE_ERROR_START); /* {COMPANY_ROLE_MARKER} */\n"
+    body = body[:a2[0].end()] + gate + body[a2[0].end():]
+    t = t[:m.end()] + body + t[end:]
+
+    t = ensure_include(t, '#include "company_role.h" /* COMPANY_ROLE_PATCH */', ['#include "vehicle_func.h"', '#include "stdafx.h"'])
+    _write_like(p, t, crlf)
+    print("vehicle_cmd.cpp: role gate added (build and start)")
+
+
 COMMERCIAL_BANK_MARKER = "COMMERCIAL_BANK_PATCH"
 
 
@@ -1563,22 +1869,33 @@ def patch_commercial_bank_commands(tree):
 
 
 def main(tree):
+    # check first, before anything is changed: without stock-market.patch the tree would be half changed and the patch could not be applied later
+    cmd_h = tree / "src" / "command_type.h"
+    if not cmd_h.is_file() or "CMD_STOCK_CLOSE" not in cmd_h.read_text(encoding="utf-8", errors="replace"):
+        sys.exit("ERROR: stock-market.patch is not applied to this tree (CMD_STOCK_CLOSE missing in src/command_type.h). Run 'git apply --whitespace=nowarn stock-market.patch' in the OpenTTD folder first. Nothing was changed.")
     patch_graph_files(tree)
     patch_town_gui(tree)
+    patch_industry_view_buy(tree)
     patch_company_info(tree)
+    patch_company_role(tree)  # step 2 of the contract system: the role gate in vehicle_cmd.cpp
     patch_graph_window_name(tree)
     patch_income_graph_to_news(tree)
     patch_cargo_rates_to_prices(tree)
     patch_cargo_delivery(tree)
     patch_cargo_market(tree)
+    patch_contract_delivery(tree)
+    patch_contract_profit(tree)
     patch_cargo_local(tree)
     patch_zone_fee(tree)
+    patch_zone_running_cost(tree)
+    patch_zone_currency_look(tree)
     patch_town_wallet(tree)
     patch_order_km(tree)
     patch_zone_permit(tree)
     patch_commercial_bank_commands(tree)
-    # patch_zone_permit_block(tree)  # OFF: needs ZonePermitCheckTest (zone_permit.h/.cpp) and thai_zone_permit_strings.txt, missing in the upload stockhoge_zones_update
+    patch_zone_permit_block(tree)  # the permit GATE (ZonePermitCheckTest in zone_permit.cpp)
     patch_zone_borders(tree)
+    patch_capital_label(tree)
     patch_zone_status(tree)
     patch_vat(tree)
     patch_vehicle_time(tree)

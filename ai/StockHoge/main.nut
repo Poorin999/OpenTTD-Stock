@@ -16,7 +16,7 @@ require("zones.nut");
 
 
 class HogeAI extends AIController {
-	static version = 116;
+	static version = 118;
 
 	static container = Container();
 	static notBuildableList = AIList();
@@ -744,6 +744,13 @@ class HogeAI extends AIController {
 
 		indexPointer = 3; // ++
 		while (true) {
+			/* OpenTTD-Stock: the headquarters comes before everything else (the AI has no HQ window that holds it back). */
+			if(!StockZones.EnsureHq()) {
+				AIController.Sleep(74);
+				continue;
+			}
+			StockZones.MaintainPermits(); // OpenTTD-Stock: keep the permits of the zones where we have stations
+			StockZones.LogDiagnostics(); // OpenTTD-Stock: why does the AI find no route? (every 30 game days)
 			CalculateProfitModel();
 			HgLog.Info("######## turn:"+turn+ " "+ GetProfitModelName() + " ######## { ");
 			local bankDebt = GetCentralBankDebt();

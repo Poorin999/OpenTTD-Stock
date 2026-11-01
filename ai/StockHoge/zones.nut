@@ -5,10 +5,13 @@
  * GetTransportTaxPerYear, GetLandTaxPerTileYear). On a build of the mod without them the AI logs one warning and plays as before.
  */
 class StockZones {
-	static state = {api = null};
+	static state = {api = null, lastMaintain = 0};
 	static MIN_DAYS_LEFT = 45;        // a permit with fewer game days left is renewed before a route in that zone is built
 	static MAX_BORDER_PERMILLE = 300; // a route whose delivery fee across a zone border is this share of the income or more is skipped
 	static SAMPLE_STEP = 8;           // tiles between the points that are looked at on the line between the two ends of a route
+	static MAINTAIN_EVERY_DAYS = 15;  // MaintainPermits looks at the stations of the company this often (game days)
+	static MAINTAIN_RENEW_BELOW = 30; // a permit with fewer game days left than this is renewed when the company has a station in that zone
+	static MAINTAIN_CASH_SHARE = 20;  // ... and only when the fee is at most 1/20 of the unborrowed cash
 
 	/** True when the script API of the game has the zone functions (checked once). */
 	static function ApiOk() {
@@ -33,6 +36,85 @@ class StockZones {
 	static function ZoneOfTile(tile) {
 		if(tile == null || !AIMap.IsValidTile(tile)) return -1;
 		return AICompany.GetZoneOfTile(tile);
+	}
+
+	static hq = {tries = 0, gaveUp = false};
+	static HQ_MAX_TRIES = 30;       // game days (one try per call of the main loop, then a short sleep); after that the AI plays on without an HQ
+	static HQ_SEARCH_RADIUS = 10;   // tiles around the centre of a town where a free 2x2 place is looked for
+	static HQ_MAX_TOWNS = 5;        // the biggest towns that are tried in one call
+
+	/** The zone with the best score as a home: the people living in it divided by its tax level (the tax of the company goes to the bank of the home zone, and the building in the home zone costs no surcharge). -1 when there is no zone. */
+	static function BestHomeZone(towns) {
+		local zones = StockZones.Count();
+		local best = -1;
+		local bestScore = -1;
+		for(local zone = 0; zone < zones; zone++) {
+			local pop = 0;
+			foreach(town, _ in towns) {
+				if(StockZones.ZoneOfTile(AITown.GetLocation(town)) == zone) pop += AITown.GetPopulation(town);
+			}
+			local tax = AICompany.GetZoneTaxPercent(zone);
+			if(tax <= 0) tax = 100;
+			local score = pop * 100 / tax;
+			if(score > bestScore) { bestScore = score; best = zone; }
+		}
+		return best;
+	}
+
+	/** OpenTTD-Stock: the headquarters is compulsory. A company must place its HQ before it builds anything (the human player is held by the
+	 *  HQ window, the AI by this function: it is called at the start of every turn of the main loop). The HQ goes next to the biggest towns.
+	 *  Returns true when the AI may build (it has an HQ, the mod has no zones, or HQ_MAX_TRIES tries failed), false when it must wait. */
+	static function EnsureHq() {
+		if(!StockZones.ApiOk() || StockZones.Count() <= 0) return true;
+		if(StockZones.hq.gaveUp) return true;
+		if(AIMap.IsValidTile(AICompany.GetCompanyHQ(AICompany.COMPANY_SELF))) return true;
+		StockZones.hq.tries++;
+		if(StockZones.hq.tries > StockZones.HQ_MAX_TRIES) {
+			StockZones.hq.gaveUp = true;
+			HgLog.Warning("hq: no place for the headquarters found, the AI plays on without it");
+			return true;
+		}
+		local towns = AITownList();
+		// The towns of the best home zone come first (people / tax level of the zone), the biggest town first inside a zone.
+		local best = StockZones.BestHomeZone(towns);
+		towns.Valuate(function(town, best) {
+			return AITown.GetPopulation(town) + (best >= 0 && StockZones.ZoneOfTile(AITown.GetLocation(town)) == best ? 100000000 : 0);
+		}, best);
+		towns.Sort(AIList.SORT_BY_VALUE, false);
+		local r = StockZones.HQ_SEARCH_RADIUS;
+		local maxX = AIMap.GetMapSizeX() - 2;
+		local maxY = AIMap.GetMapSizeY() - 2;
+		local townsTried = 0;
+		local execMode = AIExecMode();
+		foreach(town, _ in towns) {
+			if(townsTried++ >= StockZones.HQ_MAX_TOWNS) break;
+			local center = AITown.GetLocation(town);
+			local cx = AIMap.GetTileX(center);
+			local cy = AIMap.GetTileY(center);
+			local candidates = AIList();
+			for(local dy = -r; dy <= r; dy++) {
+				for(local dx = -r; dx <= r; dx++) {
+				local x = cx + dx;
+					local y = cy + dy;
+					if(x < 1 || y < 1 || x > maxX || y > maxY) continue;
+					candidates.AddItem(AIMap.GetTileIndex(x, y), abs(dx) + abs(dy));
+				}
+			}
+			candidates.Sort(AIList.SORT_BY_VALUE, true); // nearest to the town centre first
+			foreach(tile, _ in candidates) {
+				if(!AITile.IsBuildableRectangle(tile, 2, 2)) continue;
+				if(AICompany.BuildCompanyHQ(tile)) {
+					HgLog.Info("hq: headquarters placed near "+AITown.GetName(town)+" zone:"+StockZones.Home());
+					return true;
+				}
+				if(AIError.GetLastError() == AIError.ERR_NOT_ENOUGH_CASH) {
+					HgLog.Info("hq: not enough cash for the headquarters, waiting");
+					return false;
+				}
+			}
+		}
+		HgLog.Info("hq: no free place near the biggest towns (try "+StockZones.hq.tries+"/"+StockZones.HQ_MAX_TRIES+")");
+		return false;
 	}
 
 	/** The zone of the headquarters, -1 when there is none. */
@@ -155,5 +237,69 @@ class StockZones {
 		}
 		if(("estimate" in t) && ("buildingCost" in t.estimate)) t.estimate.buildingCost += extra;
 		return true;
+	}
+
+	static diagDate = {last = 0};
+
+	/** A few lines in the AI log every 30 game days that say WHY the AI may find no route: the income of 50 tiles of passengers, the taxes that the estimate adds,
+	 *  the engines that can be built, the industries and towns on the map, the zone, the permits and the money. Diagnostics only, changes nothing. */
+	static function LogDiagnostics() {
+		local today = AIDate.GetCurrentDate();
+		if(today - StockZones.diagDate.last < 30) return;
+		StockZones.diagDate.last = today;
+		try {
+			local pass = null;
+			foreach(c, _ in AICargoList()) {
+				if(AICargo.GetCargoLabel(c) == "PASS") { pass = c; break; }
+			}
+			local income = pass != null ? AICargo.GetCargoIncome(pass, 50, 20) : -1;
+			HgLog.Info("diag: date:"+AIDate.GetYear(today)+" towns:"+AITownList().Count()+" industries:"+AIIndustryList().Count()+" passIncome(50 tiles, 20 days, 1 unit):"+income);
+			local engines = "";
+			foreach(vt in [AIVehicle.VT_ROAD, AIVehicle.VT_RAIL, AIVehicle.VT_WATER, AIVehicle.VT_AIR]) {
+				local l = AIEngineList(vt);
+				l.Valuate(AIEngine.IsBuildable);
+				l.KeepValue(1);
+				engines += " vt"+vt+":"+l.Count();
+			}
+			HgLog.Info("diag: buildable engines"+engines);
+			if(StockZones.ApiOk() && StockZones.Count() > 0) {
+				local perm = "";
+				for(local z = 0; z < StockZones.Count(); z++) perm += " z"+z+":"+AICompany.GetPermitDaysLeft(AICompany.COMPANY_SELF, z)+"d/fee"+AICompany.GetPermitFee(z);
+				HgLog.Info("diag: home zone:"+StockZones.Home()+" hq:"+AIMap.IsValidTile(AICompany.GetCompanyHQ(AICompany.COMPANY_SELF))+" transportTax/year road:"+AICompany.GetTransportTaxPerYear(1)+" rail:"+AICompany.GetTransportTaxPerYear(0)+" landTax/tile/year:"+AICompany.GetLandTaxPerTileYear()+" unborrowed:"+AICompany.GetUnborrowedCash(AICompany.COMPANY_SELF)+" permits"+perm);
+			}
+		} catch(e) {
+			HgLog.Warning("diag failed: "+e);
+		}
+	}
+
+	/** Keep the permits of the zones where the company already has stations. Later work on an existing route (a new station, a depot, a longer rail or road,
+	 *  a repair) is a construction in that zone too, and without a valid permit the mod charges the 400% price. Looks at the stations every
+	 *  MAINTAIN_EVERY_DAYS game days; renews a permit that has fewer than MAINTAIN_RENEW_BELOW days left, when the fee is small against the unborrowed cash.
+	 *  Never buys a permit for a zone where the company has no station (PrepareCandidate does that before a new route). */
+	static function MaintainPermits() {
+		if(!StockZones.ApiOk() || StockZones.Count() <= 0) return;
+		local home = StockZones.Home();
+		if(home < 0) return;
+		local today = AIDate.GetCurrentDate();
+		if(today - StockZones.state.lastMaintain < StockZones.MAINTAIN_EVERY_DAYS) return;
+		StockZones.state.lastMaintain = today;
+
+		local zones = {};
+		foreach(station, _ in AIStationList(AIStation.STATION_ANY)) {
+			local z = StockZones.ZoneOfTile(AIStation.GetLocation(station));
+			if(z >= 0 && z != home) zones.rawset(z, true);
+		}
+		foreach(z, _ in zones) {
+			if(AICompany.GetPermitDaysLeft(AICompany.COMPANY_SELF, z) >= StockZones.MAINTAIN_RENEW_BELOW) continue;
+			local fee = AICompany.GetPermitFee(z);
+			if(fee < 0) continue;
+			if(AICompany.GetUnborrowedCash(AICompany.COMPANY_SELF) < fee * StockZones.MAINTAIN_CASH_SHARE) continue;
+			local execMode = AIExecMode();
+			if(AICompany.BuyBuildingPermit(z)) {
+				HgLog.Info("zone: renewed the building permit of zone "+z+" fee:"+fee);
+			} else {
+				HgLog.Warning("zone: could not renew the permit of zone "+z+" "+AIError.GetLastErrorString());
+			}
+		}
 	}
 }
